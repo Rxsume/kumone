@@ -61,6 +61,25 @@ struct AudioSourceClient {
         return try await execute(request, source: source, operation: operation)
     }
 
+    /// POST with a JSON body. Used by script-backend providers (ikun /
+    /// Haitangw), whose resolve-url endpoints only accept POST. Response
+    /// handling is identical to the GET path: 2xx only, same logging.
+    func postJSON(
+        to url: URL,
+        source: AudioSourceID,
+        operation: String,
+        body: [String: Any],
+        userAgent: String = "Mozilla/5.0"
+    ) async throws -> Data {
+        var request = URLRequest(url: url)
+        request.timeoutInterval = 10
+        request.httpMethod = "POST"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.setValue(userAgent, forHTTPHeaderField: "User-Agent")
+        request.httpBody = try JSONSerialization.data(withJSONObject: body)
+        return try await execute(request, source: source, operation: operation)
+    }
+
     private func execute(
         _ request: URLRequest,
         source: AudioSourceID,

@@ -350,7 +350,11 @@ final class SettingsManager: ObservableObject {
         if let rawSourceIDs = defaults.stringArray(forKey: Keys.unblockSources) {
             enabledAudioSourceIDs = Set(rawSourceIDs.compactMap(AudioSourceID.init))
         } else {
-            enabledAudioSourceIDs = Set(AudioSourceID.allCases)
+            // Script-backend sources are opt-in: a user who never touched
+            // the source switches keeps the built-in sources only.
+            enabledAudioSourceIDs = Set(
+                AudioSourceID.allCases.filter { !$0.isScriptBackend }
+            )
         }
         autoCheckUpdates = defaults.object(forKey: Keys.autoCheckUpdates) as? Bool ?? true
         showDesktopLyrics = defaults.object(forKey: Keys.desktopLyrics) as? Bool ?? false

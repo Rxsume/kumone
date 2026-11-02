@@ -1,0 +1,49 @@
+# Fork-only unsigned iOS build. NOT upstream: upstream release.yml needs
+# macOS signing secrets and only runs on tag pushes, so this workflow
+# builds just the unsigned IPA on demand.
+#
+# Base: main HEAD (newer than the v0.3.24 tag). MARKETING_VERSION stays
+# 0.3.24 and CURRENT_PROJECT_VERSION is the commit count, exactly as
+# the release workflow derives them, so this build is identifiable as
+# a custom build on top of 0.3.24 rather than a new upstream release.
+name: Build Unsigned iOS IPA
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build-ipa:
+    runs-on: macos-26
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Derive version
+        run: |
+          echo "VERSION=0.3.24" >> "$GITHUB_ENV"
+          echo "BUILD_NUMBER=$(git rev-list --count HEAD)" >> "$GITHUB_ENV"
+
+      - name: Build unsigned iOS IPA
+        run: |
+          xcodebuild -workspace ios/KumoneIOS.xcworkspace -scheme KumoneIOS \
+            -configuration Release -destination 'generic/platform=iOS' \
+            -derivedDataPath "$RUNNER_TEMP/ios-dd" \
+            CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO \
+            MARKETING_VERSION="$VERSION" CURRENT_PROJECT_VERSION="$BUILD_NUMBER" \
+            build
+          APP="$RUNNER_TEMP/ios-dd/Build/Products/Release-iphoneos/KumoneIOS.app"
+          mkdir -p "$RUNNER_TEMP/payload/Payload"
+          cp -R "$APP" "$RUNNER_TEMP/payload/Payload/"
+          (cd "$RUNNER_TEMP/payload" && zip -qry "$GITHUB_WORKSPACE/Kumone-iOS-0.3.24-custom.ipa" Payload)
+          ls -la "$GITHUB_WORKSPACE"/*.ipa
+
+      - name: Upload unsigned IPA
+        uses: actions/upload-artifact@v4
+        with:
+          name: Kumone-iOS-unsigned-ipa
+          path: Kumone-iOS-0.3.24-custom.ipa
+          if-no-files-found: error

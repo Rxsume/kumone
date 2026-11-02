@@ -3,10 +3,15 @@ import os.log
 
 /// Resolves gray tracks from the direct pyncmd source, then built-in search
 /// providers when pyncmd cannot serve the original NetEase song ID.
+/// Script-backend providers (ikun / Haitangw / Xinghai) run first among the
+/// fallbacks: they resolve by NetEase ID directly, with no search step.
 enum UnblockService {
     private static let log = Logger(subsystem: "im.missuo.kumone", category: "audio-source")
     private static let httpClient = AudioSourceClient.shared
     private static let fallbackProviders: [any AudioSourceProvider] = [
+        IkunAudioSourceProvider(),
+        HaitangwAudioSourceProvider(),
+        XinghaiAudioSourceProvider(),
         KugouAudioSourceProvider(),
         KuwoAudioSourceProvider(),
     ]

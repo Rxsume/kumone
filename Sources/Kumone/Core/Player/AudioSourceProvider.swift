@@ -4,12 +4,32 @@ enum AudioSourceID: String, CaseIterable, Hashable {
     case pyncmd
     case kugou
     case kuwo
+    // Script-backend sources (native re-implementations of the resolve-url
+    // endpoints used by LX Music custom-source scripts). NetEase-ID only:
+    // they resolve a playback URL from the track's NetEase ID, with no
+    // cross-platform search. Added in the ssxx94 fork; upstream has none.
+    case ikun
+    case haitangw
+    case xinghai
 
     var displayName: String {
         switch self {
         case .pyncmd: return "pyncmd"
         case .kugou: return String(localized: "酷狗音乐")
         case .kuwo: return String(localized: "酷我音乐")
+        case .ikun: return "ikun"
+        case .haitangw: return String(localized: "长青/海堂")
+        case .xinghai: return String(localized: "星海")
+        }
+    }
+
+    /// Script-backend sources are off by default (see SettingsManager):
+    /// they call third-party endpoints that have not been verified on
+    /// device, so they must be opted into explicitly in Settings.
+    var isScriptBackend: Bool {
+        switch self {
+        case .ikun, .haitangw, .xinghai: return true
+        case .pyncmd, .kugou, .kuwo: return false
         }
     }
 }
