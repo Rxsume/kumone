@@ -350,8 +350,9 @@ final class SettingsManager: ObservableObject {
         if let rawSourceIDs = defaults.stringArray(forKey: Keys.unblockSources) {
             enabledAudioSourceIDs = Set(rawSourceIDs.compactMap(AudioSourceID.init))
         } else {
-            // Script-backend sources are opt-in: a user who never touched
-            // the source switches keeps the built-in sources only.
+            // Script-backend sources are opt-in, except ikun, the
+            // preferred source, which is on by default: a user who never
+            // touched the source switches keeps pyncmd + ikun.
             enabledAudioSourceIDs = Set(
                 AudioSourceID.allCases.filter { !$0.isScriptBackend }
             )
