@@ -6,9 +6,9 @@
 
 <div align="center">
 
-<img src="docs/icon.png" width="140" alt="Kumone" />
+<img src="docs/icon.png" width="140" alt="Rumxs" />
 
-# Kumone
+# Rumxs
 
 **雲の音 — 原生 macOS 网易云音乐客户端**
 
