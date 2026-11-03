@@ -18,6 +18,11 @@ configFiles:
 packages:
   KumoneIOSPackage:
     path: KumoneIOSPackage
+  # The root package, for the RumxsLiveActivityShared library product: the
+  # Live Activity attributes type must live in one module imported by both
+  # the app and the widget extension.
+  kumone:
+    path: ..
 targets:
   KumoneIOS:
     type: application
@@ -40,6 +45,40 @@ targets:
         # silently defeat the CarPlay overlay in Config/Shared.xcconfig. The
         # setting lives there instead, behind $(KUMONE_ENTITLEMENTS_FILE).
         ENABLE_PREVIEWS: YES
+  # Live Activity widget extension (Dynamic Island + lock screen). The
+  # attributes type lives in the RumxsLiveActivityShared library product
+  # of the root package, imported by both the app (via KumoneCore) and
+  # this extension: ActivityKit matches an activity to its widget by the
+  # attributes type's identity, so one shared module is required.
+  # Deployment target is 16.1: Live Activities need 16.1 even though the
+  # app itself supports 16.0.
+  RumxsLiveActivity:
+    type: app-extension
+    platform: iOS
+    sources:
+      - RumxsLiveActivity
+    dependencies:
+      - package: kumone
+        product: RumxsLiveActivityShared
+    configFiles:
+      Debug: Config/Debug.xcconfig
+      Release: Config/Release.xcconfig
+      TestFlight: Config/TestFlight.xcconfig
+    entitlements:
+      path: Config/RumxsLiveActivity.entitlements
+    info:
+      path: RumxsLiveActivity/Info.plist
+    settings:
+      base:
+        # Overrides for the xcconfig chain (Shared.xcconfig describes the
+        # app): the extension has its own bundle ID, a 16.1 floor, its own
+        # Info.plist used verbatim, and extension-only API.
+        PRODUCT_BUNDLE_IDENTIFIER: sb.moe.kumone.LiveActivityWidget
+        PRODUCT_NAME: RumxsLiveActivity
+        IPHONEOS_DEPLOYMENT_TARGET: "16.1"
+        GENERATE_INFOPLIST_FILE: NO
+        APPLICATION_EXTENSION_API_ONLY: YES
+        SKIP_INSTALL: YES
   KumoneIOSUITests:
     type: bundle.ui-testing
     platform: iOS

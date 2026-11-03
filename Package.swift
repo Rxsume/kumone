@@ -41,6 +41,11 @@ let package = Package(
     products: [
         .executable(name: "Kumone", targets: ["KumoneLauncher"]),
         .library(name: "KumoneCore", targets: ["KumoneCore"]),
+        // Live Activity attributes shared by the app and the widget
+        // extension. ActivityKit matches by the attributes type's identity,
+        // so the type must live in exactly one module imported by both
+        // sides — see Sources/RumxsLiveActivityShared.
+        .library(name: "RumxsLiveActivityShared", targets: ["RumxsLiveActivityShared"]),
         // Offline vocal/accompaniment separation for AutoMix stem transitions; macOS only.
         .library(name: "StemKit", targets: ["StemKit"]),
     ],
@@ -64,11 +69,26 @@ let package = Package(
         .target(
             name: "KumoneCore",
             dependencies: [
+                .target(name: "RumxsLiveActivityShared"),
                 .product(name: "Sparkle", package: "Sparkle", condition: .when(platforms: [.macOS])),
                 .target(name: "KumoneObjC", condition: .when(platforms: [.macOS])),
             ],
             path: "Sources/Kumone",
             exclude: ["Resources"],
+            swiftSettings: [
+                .swiftLanguageMode(.v5),
+            ]
+        ),
+        // Live Activity attributes shared with the widget extension. A leaf
+        // target with no dependencies: the attributes type must live in
+        // exactly one module (this one) imported by both the app and the
+        // extension, or ActivityKit cannot match the activity to its
+        // widget. The file keeps its `#if os(iOS)` gate around the
+        // ActivityKit parts and the Foundation-only constants outside it,
+        // so the target also builds on macOS (CI `swift build`).
+        .target(
+            name: "RumxsLiveActivityShared",
+            path: "Sources/RumxsLiveActivityShared",
             swiftSettings: [
                 .swiftLanguageMode(.v5),
             ]
