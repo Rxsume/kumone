@@ -108,6 +108,14 @@ struct SettingsView: View {
                         Text(mode.displayName).tag(mode)
                     }
                 }
+                Picker("横屏播放页样式", selection: $settings.landscapeNowPlayingStyle) {
+                    ForEach(LandscapeNowPlayingStyle.allCases) { style in
+                        Text(style.displayName).tag(style)
+                    }
+                }
+                Text("iPhone 横放或 iPad 打开播放页时使用；竖屏仍按上面的「播放页模式」")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
                 #endif
                 Toggle("点击封面打开专辑", isOn: $settings.openAlbumOnArtworkClick)
                 Toggle("显示歌词翻译", isOn: $settings.showLyricsTranslation)
@@ -186,24 +194,37 @@ struct SettingsView: View {
                 }
             }
 
-            Section("更新") {
-                Toggle("启动时自动检查更新", isOn: $settings.autoCheckUpdates)
-                Text("关闭后启动不再自动弹出更新提示，仍可手动检查更新")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
+            if showsUpdateControls {
+                Section("更新") {
+                    Toggle("启动时自动检查更新", isOn: $settings.autoCheckUpdates)
+                    Text("关闭后启动不再自动弹出更新提示，仍可手动检查更新")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
             }
 
             Section("关于") {
-                LabeledContent("Kumone", value: appVersion)
+                LabeledContent("Rumxs", value: appVersion)
                 #if os(iOS)
-                Button {
-                    IOSUpdater.shared.check(interactive: true)
-                } label: {
-                    Label("检查更新", systemImage: "arrow.triangle.2.circlepath")
+                switch DistributionChannel.current {
+                case .sideload:
+                    Button {
+                        IOSUpdater.shared.check(interactive: true)
+                    } label: {
+                        Label("检查更新", systemImage: "arrow.triangle.2.circlepath")
+                    }
+                    Text("装有 TrollStore（巨魔）可在应用内一键自动安装；否则可下载 IPA 用侧载工具重装（登录状态与设置保留）")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                case .testFlight:
+                    Text("TestFlight 版本，新版本会通过 TestFlight App 推送")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                case .appStore:
+                    Text("通过 App Store 更新")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
                 }
-                Text("装有 TrollStore（巨魔）可在应用内一键自动安装；否则可下载 IPA 用侧载工具重装（登录状态与设置保留）")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
                 #endif
                 Text("网易云音乐第三方客户端 · 数据来自网易云音乐")
                     .font(.caption)
@@ -240,6 +261,15 @@ struct SettingsView: View {
             }
             #endif
         }
+    }
+
+    /// Sparkle on macOS; on iOS only sideload builds carry an updater.
+    private var showsUpdateControls: Bool {
+        #if os(iOS)
+        return DistributionChannel.current.allowsSelfUpdate
+        #else
+        return true
+        #endif
     }
 
     private var appVersion: String {

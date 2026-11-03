@@ -82,16 +82,16 @@ NOTES_JSON="$(
 
 cat <<JSON
 {
-  "name": "Kumone",
+  "name": "Rumxs",
   "subtitle": "网易云音乐第三方客户端 · Unofficial NetEase Cloud Music client",
-  "description": "Kumone 是网易云音乐的非官方原生客户端，直连网易云真实 API：扫码登录、日推、歌单、歌词、播客与灰色歌曲解锁。\n\nAn unofficial, native client for NetEase Cloud Music that talks directly to NetEase's real API — no ads, no telemetry, no bundled third-party SDKs.\n\n每次发版附带的是**未签名**的 iOS IPA，安装时请用你自己的 Apple ID 重新签名：AltStore、SideStore、Sideloadly 或 Xcode 均可。",
+  "description": "Rumxs 是网易云音乐的非官方原生客户端，直连网易云真实 API：扫码登录、日推、歌单、歌词、播客与灰色歌曲解锁。\n\nAn unofficial, native client for NetEase Cloud Music that talks directly to NetEase's real API — no ads, no telemetry, no bundled third-party SDKs.\n\n每次发版附带的是**未签名**的 iOS IPA，安装时请用你自己的 Apple ID 重新签名：AltStore、SideStore、Sideloadly 或 Xcode 均可。",
   "iconURL": "$ICON_URL",
   "website": "https://github.com/$REPO",
   "tintColor": "$TINT",
   "featuredApps": ["$BUNDLE_ID"],
   "apps": [
     {
-      "name": "Kumone",
+      "name": "Rumxs",
       "bundleIdentifier": "$BUNDLE_ID",
       "developerName": "missuo",
       "subtitle": "网易云音乐第三方客户端 · Unofficial NetEase Cloud Music client",
