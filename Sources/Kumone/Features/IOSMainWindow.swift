@@ -52,7 +52,7 @@ public struct IOSMainWindow: View {
             .task {
                 await DownloadManager.shared.start()
                 await account.bootstrap()
-                if settings.autoCheckUpdates {
+                if settings.autoCheckUpdates, DistributionChannel.current.allowsSelfUpdate {
                     IOSUpdater.shared.check(interactive: false)
                 }
             }
@@ -317,6 +317,7 @@ public struct IOSMainWindow: View {
         NavigationStack(path: binding(for: tab)) {
             content().appDestinations()
         }
+        .publishesWindowHorizontalInsets()
     }
 
     @ViewBuilder
@@ -489,6 +490,7 @@ struct IOSMiniPlayerBar: View {
             .buttonStyle(.plain)
             .accessibilityLabel(nowPlayingAccessibilityLabel)
             .accessibilityHint("打开正在播放")
+            .accessibilityIdentifier("mini-player-now-playing")
 
             if !presentation.isInline {
                 Button(action: player.previous) {
