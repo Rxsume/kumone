@@ -95,7 +95,7 @@ final class LiveActivityManager {
         // waits on the thumbnail download.
         if let previous = activity {
             activity = nil
-            Task { await previous.end(nil, dismissalPolicy: .immediate) }
+            Task { await previous.end(dismissalPolicy: .immediate) }
         }
         lastSentState = nil
         lastSentTrackID = nil
@@ -175,11 +175,10 @@ final class LiveActivityManager {
         guard let player else { return }
         let state = makeState(for: track, player: player)
         let attributes = RumxsLiveActivityAttributes(trackID: track.id)
-        let stale = Date().addingTimeInterval(8 * 3600)
         do {
             activity = try Activity.request(
                 attributes: attributes,
-                content: ActivityContent(state: state, staleDate: stale),
+                contentState: state,
                 pushType: nil
             )
             lastSentState = state
@@ -209,7 +208,7 @@ final class LiveActivityManager {
         self.activity = nil
         lastSentState = nil
         lastSentTrackID = nil
-        Task { await activity.end(nil, dismissalPolicy: .default) }
+        Task { await activity.end(dismissalPolicy: .default) }
     }
 
     // MARK: - Artwork
