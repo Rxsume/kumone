@@ -9,9 +9,13 @@
 /* Begin PBXBuildFile section */
 		69F9DF0E863EFB197513936E /* KumoneIOSUITests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7A9033A23C5610F19ABA3774 /* KumoneIOSUITests.swift */; };
 		912D4F61C71BE306BABD494B /* KumoneIOSFeature in Frameworks */ = {isa = PBXBuildFile; productRef = 2D74B41A7A94ABA39956EC55 /* KumoneIOSFeature */; };
+		95E3FB4324B6AECC51E4BB75 /* RumxsLiveActivityShared in Frameworks */ = {isa = PBXBuildFile; productRef = 8CA4E7F6726295CD3A8920DF /* RumxsLiveActivityShared */; };
 		C2D27A1CAB9C74AB85AE8166 /* KumoneIOSApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = A494667EB444A90236506102 /* KumoneIOSApp.swift */; };
 		C777A61B1DD211B6FF64D88B /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 8B9C6A5A61A6330586810260 /* Assets.xcassets */; };
 		EC74DAC7ED94A1CFD01A6BB9 /* PrivacyInfo.xcprivacy in Resources */ = {isa = PBXBuildFile; fileRef = 07C790DFE6D836026CD01D00 /* PrivacyInfo.xcprivacy */; };
+		24520E686C736D4B70E83A1E /* RumxsLiveActivityBundle.swift in Sources */ = {isa = PBXBuildFile; fileRef = 73C8298811DC5A391ECC429E /* RumxsLiveActivityBundle.swift */; };
+		19758DB86416B708DC426F3F /* RumxsLiveActivityWidget.swift in Sources */ = {isa = PBXBuildFile; fileRef = 38CB825325EB656ED8785A64 /* RumxsLiveActivityWidget.swift */; };
+		617DD10008B62924ED8A2429 /* RumxsLiveActivity.appex in Embed App Extensions */ = {isa = PBXBuildFile; fileRef = E9932619CF285E1F7A6A2D5C /* RumxsLiveActivity.appex */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -22,6 +26,13 @@
 			remoteGlobalIDString = 481C5C62EB4A6DB3CC0FDC39;
 			remoteInfo = KumoneIOS;
 		};
+		2994D590AD3D0091BB65D422 /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = E1C3D3EF86B1B44C4A2366E3 /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = ABFDB6FC28C29A40F498B9A9;
+			remoteInfo = RumxsLiveActivity;
+		};
 /* End PBXContainerItemProxy section */
 
 /* Begin PBXFileReference section */
@@ -31,12 +42,18 @@
 		25934AD73710C9EDB53BDDA0 /* KumoneIOS.app */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.application; path = KumoneIOS.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		2F2B9DB0459DCEF7CDE9DE2C /* TestFlight.xcconfig */ = {isa = PBXFileReference; lastKnownFileType = text.xcconfig; path = TestFlight.xcconfig; sourceTree = "<group>"; };
 		45602F996F250E88035F23A9 /* KumoneIOSPackage */ = {isa = PBXFileReference; lastKnownFileType = folder; name = KumoneIOSPackage; path = KumoneIOSPackage; sourceTree = SOURCE_ROOT; };
+		DA4E4A990DDF2A3866D8BDA1 /* kumone */ = {isa = PBXFileReference; lastKnownFileType = folder; name = kumone; path = ..; sourceTree = SOURCE_ROOT; };
 		66554F47F0D6FC82F2EFDB2A /* KumoneIOS.xctestplan */ = {isa = PBXFileReference; path = KumoneIOS.xctestplan; sourceTree = "<group>"; };
 		6D28AAA402747474C3A1B8AD /* Debug.xcconfig */ = {isa = PBXFileReference; lastKnownFileType = text.xcconfig; path = Debug.xcconfig; sourceTree = "<group>"; };
 		74C59F0F113B18EBEA9C55B6 /* Tests.xcconfig */ = {isa = PBXFileReference; lastKnownFileType = text.xcconfig; path = Tests.xcconfig; sourceTree = "<group>"; };
 		7A9033A23C5610F19ABA3774 /* KumoneIOSUITests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = KumoneIOSUITests.swift; sourceTree = "<group>"; };
 		8B9C6A5A61A6330586810260 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
 		A494667EB444A90236506102 /* KumoneIOSApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = KumoneIOSApp.swift; sourceTree = "<group>"; };
+		E9932619CF285E1F7A6A2D5C /* RumxsLiveActivity.appex */ = {isa = PBXFileReference; explicitFileType = "wrapper.app-extension"; includeInIndex = 0; path = RumxsLiveActivity.appex; sourceTree = BUILT_PRODUCTS_DIR; };
+		73C8298811DC5A391ECC429E /* RumxsLiveActivityBundle.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RumxsLiveActivityBundle.swift; sourceTree = "<group>"; };
+		38CB825325EB656ED8785A64 /* RumxsLiveActivityWidget.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RumxsLiveActivityWidget.swift; sourceTree = "<group>"; };
+		1DFE6FA9F260911EB4743EC6 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
+		A69F2CFAD411B8256929747B /* RumxsLiveActivity.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = Config/RumxsLiveActivity.entitlements; sourceTree = SOURCE_ROOT; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -48,13 +65,36 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
+		C4701C3E3CBD4DB73BA8E3DC /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				95E3FB4324B6AECC51E4BB75 /* RumxsLiveActivityShared in Frameworks */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 /* End PBXFrameworksBuildPhase section */
+
+/* Begin PBXCopyFilesBuildPhase section */
+		629453115C4759BB35701724 /* Embed App Extensions */ = {
+			isa = PBXCopyFilesBuildPhase;
+			buildActionMask = 2147483647;
+			dstPath = "";
+			dstSubfolderSpec = 13;
+			files = (
+				617DD10008B62924ED8A2429 /* RumxsLiveActivity.appex in Embed App Extensions */,
+			);
+			name = "Embed App Extensions";
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXCopyFilesBuildPhase section */
 
 /* Begin PBXGroup section */
 		06B27D73B868029A6CD07927 /* Packages */ = {
 			isa = PBXGroup;
 			children = (
 				45602F996F250E88035F23A9 /* KumoneIOSPackage */,
+				DA4E4A990DDF2A3866D8BDA1 /* kumone */,
 			);
 			name = Packages;
 			sourceTree = "<group>";
@@ -68,6 +108,7 @@
 				CEC97C7667B5C3BA415E1C82 /* KumoneIOSUITests */,
 				06B27D73B868029A6CD07927 /* Packages */,
 				49A9A6B7173C5F9EDEB542C8 /* Products */,
+				0E9EA18A9722B4FA350701B1 /* RumxsLiveActivity */,
 			);
 			sourceTree = "<group>";
 		};
@@ -76,6 +117,7 @@
 			children = (
 				25934AD73710C9EDB53BDDA0 /* KumoneIOS.app */,
 				0646F456C7BF38C0A8ED880E /* KumoneIOSUITests.xctest */,
+				E9932619CF285E1F7A6A2D5C /* RumxsLiveActivity.appex */,
 			);
 			name = Products;
 			sourceTree = "<group>";
@@ -87,6 +129,7 @@
 				2199D32FC69383EC32B19794 /* Release.xcconfig */,
 				2F2B9DB0459DCEF7CDE9DE2C /* TestFlight.xcconfig */,
 				74C59F0F113B18EBEA9C55B6 /* Tests.xcconfig */,
+				A69F2CFAD411B8256929747B /* RumxsLiveActivity.entitlements */,
 			);
 			path = Config;
 			sourceTree = "<group>";
@@ -142,6 +185,16 @@
 			path = Resources;
 			sourceTree = "<group>";
 		};
+		0E9EA18A9722B4FA350701B1 /* RumxsLiveActivity */ = {
+			isa = PBXGroup;
+			children = (
+				73C8298811DC5A391ECC429E /* RumxsLiveActivityBundle.swift */,
+				38CB825325EB656ED8785A64 /* RumxsLiveActivityWidget.swift */,
+				1DFE6FA9F260911EB4743EC6 /* Info.plist */,
+			);
+			path = RumxsLiveActivity;
+			sourceTree = "<group>";
+		};
 /* End PBXGroup section */
 
 /* Begin PBXNativeTarget section */
@@ -152,10 +205,12 @@
 				70D34C1C5A629E97B9F4827E /* Sources */,
 				7545061B2914675A51010029 /* Resources */,
 				B85E6AD333E049D6862A8DBF /* Frameworks */,
+				629453115C4759BB35701724 /* Embed App Extensions */,
 			);
 			buildRules = (
 			);
 			dependencies = (
+				4A5EF6CF1ABE66530ED06832 /* PBXTargetDependency */,
 			);
 			name = KumoneIOS;
 			packageProductDependencies = (
@@ -183,6 +238,25 @@
 			productReference = 0646F456C7BF38C0A8ED880E /* KumoneIOSUITests.xctest */;
 			productType = "com.apple.product-type.bundle.ui-testing";
 		};
+		ABFDB6FC28C29A40F498B9A9 /* RumxsLiveActivity */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 4F4B5B6302CD36F9B2E3F6DC /* Build configuration list for PBXNativeTarget "RumxsLiveActivity" */;
+			buildPhases = (
+				78E37E98FEFC86868DED6F04 /* Sources */,
+				C4701C3E3CBD4DB73BA8E3DC /* Frameworks */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			name = RumxsLiveActivity;
+			packageProductDependencies = (
+				8CA4E7F6726295CD3A8920DF /* RumxsLiveActivityShared */,
+			);
+			productName = RumxsLiveActivity;
+			productReference = E9932619CF285E1F7A6A2D5C /* RumxsLiveActivity.appex */;
+			productType = "com.apple.product-type.app-extension";
+		};
 /* End PBXNativeTarget section */
 
 /* Begin PBXProject section */
@@ -200,6 +274,10 @@
 						DevelopmentTeam = "";
 						ProvisioningStyle = Automatic;
 					};
+					ABFDB6FC28C29A40F498B9A9 = {
+						DevelopmentTeam = "";
+						ProvisioningStyle = Automatic;
+					};
 				};
 			};
 			buildConfigurationList = CDF86BD3591ABC246FFB339F /* Build configuration list for PBXProject "KumoneIOS" */;
@@ -213,6 +291,7 @@
 			minimizedProjectReferenceProxies = 1;
 			packageReferences = (
 				D068EB99084BBAD6F3EA7AB9 /* XCLocalSwiftPackageReference "KumoneIOSPackage" */,
+				1284741608492A2AB0746279 /* XCLocalSwiftPackageReference "kumone" */,
 			);
 			preferredProjectObjectVersion = 77;
 			productRefGroup = 49A9A6B7173C5F9EDEB542C8 /* Products */;
@@ -221,6 +300,7 @@
 			targets = (
 				481C5C62EB4A6DB3CC0FDC39 /* KumoneIOS */,
 				7F3FA2EAD87A1580A6CD3880 /* KumoneIOSUITests */,
+				ABFDB6FC28C29A40F498B9A9 /* RumxsLiveActivity */,
 			);
 		};
 /* End PBXProject section */
@@ -254,6 +334,15 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
+		78E37E98FEFC86868DED6F04 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				24520E686C736D4B70E83A1E /* RumxsLiveActivityBundle.swift in Sources */,
+				19758DB86416B708DC426F3F /* RumxsLiveActivityWidget.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 /* End PBXSourcesBuildPhase section */
 
 /* Begin PBXTargetDependency section */
@@ -261,6 +350,11 @@
 			isa = PBXTargetDependency;
 			target = 481C5C62EB4A6DB3CC0FDC39 /* KumoneIOS */;
 			targetProxy = 938A878937A1366DA22272E1 /* PBXContainerItemProxy */;
+		};
+		4A5EF6CF1ABE66530ED06832 /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = ABFDB6FC28C29A40F498B9A9 /* RumxsLiveActivity */;
+			targetProxy = 2994D590AD3D0091BB65D422 /* PBXContainerItemProxy */;
 		};
 /* End PBXTargetDependency section */
 
@@ -524,6 +618,51 @@
 			};
 			name = TestFlight;
 		};
+		2D1E672481B1DDA26ED67788 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			baseConfigurationReference = 6D28AAA402747474C3A1B8AD /* Debug.xcconfig */;
+			buildSettings = {
+				APPLICATION_EXTENSION_API_ONLY = YES;
+				CODE_SIGN_ENTITLEMENTS = Config/RumxsLiveActivity.entitlements;
+				GENERATE_INFOPLIST_FILE = NO;
+				INFOPLIST_FILE = RumxsLiveActivity/Info.plist;
+				IPHONEOS_DEPLOYMENT_TARGET = 16.1;
+				PRODUCT_BUNDLE_IDENTIFIER = sb.moe.kumone.LiveActivityWidget;
+				PRODUCT_NAME = RumxsLiveActivity;
+				SKIP_INSTALL = YES;
+			};
+			name = Debug;
+		};
+		EB47466BE95165EDFB3F804A /* Release */ = {
+			isa = XCBuildConfiguration;
+			baseConfigurationReference = 2199D32FC69383EC32B19794 /* Release.xcconfig */;
+			buildSettings = {
+				APPLICATION_EXTENSION_API_ONLY = YES;
+				CODE_SIGN_ENTITLEMENTS = Config/RumxsLiveActivity.entitlements;
+				GENERATE_INFOPLIST_FILE = NO;
+				INFOPLIST_FILE = RumxsLiveActivity/Info.plist;
+				IPHONEOS_DEPLOYMENT_TARGET = 16.1;
+				PRODUCT_BUNDLE_IDENTIFIER = sb.moe.kumone.LiveActivityWidget;
+				PRODUCT_NAME = RumxsLiveActivity;
+				SKIP_INSTALL = YES;
+			};
+			name = Release;
+		};
+		485A90E2C28AEECBC908951B /* TestFlight */ = {
+			isa = XCBuildConfiguration;
+			baseConfigurationReference = 2F2B9DB0459DCEF7CDE9DE2C /* TestFlight.xcconfig */;
+			buildSettings = {
+				APPLICATION_EXTENSION_API_ONLY = YES;
+				CODE_SIGN_ENTITLEMENTS = Config/RumxsLiveActivity.entitlements;
+				GENERATE_INFOPLIST_FILE = NO;
+				INFOPLIST_FILE = RumxsLiveActivity/Info.plist;
+				IPHONEOS_DEPLOYMENT_TARGET = 16.1;
+				PRODUCT_BUNDLE_IDENTIFIER = sb.moe.kumone.LiveActivityWidget;
+				PRODUCT_NAME = RumxsLiveActivity;
+				SKIP_INSTALL = YES;
+			};
+			name = TestFlight;
+		};
 /* End XCBuildConfiguration section */
 
 /* Begin XCConfigurationList section */
@@ -557,6 +696,16 @@
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Debug;
 		};
+		4F4B5B6302CD36F9B2E3F6DC /* Build configuration list for PBXNativeTarget "RumxsLiveActivity" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				2D1E672481B1DDA26ED67788 /* Debug */,
+				EB47466BE95165EDFB3F804A /* Release */,
+				485A90E2C28AEECBC908951B /* TestFlight */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
 /* End XCConfigurationList section */
 
 /* Begin XCLocalSwiftPackageReference section */
@@ -564,12 +713,20 @@
 			isa = XCLocalSwiftPackageReference;
 			relativePath = KumoneIOSPackage;
 		};
+		1284741608492A2AB0746279 /* XCLocalSwiftPackageReference "kumone" */ = {
+			isa = XCLocalSwiftPackageReference;
+			relativePath = ..;
+		};
 /* End XCLocalSwiftPackageReference section */
 
 /* Begin XCSwiftPackageProductDependency section */
 		2D74B41A7A94ABA39956EC55 /* KumoneIOSFeature */ = {
 			isa = XCSwiftPackageProductDependency;
 			productName = KumoneIOSFeature;
+		};
+		8CA4E7F6726295CD3A8920DF /* RumxsLiveActivityShared */ = {
+			isa = XCSwiftPackageProductDependency;
+			productName = RumxsLiveActivityShared;
 		};
 /* End XCSwiftPackageProductDependency section */
 	};
