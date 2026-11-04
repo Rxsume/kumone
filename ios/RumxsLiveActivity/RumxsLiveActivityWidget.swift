@@ -77,13 +77,12 @@ struct RumxsLiveActivityWidget: Widget {
                 RumxsLiveActivityArtwork(fileName: context.state.artworkFileName, size: 24)
             } compactTrailing: {
                 Link(destination: RumxsLiveActivityLink.togglePlay) {
-                    Image(systemName: context.state.isPlaying ? "pause.fill" : "play.fill")
-                        .font(.system(size: 13, weight: .semibold))
+                    RumxsLiveActivityWaveform(isPlaying: context.state.isPlaying)
                         .frame(width: 28, height: 28)
                         .contentShape(Rectangle())
                 }
             } minimal: {
-                Image(systemName: "music.note")
+                RumxsLiveActivityArtwork(fileName: context.state.artworkFileName, size: 24)
             }
         }
     }
@@ -136,6 +135,44 @@ private struct RumxsLiveActivityArtwork: View {
             .appendingPathComponent(fileName)
         guard let uiImage = UIImage(contentsOfFile: url.path) else { return nil }
         return Image(uiImage: uiImage)
+    }
+}
+
+/// Audio-waveform bars for the collapsed island's trailing side, matching
+/// the system Now Playing look: artwork on the left, waveform on the
+/// right. Tapping the bars toggles playback via the surrounding Link.
+/// The bars render statically when paused (dimmed); while playing they
+/// pulse subtly. Island views render remotely and may not run the
+/// animation, so the static bar layout is the requirement and the pulse
+/// is a bonus.
+private struct RumxsLiveActivityWaveform: View {
+    let isPlaying: Bool
+
+    /// Relative bar heights, shortest at the edges.
+    private static let barHeights: [CGFloat] = [10, 18, 26, 14, 7]
+
+    /// Per-bar pulse amplitude, so neighbouring bars move out of phase.
+    private static let pulseScales: [CGFloat] = [1.15, 0.75, 1.1, 0.85, 1.2]
+
+    @State private var isPulsing = false
+
+    var body: some View {
+        HStack(alignment: .center, spacing: 3) {
+            ForEach(Self.barHeights.indices, id: \.self) { index in
+                Capsule()
+                    .fill(.primary)
+                    .frame(width: 3, height: Self.barHeights[index])
+                    .scaleEffect(y: isPulsing ? Self.pulseScales[index] : 1, anchor: .center)
+                    .animation(
+                        .easeInOut(duration: 0.6)
+                            .repeatForever(autoreverses: true)
+                            .delay(Double(index) * 0.09),
+                        value: isPulsing
+                    )
+            }
+        }
+        .opacity(isPlaying ? 1 : 0.5)
+        .onAppear { isPulsing = isPlaying }
     }
 }
 
