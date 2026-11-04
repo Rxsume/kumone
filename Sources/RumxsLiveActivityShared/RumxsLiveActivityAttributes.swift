@@ -27,7 +27,7 @@ import ActivityKit
 /// The content state is deliberately small: text and numbers only, no image
 /// data. Artwork travels as a thumbnail file in the shared container and the
 /// state only names it, so updates stay cheap and the island never waits on
-/// a download.
+/// a download. Palette colors travel the same way, as hex strings.
 @available(iOS 16.1, *)
 public struct RumxsLiveActivityAttributes: ActivityAttributes, Codable, Hashable, Sendable {
     /// The track this activity was requested for. Track changes end the old
@@ -55,6 +55,12 @@ public struct RumxsLiveActivityAttributes: ActivityAttributes, Codable, Hashable
         public var previousLyric: String?
         public var currentLyric: String?
         public var nextLyric: String?
+        /// Dominant artwork colors as "#RRGGBB" hex strings, for the
+        /// expanded island's ambient tint. Colors cross as hex because the
+        /// widget extension cannot import the app's palette code; nil
+        /// renders the plain black island, as before.
+        public var artworkPrimaryHex: String?
+        public var artworkSecondaryHex: String?
 
         public init(
             title: String,
@@ -66,7 +72,9 @@ public struct RumxsLiveActivityAttributes: ActivityAttributes, Codable, Hashable
             duration: TimeInterval,
             previousLyric: String?,
             currentLyric: String?,
-            nextLyric: String?
+            nextLyric: String?,
+            artworkPrimaryHex: String? = nil,
+            artworkSecondaryHex: String? = nil
         ) {
             self.title = title
             self.artist = artist
@@ -78,6 +86,8 @@ public struct RumxsLiveActivityAttributes: ActivityAttributes, Codable, Hashable
             self.previousLyric = previousLyric
             self.currentLyric = currentLyric
             self.nextLyric = nextLyric
+            self.artworkPrimaryHex = artworkPrimaryHex
+            self.artworkSecondaryHex = artworkSecondaryHex
         }
     }
 }
