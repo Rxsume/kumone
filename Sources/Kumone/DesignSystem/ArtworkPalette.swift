@@ -13,6 +13,32 @@ struct ArtworkColors: Equatable {
     )
 }
 
+#if os(iOS)
+extension ArtworkColors {
+    /// "#RRGGBB" pair for the Live Activity widget extension, which cannot
+    /// import this palette code: colors cross the boundary as hex strings
+    /// in the activity's content state, the same way artwork crosses as a
+    /// file name.
+    var hexPair: (primary: String, secondary: String) {
+        (primary.hexString, secondary.hexString)
+    }
+}
+
+private extension Color {
+    /// "#RRGGBB" in sRGB. Unresolvable colors read as black.
+    var hexString: String {
+        var red: CGFloat = 0, green: CGFloat = 0, blue: CGFloat = 0, alpha: CGFloat = 0
+        UIColor(self).getRed(&red, green: &green, blue: &blue, alpha: &alpha)
+        return String(
+            format: "#%02X%02X%02X",
+            Int((red * 255).rounded()),
+            Int((green * 255).rounded()),
+            Int((blue * 255).rounded())
+        )
+    }
+}
+#endif
+
 enum ArtworkPalette {
     private static var cache: [String: ArtworkColors] = [:]
 
