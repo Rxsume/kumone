@@ -36,6 +36,13 @@
             </array>
         </dict>
     </array>
+    <!-- Live Activities (Dynamic Island / lock screen) require this opt-in:
+         without NSSupportsLiveActivities, iOS refuses to start any
+         ActivityKit activity and the per-app Live Activities toggle never
+         appears in Settings, so LiveActivityManager can never request an
+         activity. -->
+    <key>NSSupportsLiveActivities</key>
+    <true/>
     <key>UIBackgroundModes</key>
     <array>
         <string>audio</string>
