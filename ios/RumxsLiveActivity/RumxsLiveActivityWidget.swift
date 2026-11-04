@@ -27,6 +27,7 @@ struct RumxsLiveActivityWidget: Widget {
                 DynamicIslandExpandedRegion(.leading) {
                     RumxsLiveActivityArtwork(fileName: context.state.artworkFileName, size: 48)
                         .widgetURL(RumxsLiveActivityLink.nowPlaying)
+                        .background(RumxsLiveActivityWidget.ambientTint(for: context.state))
                 }
                 DynamicIslandExpandedRegion(.trailing) {
                     HStack(spacing: 18) {
@@ -43,6 +44,7 @@ struct RumxsLiveActivityWidget: Widget {
                                 .contentShape(Rectangle())
                         }
                     }
+                    .background(RumxsLiveActivityWidget.ambientTint(for: context.state))
                 }
                 DynamicIslandExpandedRegion(.bottom) {
                     VStack(alignment: .leading, spacing: 6) {
@@ -72,6 +74,8 @@ struct RumxsLiveActivityWidget: Widget {
                         }
                     }
                     .widgetURL(RumxsLiveActivityLink.nowPlaying)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .background(RumxsLiveActivityWidget.ambientBackground(for: context.state))
                 }
             } compactLeading: {
                 RumxsLiveActivityArtwork(fileName: context.state.artworkFileName, size: 24)
@@ -91,9 +95,62 @@ struct RumxsLiveActivityWidget: Widget {
         [state.artist, state.album].filter { !$0.isEmpty }.joined(separator: " · ")
     }
 
+    /// Ambient gradient for the expanded island, derived from the artwork
+    /// palette. Kept dark so title, lyrics and controls stay legible.
+    /// Missing colors render clear: exactly the plain black island.
+    @ViewBuilder
+    static func ambientBackground(for state: RumxsLiveActivityAttributes.ContentState) -> some View {
+        if let primaryHex = state.artworkPrimaryHex,
+           let secondaryHex = state.artworkSecondaryHex,
+           let primary = Color(hex: primaryHex),
+           let secondary = Color(hex: secondaryHex) {
+            LinearGradient(
+                colors: [primary.darkened(by: 0.55), secondary.darkened(by: 0.65)],
+                startPoint: .topLeading,
+                endPoint: .bottomTrailing
+            )
+        } else {
+            Color.clear
+        }
+    }
+
+    /// Faint matching tint behind the leading/trailing regions, so the
+    /// whole expanded island reads as one tinted surface.
+    @ViewBuilder
+    static func ambientTint(for state: RumxsLiveActivityAttributes.ContentState) -> some View {
+        if let primaryHex = state.artworkPrimaryHex,
+           let primary = Color(hex: primaryHex) {
+            primary.darkened(by: 0.7).opacity(0.35)
+        } else {
+            Color.clear
+        }
+    }
+
     static func timeText(_ interval: TimeInterval) -> String {
         let total = max(0, Int(interval.rounded()))
         return "\(total / 60):\(String(format: "%02d", total % 60))"
+    }
+}
+
+/// Hex-string colors from the activity state. The widget extension cannot
+/// import the app's palette code, so colors cross as "#RRGGBB" strings.
+private extension Color {
+    init?(hex: String) {
+        let cleaned = hex.hasPrefix("#") ? String(hex.dropFirst()) : hex
+        guard cleaned.count == 6, let value = UInt64(cleaned, radix: 16) else { return nil }
+        self.init(
+            red: Double((value >> 16) & 0xFF) / 255,
+            green: Double((value >> 8) & 0xFF) / 255,
+            blue: Double(value & 0xFF) / 255
+        )
+    }
+
+    /// Scales the color toward black so island text stays legible over it.
+    func darkened(by amount: CGFloat) -> Color {
+        var red: CGFloat = 0, green: CGFloat = 0, blue: CGFloat = 0, alpha: CGFloat = 0
+        UIColor(self).getRed(&red, green: &green, blue: &blue, alpha: &alpha)
+        let factor = max(0, 1 - amount)
+        return Color(red: red * factor, green: green * factor, blue: blue * factor)
     }
 }
 
