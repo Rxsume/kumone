@@ -16,7 +16,7 @@ import os.log
 /// source is tried. A probe that errors or times out never rejects a
 /// URL — it only rejects a clip whose duration is actually known.
 enum UnblockService {
-    private static let log = Logger(subsystem: "im.missuo.kumone", category: "audio-source")
+    private static let log = Logger(subsystem: "sb.moe.kumone", category: "audio-source")
     private static let httpClient = AudioSourceClient.shared
     private static let ikunProvider = IkunAudioSourceProvider()
     private static let fallbackProviders: [any AudioSourceProvider] = [
@@ -122,7 +122,7 @@ enum UnblockService {
     }
 
     private static func pyncmd(_ track: Track) async throws -> ResolvedAudioSource {
-        let urlString = "https://music-api.gdstudio.xyz/api.php?types=url&source=netease&id=\(track.id)&br=320"
+        let urlString = "https://music-api.gdstudio.xyz/api.php?types=url&source=\(Upstream.tag)&id=\(track.id)&br=320"
         let data = try await httpClient.data(
             from: urlString,
             source: .pyncmd,
