@@ -84,14 +84,16 @@ final class NowPlayingManager {
     }
     #endif
 
-    /// - Parameter avPlayer: the iOS AVPlayer backing playback. When supplied,
-    ///   the Now Playing session is bound to it so the system can identify the
-    ///   app behind the session.
-    func attach(to player: PlayerService, avPlayer: AVPlayer? = nil) {
+    /// - Parameter players: the iOS players backing playback. When supplied,
+    ///   the Now Playing session is bound to all of them so the system can
+    ///   identify the app behind the session — with the dual-deck crossfade
+    ///   engine both decks are bound, and the session survives the deck swap
+    ///   at the overlap because it never belonged to one player.
+    func attach(to player: PlayerService, players: [AVPlayer]? = nil) {
         self.player = player
         #if os(iOS)
-        if let avPlayer {
-            let session = MPNowPlayingSession(players: [avPlayer])
+        if let players, !players.isEmpty {
+            let session = MPNowPlayingSession(players: players)
             // We publish the full dictionary ourselves (elapsed time, queue
             // count, artwork), which the automatic publisher would omit.
             session.automaticallyPublishesNowPlayingInfo = false
