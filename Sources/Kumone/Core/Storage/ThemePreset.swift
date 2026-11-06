@@ -23,14 +23,18 @@ struct ThemeColor: Codable, Equatable, Hashable {
         var red: CGFloat = 0, green: CGFloat = 0, blue: CGFloat = 0, alpha: CGFloat = 1
         #if os(iOS)
         let resolved = UIColor(color).getRed(&red, green: &green, blue: &blue, alpha: &alpha)
-        #else
-        let resolved = NSColor(color).getRed(&red, green: &green, blue: &blue, alpha: &alpha)
-        #endif
         if resolved {
             self.init(red: Double(red), green: Double(green), blue: Double(blue), alpha: Double(alpha))
         } else {
             self.init(red: 0, green: 0, blue: 0, alpha: 1)
         }
+        #else
+        // AppKit's getRed returns Void (no success flag); colours that do
+        // not resolve to RGB leave the initial values untouched, which are
+        // already opaque black — the documented fallback.
+        NSColor(color).getRed(&red, green: &green, blue: &blue, alpha: &alpha)
+        self.init(red: Double(red), green: Double(green), blue: Double(blue), alpha: Double(alpha))
+        #endif
     }
 
     var color: Color {
