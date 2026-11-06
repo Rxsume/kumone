@@ -74,6 +74,7 @@ struct StaggeredAppearanceModifier: ViewModifier {
     let index: Int
     var itemID: String
 
+    @EnvironmentObject private var settings: SettingsManager
     @State private var isVisible = false
 
     func body(content: Content) -> some View {
@@ -81,7 +82,9 @@ struct StaggeredAppearanceModifier: ViewModifier {
             .opacity(isVisible ? 1 : 0)
             .offset(y: isVisible ? 0 : 16)
             .onAppear {
-                if Platform.isReduceMotionEnabled
+                // C4/C5: static mode — or the transitions reduce-motion
+                // override — skips the entrance animation.
+                if settings.staticMode || settings.effectiveReduceMotionTransitions
                     || AnimationCache.hasAnimated(itemID) {
                     isVisible = true
                     return
@@ -235,8 +238,15 @@ struct MarqueeText: View {
     var fontSize: CGFloat = 13
     var fontWeight: PlatformFont.Weight = .medium
 
+    @EnvironmentObject private var settings: SettingsManager
+
     var body: some View {
-        MarqueeTextView.Representable(text: text, fontSize: fontSize, weight: fontWeight)
+        MarqueeTextView.Representable(
+            text: text, fontSize: fontSize, weight: fontWeight,
+            // C4/C5: static mode — or the micro-motion reduce-motion
+            // override — holds the title still instead of scrolling it.
+            reduceMotion: settings.staticMode || settings.effectiveReduceMotionMicroMotion
+        )
     }
 }
 
@@ -257,6 +267,7 @@ final class MarqueeTextView: PlatformView {
     private var text: String
     private var fontSize: CGFloat
     private var weight: PlatformFont.Weight
+    private var reduceMotion: Bool
     private var textWidth: CGFloat = 0
     /// Guards against re-running layout on every display cycle: the host view
     /// calls layout() each frame while an animation is in flight, and tearing
@@ -269,10 +280,11 @@ final class MarqueeTextView: PlatformView {
     /// A single optional accessor lets the shared setup code work on both.
     private var hostLayer: CALayer? { layer }
 
-    init(text: String, fontSize: CGFloat, weight: PlatformFont.Weight) {
+    init(text: String, fontSize: CGFloat, weight: PlatformFont.Weight, reduceMotion: Bool = false) {
         self.text = text
         self.fontSize = fontSize
         self.weight = weight
+        self.reduceMotion = reduceMotion
         super.init(frame: .zero)
         #if os(macOS)
         wantsLayer = true
@@ -294,11 +306,13 @@ final class MarqueeTextView: PlatformView {
     @available(*, unavailable)
     required init?(coder: NSCoder) { fatalError("init(coder:) is not used") }
 
-    func update(text: String, fontSize: CGFloat, weight: PlatformFont.Weight) {
-        guard text != self.text || fontSize != self.fontSize || weight != self.weight else { return }
+    func update(text: String, fontSize: CGFloat, weight: PlatformFont.Weight, reduceMotion: Bool) {
+        guard text != self.text || fontSize != self.fontSize || weight != self.weight
+            || reduceMotion != self.reduceMotion else { return }
         self.text = text
         self.fontSize = fontSize
         self.weight = weight
+        self.reduceMotion = reduceMotion
         applyText()
         relayout()
     }
@@ -406,7 +420,7 @@ final class MarqueeTextView: PlatformView {
 
     private func restartAnimation() {
         scroller.removeAnimation(forKey: "marquee")
-        guard needsMarquee, !Platform.isReduceMotionEnabled else { return }
+        guard needsMarquee, !reduceMotion else { return }
 
         let distance = textWidth + Self.gap
         let animation = CABasicAnimation(keyPath: "position.x")
@@ -424,20 +438,21 @@ final class MarqueeTextView: PlatformView {
         let text: String
         let fontSize: CGFloat
         let weight: PlatformFont.Weight
+        let reduceMotion: Bool
 
         #if os(macOS)
         func makeNSView(context: Context) -> MarqueeTextView {
-            MarqueeTextView(text: text, fontSize: fontSize, weight: weight)
+            MarqueeTextView(text: text, fontSize: fontSize, weight: weight, reduceMotion: reduceMotion)
         }
         func updateNSView(_ view: MarqueeTextView, context: Context) {
-            view.update(text: text, fontSize: fontSize, weight: weight)
+            view.update(text: text, fontSize: fontSize, weight: weight, reduceMotion: reduceMotion)
         }
         #else
         func makeUIView(context: Context) -> MarqueeTextView {
-            MarqueeTextView(text: text, fontSize: fontSize, weight: weight)
+            MarqueeTextView(text: text, fontSize: fontSize, weight: weight, reduceMotion: reduceMotion)
         }
         func updateUIView(_ view: MarqueeTextView, context: Context) {
-            view.update(text: text, fontSize: fontSize, weight: weight)
+            view.update(text: text, fontSize: fontSize, weight: weight, reduceMotion: reduceMotion)
         }
         #endif
     }
