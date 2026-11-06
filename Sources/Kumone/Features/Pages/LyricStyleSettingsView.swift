@@ -497,7 +497,7 @@ struct LyricStyleSettingsView: View {
                 Text("预览文本")
             }
 
-            Section("字体") {
+            Section {
                 Picker("字体", selection: $settings.lyricsFontStyle) {
                     ForEach(LyricsFontStyle.allCases) { style in
                         Text(style.displayName).tag(style)
@@ -520,6 +520,8 @@ struct LyricStyleSettingsView: View {
                     set: { settings.lyricsCustomFont = $0.isEmpty ? nil : $0 }
                 ))
                 #endif
+            } header: {
+                Text("字体")
             } footer: {
                 Text("自定义字体优先于上方选择的字体样式；不选则用样式字体。")
             }
@@ -600,7 +602,7 @@ struct LyricStyleSettingsView: View {
             }
 
             if settings.visualizerBackgroundMode == .nomand {
-                Section("漫游（半调圆点）") {
+                Section {
                     Picker("效果", selection: $settings.nomandEffect) {
                         ForEach(NomandEffect.allCases) { effect in
                             Text(effect.displayName).tag(effect)
@@ -635,6 +637,8 @@ struct LyricStyleSettingsView: View {
                     } maximumValueLabel: {
                         Text("100%")
                     }
+                } header: {
+                    Text("漫游（半调圆点）")
                 } footer: {
                     Text("半调圆点由封面实时生成；圆点取主题强调色，空隙取背景色。保留原色时圆点按封面颜色着色。")
                 }
@@ -656,7 +660,7 @@ struct LyricStyleSettingsView: View {
                 Text("目前只有流光一种样式。")
             }
 
-            Section("流光") {
+            Section {
                 Toggle("词旋转", isOn: $settings.classicWordRotation)
                 Slider(value: $settings.classicBreathingFloat, in: SettingsManager.classicBreathingFloatRange, step: 0.1) {
                     Text("呼吸浮动")
@@ -673,6 +677,8 @@ struct LyricStyleSettingsView: View {
                     Text("2")
                 }
                 Toggle("避免词重叠", isOn: $settings.classicAvoidOverlap)
+            } header: {
+                Text("流光")
             } footer: {
                 Text("词旋转与呼吸浮动在静态模式或减弱动态开启时自动关闭。")
             }
