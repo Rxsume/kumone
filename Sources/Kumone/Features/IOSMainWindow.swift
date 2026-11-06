@@ -178,7 +178,11 @@ public struct IOSMainWindow: View {
         } else {
             tabInterface
                 .overlay {
-                    if settings.showMainWindowAmbientBackground {
+                    // The luminous now-playing page paints its own nomand
+                    // halftone background; the ambient glow behind it would
+                    // wash the page out, so it stays off while luminous is up.
+                    if settings.showMainWindowAmbientBackground,
+                       !(player.showNowPlaying && settings.effectiveNowPlayingMode == .luminous) {
                         MainWindowAmbientBackground(
                             colors: artworkStore.colors,
                             intensity: settings.mainWindowAmbientBackgroundIntensity

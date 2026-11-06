@@ -78,6 +78,10 @@ public enum NowPlayingMode: String, CaseIterable, Identifiable {
     /// iOS only in practice — macOS offers only vinyl/classic in its
     /// picker, and the macOS compact dispatch falls through to classic.
     case lattice
+    /// Folia classic visualizer ("流光", P1 of the luminous port): one big
+    /// lyric line at a time, words glowing one by one over the
+    /// cover-derived halftone background. iOS compact only, like lattice.
+    case luminous
 
     public var id: String { rawValue }
 
@@ -88,6 +92,7 @@ public enum NowPlayingMode: String, CaseIterable, Identifiable {
         case .immersive: return String(localized: "沉浸模式")
         case .minimal: return String(localized: "简洁模式")
         case .lattice: return String(localized: "格子模式")
+        case .luminous: return String(localized: "流光")
         }
     }
 }
@@ -232,6 +237,89 @@ enum ReplayGainMode: String, CaseIterable, Identifiable {
     }
 }
 
+/// Lyric typeface family for the Folia luminous lyrics (and the Lattice
+/// card). Mirrors Folia's `Theme['fontStyle']` (`sans` / `serif` / `mono`)
+/// from `useTypographySettingsStore`.
+enum LyricsFontStyle: String, CaseIterable, Identifiable {
+    case sans
+    case serif
+    case mono
+
+    var id: String { rawValue }
+
+    var displayName: String {
+        switch self {
+        case .sans: return String(localized: "无衬线")
+        case .serif: return String(localized: "衬线")
+        case .mono: return String(localized: "等宽")
+        }
+    }
+
+    /// SwiftUI font design for the style; a custom font name (when set) is
+    /// resolved by the caller with `Font.custom` instead.
+    var design: Font.Design {
+        switch self {
+        case .sans: return .default
+        case .serif: return .serif
+        case .mono: return .monospaced
+        }
+    }
+}
+
+/// Which background the luminous (流光) now-playing page uses. Only the
+/// nomand halftone background is ported for now; `none` is the plain dark
+/// page. Other Folia backgrounds (latent / sora / monet) are not ported.
+enum VisualizerBackgroundMode: String, CaseIterable, Identifiable {
+    case nomand
+    case none
+
+    var id: String { rawValue }
+
+    var displayName: String {
+        switch self {
+        case .nomand: return String(localized: "漫游（半调圆点）")
+        case .none: return String(localized: "无背景")
+        }
+    }
+}
+
+/// Nomand background effect. Only halftone-dots is ported for now; the enum
+/// stays so dithering / fluted-glass / paper-texture / lens-distortion can
+/// slot in without a settings migration.
+enum NomandEffect: String, CaseIterable, Identifiable {
+    case halftoneDots
+
+    var id: String { rawValue }
+
+    var displayName: String {
+        switch self {
+        case .halftoneDots: return String(localized: "半调圆点")
+        }
+    }
+}
+
+/// What the subtitle overlay under the luminous line shows. This is a
+/// derived view of the two pre-existing lyric settings (see
+/// `SettingsManager.subtitleContentMode`): translation ↔
+/// `showLyricsTranslation`, romaji ↔ `lyricsAnnotation == .romaji`.
+enum SubtitleContentMode: String, CaseIterable, Identifiable {
+    case translation
+    case romaji
+    case both
+    case none
+
+    var id: String { rawValue }
+
+    var displayName: String {
+        switch self {
+        case .translation: return String(localized: "译文")
+        case .romaji: return String(localized: "罗马音")
+        case .both: return String(localized: "两者")
+        case .none: return String(localized: "无")
+        }
+    }
+}
+
 @MainActor
 final class SettingsManager: ObservableObject {
     static let shared = SettingsManager()
@@ -302,6 +390,31 @@ final class SettingsManager: ObservableObject {
         static let crossfadeMaxSeconds = "settings.crossfadeMaxSeconds"
         static let replayGainMode = "settings.replayGainMode"
         static let foliaEnabled = "settings.foliaEnabled"
+        // Folia luminous (流光) classic tuning.
+        static let classicWordRotation = "settings.classicWordRotation"
+        static let classicBreathingFloat = "settings.classicBreathingFloat"
+        static let classicWordSpacing = "settings.classicWordSpacing"
+        static let classicAvoidOverlap = "settings.classicAvoidOverlap"
+        // Folia nomand (漫游) halftone background.
+        static let visualizerBackgroundMode = "settings.visualizerBackgroundMode"
+        static let nomandEffect = "settings.nomandEffect"
+        static let nomandHalftoneSize = "settings.nomandHalftoneSize"
+        static let nomandHalftoneRadius = "settings.nomandHalftoneRadius"
+        static let nomandHalftoneContrast = "settings.nomandHalftoneContrast"
+        static let nomandOriginalColors = "settings.nomandOriginalColors"
+        static let nomandOverlayOpacity = "settings.nomandOverlayOpacity"
+        // Folia lyric-style window (VisPlayground).
+        static let lyricsFontStyle = "settings.lyricsFontStyle"
+        static let lyricsFontScale = "settings.lyricsFontScale"
+        static let lyricsFontWeight = "settings.lyricsFontWeight"
+        static let lyricsCustomFont = "settings.lyricsCustomFont"
+        static let visualizerOpacity = "settings.visualizerOpacity"
+        static let subtitleFontScale = "settings.subtitleFontScale"
+        static let subtitleOverlayOpacity = "settings.subtitleOverlayOpacity"
+        static let subtitleUpcomingLyricsBlur = "settings.subtitleUpcomingLyricsBlur"
+        static let hideTranslationSubtitle = "settings.hideTranslationSubtitle"
+        static let subtitleFontFollowsLyrics = "settings.subtitleFontFollowsLyrics"
+        static let subtitleHarmonyEnabled = "settings.subtitleHarmonyEnabled"
     }
 
     @Published var audioQuality: AudioQuality {
@@ -514,6 +627,48 @@ final class SettingsManager: ObservableObject {
 
     // MARK: - Folia visual / playback settings
 
+    // Folia luminous / nomand / lyric-style defaults (Folia v0.7.26:
+    // `DEFAULT_CLASSIC_TUNING`, `DEFAULT_NOMAND_BACKGROUND_TUNING`,
+    // `useTypographySettingsStore`). Kept as static constants so tests can
+    // pin them, and so the master-switch-off fallbacks have one source of
+    // truth with the stored defaults.
+    nonisolated static let defaultClassicWordRotation = true
+    nonisolated static let defaultClassicBreathingFloat = 1.0
+    nonisolated static let defaultClassicWordSpacing = 0.7
+    nonisolated static let defaultClassicAvoidOverlap = false
+    nonisolated static let defaultVisualizerBackgroundMode = VisualizerBackgroundMode.nomand
+    nonisolated static let defaultNomandEffect = NomandEffect.halftoneDots
+    nonisolated static let defaultNomandHalftoneSize = 0.5
+    nonisolated static let defaultNomandHalftoneRadius = 1.25
+    nonisolated static let defaultNomandHalftoneContrast = 0.4
+    nonisolated static let defaultNomandOriginalColors = false
+    nonisolated static let defaultNomandOverlayOpacity = 0.35
+    nonisolated static let defaultLyricsFontStyle = LyricsFontStyle.sans
+    nonisolated static let defaultLyricsFontScale = 1.0
+    nonisolated static let defaultVisualizerOpacity = 1.0
+    nonisolated static let defaultSubtitleFontScale = 1.0
+    nonisolated static let defaultSubtitleOverlayOpacity = 0.6
+    nonisolated static let defaultSubtitleUpcomingLyricsBlur = true
+    nonisolated static let defaultHideTranslationSubtitle = false
+    nonisolated static let defaultSubtitleFontFollowsLyrics = true
+    nonisolated static let defaultSubtitleHarmonyEnabled = true
+
+    nonisolated static let classicBreathingFloatRange = 0.0...2.0
+    nonisolated static let classicWordSpacingRange = 0.0...2.0
+    nonisolated static let nomandHalftoneSizeRange = 0.1...1.0
+    nonisolated static let nomandHalftoneRadiusRange = 0.1...2.0
+    nonisolated static let nomandHalftoneContrastRange = 0.0...1.0
+    nonisolated static let nomandOverlayOpacityRange = 0.0...1.0
+    nonisolated static let lyricsFontScaleRange = 0.85...1.4
+    nonisolated static let lyricsFontWeightRange = 100.0...900.0
+    nonisolated static let visualizerOpacityRange = 0.2...1.0
+    nonisolated static let subtitleFontScaleRange = 0.85...1.4
+    nonisolated static let subtitleOverlayOpacityRange = 0.0...1.0
+
+    nonisolated static func clamped(_ value: Double, to range: ClosedRange<Double>) -> Double {
+        min(max(value, range.lowerBound), range.upperBound)
+    }
+
     /// Master switch for all Folia visual / playback settings in this
     /// section. Off restores the pre-folia behaviour (what the app did
     /// at bb21dd8, before PR #8): every `effective*` property below
@@ -648,6 +803,22 @@ final class SettingsManager: ObservableObject {
     }
 
     private static func setOptionalBool(_ value: Bool?, forKey key: String) {
+        if let value {
+            UserDefaults.standard.set(value, forKey: key)
+        } else {
+            UserDefaults.standard.removeObject(forKey: key)
+        }
+    }
+
+    private static func setOptionalDouble(_ value: Double?, forKey key: String) {
+        if let value {
+            UserDefaults.standard.set(value, forKey: key)
+        } else {
+            UserDefaults.standard.removeObject(forKey: key)
+        }
+    }
+
+    private static func setOptionalString(_ value: String?, forKey key: String) {
         if let value {
             UserDefaults.standard.set(value, forKey: key)
         } else {
@@ -877,13 +1048,318 @@ final class SettingsManager: ObservableObject {
         return replayGainMode
     }
 
-    /// Now-playing mode with the Folia master switch off: `.lattice` is a
-    /// Folia (P2) mode, so it falls back to the pre-folia default
-    /// (`.immersive`); vinyl/classic/immersive/minimal predate Folia and
-    /// pass through unchanged.
+    /// Now-playing mode with the Folia master switch off: `.lattice` and
+    /// `.luminous` are Folia modes, so they fall back to the pre-folia
+    /// default (`.immersive`); vinyl/classic/immersive/minimal predate
+    /// Folia and pass through unchanged.
     var effectiveNowPlayingMode: NowPlayingMode {
-        guard foliaEnabled || nowPlayingMode != .lattice else { return .immersive }
+        guard foliaEnabled || (nowPlayingMode != .lattice && nowPlayingMode != .luminous) else {
+            return .immersive
+        }
         return nowPlayingMode
+    }
+
+    // MARK: - Folia luminous (流光) classic tuning
+
+    /// classic: let words rotate to their deterministic random angle.
+    @Published var classicWordRotation: Bool {
+        didSet { UserDefaults.standard.set(classicWordRotation, forKey: Keys.classicWordRotation) }
+    }
+
+    /// classic word rotation with the master switch off: the Folia default.
+    var effectiveClassicWordRotation: Bool {
+        foliaEnabled ? classicWordRotation : Self.defaultClassicWordRotation
+    }
+
+    /// classic: whole-line breathing float multiplier (0–2, 0 = still).
+    @Published var classicBreathingFloat: Double {
+        didSet { UserDefaults.standard.set(classicBreathingFloat, forKey: Keys.classicBreathingFloat) }
+    }
+
+    /// classic breathing float with the master switch off: the Folia default.
+    var effectiveClassicBreathingFloat: Double {
+        foliaEnabled ? classicBreathingFloat : Self.defaultClassicBreathingFloat
+    }
+
+    /// classic: word spacing multiplier (0–2) applied to the computed gap
+    /// between neighbouring words.
+    @Published var classicWordSpacing: Double {
+        didSet { UserDefaults.standard.set(classicWordSpacing, forKey: Keys.classicWordSpacing) }
+    }
+
+    /// classic word spacing with the master switch off: the Folia default.
+    var effectiveClassicWordSpacing: Double {
+        foliaEnabled ? classicWordSpacing : Self.defaultClassicWordSpacing
+    }
+
+    /// classic: space words by how far they actually reach when scaled,
+    /// turned and offset, so none overlaps another.
+    @Published var classicAvoidOverlap: Bool {
+        didSet { UserDefaults.standard.set(classicAvoidOverlap, forKey: Keys.classicAvoidOverlap) }
+    }
+
+    /// classic avoid-overlap with the master switch off: the Folia default.
+    var effectiveClassicAvoidOverlap: Bool {
+        foliaEnabled ? classicAvoidOverlap : Self.defaultClassicAvoidOverlap
+    }
+
+    // MARK: - Folia nomand (漫游) halftone background
+
+    /// Background behind the luminous now-playing page.
+    @Published var visualizerBackgroundMode: VisualizerBackgroundMode {
+        didSet {
+            UserDefaults.standard.set(visualizerBackgroundMode.rawValue, forKey: Keys.visualizerBackgroundMode)
+        }
+    }
+
+    /// Background mode with the master switch off: the Folia default.
+    var effectiveVisualizerBackgroundMode: VisualizerBackgroundMode {
+        foliaEnabled ? visualizerBackgroundMode : Self.defaultVisualizerBackgroundMode
+    }
+
+    /// Nomand effect. Only halftone-dots is ported for now.
+    @Published var nomandEffect: NomandEffect {
+        didSet { UserDefaults.standard.set(nomandEffect.rawValue, forKey: Keys.nomandEffect) }
+    }
+
+    /// Nomand effect with the master switch off: the Folia default.
+    var effectiveNomandEffect: NomandEffect {
+        foliaEnabled ? nomandEffect : Self.defaultNomandEffect
+    }
+
+    /// Halftone dot size (0.1–1): larger values pack the dots tighter.
+    @Published var nomandHalftoneSize: Double {
+        didSet { UserDefaults.standard.set(nomandHalftoneSize, forKey: Keys.nomandHalftoneSize) }
+    }
+
+    /// Halftone dot size with the master switch off: the Folia default.
+    var effectiveNomandHalftoneSize: Double {
+        foliaEnabled ? nomandHalftoneSize : Self.defaultNomandHalftoneSize
+    }
+
+    /// Halftone dot radius (0.1–2): larger values make harder, rounder dots.
+    @Published var nomandHalftoneRadius: Double {
+        didSet { UserDefaults.standard.set(nomandHalftoneRadius, forKey: Keys.nomandHalftoneRadius) }
+    }
+
+    /// Halftone dot radius with the master switch off: the Folia default.
+    var effectiveNomandHalftoneRadius: Double {
+        foliaEnabled ? nomandHalftoneRadius : Self.defaultNomandHalftoneRadius
+    }
+
+    /// Halftone contrast (0–1): how hard the dot pattern cuts.
+    @Published var nomandHalftoneContrast: Double {
+        didSet { UserDefaults.standard.set(nomandHalftoneContrast, forKey: Keys.nomandHalftoneContrast) }
+    }
+
+    /// Halftone contrast with the master switch off: the Folia default.
+    var effectiveNomandHalftoneContrast: Double {
+        foliaEnabled ? nomandHalftoneContrast : Self.defaultNomandHalftoneContrast
+    }
+
+    /// Keep the cover's own colours in the halftone dots instead of mapping
+    /// them to the theme accent / background.
+    @Published var nomandOriginalColors: Bool {
+        didSet { UserDefaults.standard.set(nomandOriginalColors, forKey: Keys.nomandOriginalColors) }
+    }
+
+    /// Original colours with the master switch off: the Folia default.
+    var effectiveNomandOriginalColors: Bool {
+        foliaEnabled ? nomandOriginalColors : Self.defaultNomandOriginalColors
+    }
+
+    /// Theme-background veil over the halftone layer (0–1).
+    @Published var nomandOverlayOpacity: Double {
+        didSet { UserDefaults.standard.set(nomandOverlayOpacity, forKey: Keys.nomandOverlayOpacity) }
+    }
+
+    /// Overlay opacity with the master switch off: the Folia default.
+    var effectiveNomandOverlayOpacity: Double {
+        foliaEnabled ? nomandOverlayOpacity : Self.defaultNomandOverlayOpacity
+    }
+
+    // MARK: - Folia lyric-style window (VisPlayground)
+
+    /// Lyric typeface family for the luminous lyrics and the Lattice card.
+    @Published var lyricsFontStyle: LyricsFontStyle {
+        didSet { UserDefaults.standard.set(lyricsFontStyle.rawValue, forKey: Keys.lyricsFontStyle) }
+    }
+
+    /// Lyric font style with the master switch off: the Folia default.
+    var effectiveLyricsFontStyle: LyricsFontStyle {
+        foliaEnabled ? lyricsFontStyle : Self.defaultLyricsFontStyle
+    }
+
+    /// Lyric font-size scale (0.85–1.4), applied to the luminous font-size
+    /// formula and to the Lattice card sizes.
+    @Published var lyricsFontScale: Double {
+        didSet { UserDefaults.standard.set(lyricsFontScale, forKey: Keys.lyricsFontScale) }
+    }
+
+    /// Lyric font-size scale with the master switch off: the Folia default.
+    var effectiveLyricsFontScale: Double {
+        foliaEnabled ? lyricsFontScale : Self.defaultLyricsFontScale
+    }
+
+    /// Lyric font weight (100–900) when auto weight is off; `nil` means
+    /// automatic (the visualizer's own default weight, 700 for luminous).
+    @Published var lyricsFontWeight: Double? {
+        didSet { Self.setOptionalDouble(lyricsFontWeight, forKey: Keys.lyricsFontWeight) }
+    }
+
+    /// Lyric font weight with the master switch off: automatic.
+    var effectiveLyricsFontWeight: Double? {
+        foliaEnabled ? lyricsFontWeight : nil
+    }
+
+    /// Custom lyric font (PostScript name from the system font picker);
+    /// `nil` means the selected font style.
+    @Published var lyricsCustomFont: String? {
+        didSet { Self.setOptionalString(lyricsCustomFont, forKey: Keys.lyricsCustomFont) }
+    }
+
+    /// Custom lyric font with the master switch off: none.
+    var effectiveLyricsCustomFont: String? {
+        foliaEnabled ? lyricsCustomFont : nil
+    }
+
+    /// Overall opacity of the visualizer lyrics (0.2–1).
+    @Published var visualizerOpacity: Double {
+        didSet { UserDefaults.standard.set(visualizerOpacity, forKey: Keys.visualizerOpacity) }
+    }
+
+    /// Visualizer opacity with the master switch off: the Folia default.
+    var effectiveVisualizerOpacity: Double {
+        foliaEnabled ? visualizerOpacity : Self.defaultVisualizerOpacity
+    }
+
+    /// Subtitle font-size scale (0.85–1.4).
+    @Published var subtitleFontScale: Double {
+        didSet { UserDefaults.standard.set(subtitleFontScale, forKey: Keys.subtitleFontScale) }
+    }
+
+    /// Subtitle font-size scale with the master switch off: the Folia default.
+    var effectiveSubtitleFontScale: Double {
+        foliaEnabled ? subtitleFontScale : Self.defaultSubtitleFontScale
+    }
+
+    /// Subtitle overlay opacity (0–1): how strongly the translation /
+    /// upcoming-line rows read against the background.
+    @Published var subtitleOverlayOpacity: Double {
+        didSet { UserDefaults.standard.set(subtitleOverlayOpacity, forKey: Keys.subtitleOverlayOpacity) }
+    }
+
+    /// Subtitle overlay opacity with the master switch off: the Folia default.
+    var effectiveSubtitleOverlayOpacity: Double {
+        foliaEnabled ? subtitleOverlayOpacity : Self.defaultSubtitleOverlayOpacity
+    }
+
+    /// Blur the upcoming-line preview rows in the subtitle overlay.
+    @Published var subtitleUpcomingLyricsBlur: Bool {
+        didSet {
+            UserDefaults.standard.set(subtitleUpcomingLyricsBlur, forKey: Keys.subtitleUpcomingLyricsBlur)
+        }
+    }
+
+    /// Upcoming-line blur with the master switch off: the Folia default.
+    var effectiveSubtitleUpcomingLyricsBlur: Bool {
+        foliaEnabled ? subtitleUpcomingLyricsBlur : Self.defaultSubtitleUpcomingLyricsBlur
+    }
+
+    /// Hide the translation row in the subtitle overlay even when the
+    /// content mode would show it.
+    @Published var hideTranslationSubtitle: Bool {
+        didSet { UserDefaults.standard.set(hideTranslationSubtitle, forKey: Keys.hideTranslationSubtitle) }
+    }
+
+    /// Hide-translation with the master switch off: the Folia default.
+    var effectiveHideTranslationSubtitle: Bool {
+        foliaEnabled ? hideTranslationSubtitle : Self.defaultHideTranslationSubtitle
+    }
+
+    /// Subtitle typeface follows the lyric font style instead of sans.
+    @Published var subtitleFontFollowsLyrics: Bool {
+        didSet {
+            UserDefaults.standard.set(subtitleFontFollowsLyrics, forKey: Keys.subtitleFontFollowsLyrics)
+        }
+    }
+
+    /// Subtitle-follows-lyrics with the master switch off: the Folia default.
+    var effectiveSubtitleFontFollowsLyrics: Bool {
+        foliaEnabled ? subtitleFontFollowsLyrics : Self.defaultSubtitleFontFollowsLyrics
+    }
+
+    /// Show the harmony (background-vocal) subtitle row when the lyrics
+    /// carry one. The parser does not produce harmony data for real songs,
+    /// so this only takes effect in the style window's live preview.
+    @Published var subtitleHarmonyEnabled: Bool {
+        didSet { UserDefaults.standard.set(subtitleHarmonyEnabled, forKey: Keys.subtitleHarmonyEnabled) }
+    }
+
+    /// Harmony subtitles with the master switch off: the Folia default.
+    var effectiveSubtitleHarmonyEnabled: Bool {
+        foliaEnabled ? subtitleHarmonyEnabled : Self.defaultSubtitleHarmonyEnabled
+    }
+
+    /// What the subtitle overlay shows, derived from the two pre-existing
+    /// lyric settings (Folia's VisPlayground content mode maps onto the
+    /// same two toggles): translation ↔ `showLyricsTranslation`, romaji ↔
+    /// `lyricsAnnotation == .romaji`. Setting it writes both back, so the
+    /// rest of the app's lyric views stay in agreement.
+    var subtitleContentMode: SubtitleContentMode {
+        get {
+            switch (showLyricsTranslation, lyricsAnnotation) {
+            case (true, .romaji): return .both
+            case (true, _): return .translation
+            case (false, .romaji): return .romaji
+            case (false, _): return .none
+            }
+        }
+        set {
+            switch newValue {
+            case .translation:
+                showLyricsTranslation = true
+                lyricsAnnotation = .off
+            case .romaji:
+                showLyricsTranslation = false
+                lyricsAnnotation = .romaji
+            case .both:
+                showLyricsTranslation = true
+                lyricsAnnotation = .romaji
+            case .none:
+                showLyricsTranslation = false
+                lyricsAnnotation = .off
+            }
+        }
+    }
+
+    /// Reset every Folia luminous / nomand / lyric-style setting to its
+    /// Folia default (the style window's "默认" button). The master switch
+    /// and the pre-existing Folia settings are untouched.
+    func resetLyricStyleSettings() {
+        classicWordRotation = Self.defaultClassicWordRotation
+        classicBreathingFloat = Self.defaultClassicBreathingFloat
+        classicWordSpacing = Self.defaultClassicWordSpacing
+        classicAvoidOverlap = Self.defaultClassicAvoidOverlap
+        visualizerBackgroundMode = Self.defaultVisualizerBackgroundMode
+        nomandEffect = Self.defaultNomandEffect
+        nomandHalftoneSize = Self.defaultNomandHalftoneSize
+        nomandHalftoneRadius = Self.defaultNomandHalftoneRadius
+        nomandHalftoneContrast = Self.defaultNomandHalftoneContrast
+        nomandOriginalColors = Self.defaultNomandOriginalColors
+        nomandOverlayOpacity = Self.defaultNomandOverlayOpacity
+        lyricsFontStyle = Self.defaultLyricsFontStyle
+        lyricsFontScale = Self.defaultLyricsFontScale
+        lyricsFontWeight = nil
+        lyricsCustomFont = nil
+        visualizerOpacity = Self.defaultVisualizerOpacity
+        subtitleFontScale = Self.defaultSubtitleFontScale
+        subtitleOverlayOpacity = Self.defaultSubtitleOverlayOpacity
+        subtitleUpcomingLyricsBlur = Self.defaultSubtitleUpcomingLyricsBlur
+        hideTranslationSubtitle = Self.defaultHideTranslationSubtitle
+        subtitleFontFollowsLyrics = Self.defaultSubtitleFontFollowsLyrics
+        subtitleHarmonyEnabled = Self.defaultSubtitleHarmonyEnabled
+        subtitleContentMode = .translation
     }
 
     private init() {
@@ -1000,5 +1476,84 @@ final class SettingsManager: ObservableObject {
         replayGainMode = defaults.string(forKey: Keys.replayGainMode)
             .flatMap(ReplayGainMode.init) ?? .auto
         #endif
+        // Folia luminous (流光) classic tuning.
+        classicWordRotation = defaults.object(forKey: Keys.classicWordRotation) as? Bool
+            ?? Self.defaultClassicWordRotation
+        classicBreathingFloat = Self.clamped(
+            defaults.object(forKey: Keys.classicBreathingFloat) as? Double
+                ?? Self.defaultClassicBreathingFloat,
+            to: Self.classicBreathingFloatRange
+        )
+        classicWordSpacing = Self.clamped(
+            defaults.object(forKey: Keys.classicWordSpacing) as? Double
+                ?? Self.defaultClassicWordSpacing,
+            to: Self.classicWordSpacingRange
+        )
+        classicAvoidOverlap = defaults.object(forKey: Keys.classicAvoidOverlap) as? Bool
+            ?? Self.defaultClassicAvoidOverlap
+        // Folia nomand (漫游) halftone background.
+        visualizerBackgroundMode = defaults.string(forKey: Keys.visualizerBackgroundMode)
+            .flatMap(VisualizerBackgroundMode.init) ?? Self.defaultVisualizerBackgroundMode
+        nomandEffect = defaults.string(forKey: Keys.nomandEffect)
+            .flatMap(NomandEffect.init) ?? Self.defaultNomandEffect
+        nomandHalftoneSize = Self.clamped(
+            defaults.object(forKey: Keys.nomandHalftoneSize) as? Double
+                ?? Self.defaultNomandHalftoneSize,
+            to: Self.nomandHalftoneSizeRange
+        )
+        nomandHalftoneRadius = Self.clamped(
+            defaults.object(forKey: Keys.nomandHalftoneRadius) as? Double
+                ?? Self.defaultNomandHalftoneRadius,
+            to: Self.nomandHalftoneRadiusRange
+        )
+        nomandHalftoneContrast = Self.clamped(
+            defaults.object(forKey: Keys.nomandHalftoneContrast) as? Double
+                ?? Self.defaultNomandHalftoneContrast,
+            to: Self.nomandHalftoneContrastRange
+        )
+        nomandOriginalColors = defaults.object(forKey: Keys.nomandOriginalColors) as? Bool
+            ?? Self.defaultNomandOriginalColors
+        nomandOverlayOpacity = Self.clamped(
+            defaults.object(forKey: Keys.nomandOverlayOpacity) as? Double
+                ?? Self.defaultNomandOverlayOpacity,
+            to: Self.nomandOverlayOpacityRange
+        )
+        // Folia lyric-style window (VisPlayground).
+        lyricsFontStyle = defaults.string(forKey: Keys.lyricsFontStyle)
+            .flatMap(LyricsFontStyle.init) ?? Self.defaultLyricsFontStyle
+        lyricsFontScale = Self.clamped(
+            defaults.object(forKey: Keys.lyricsFontScale) as? Double
+                ?? Self.defaultLyricsFontScale,
+            to: Self.lyricsFontScaleRange
+        )
+        if let storedWeight = defaults.object(forKey: Keys.lyricsFontWeight) as? Double {
+            lyricsFontWeight = Self.clamped(storedWeight, to: Self.lyricsFontWeightRange)
+        } else {
+            lyricsFontWeight = nil
+        }
+        lyricsCustomFont = defaults.string(forKey: Keys.lyricsCustomFont)
+        visualizerOpacity = Self.clamped(
+            defaults.object(forKey: Keys.visualizerOpacity) as? Double
+                ?? Self.defaultVisualizerOpacity,
+            to: Self.visualizerOpacityRange
+        )
+        subtitleFontScale = Self.clamped(
+            defaults.object(forKey: Keys.subtitleFontScale) as? Double
+                ?? Self.defaultSubtitleFontScale,
+            to: Self.subtitleFontScaleRange
+        )
+        subtitleOverlayOpacity = Self.clamped(
+            defaults.object(forKey: Keys.subtitleOverlayOpacity) as? Double
+                ?? Self.defaultSubtitleOverlayOpacity,
+            to: Self.subtitleOverlayOpacityRange
+        )
+        subtitleUpcomingLyricsBlur = defaults.object(forKey: Keys.subtitleUpcomingLyricsBlur) as? Bool
+            ?? Self.defaultSubtitleUpcomingLyricsBlur
+        hideTranslationSubtitle = defaults.object(forKey: Keys.hideTranslationSubtitle) as? Bool
+            ?? Self.defaultHideTranslationSubtitle
+        subtitleFontFollowsLyrics = defaults.object(forKey: Keys.subtitleFontFollowsLyrics) as? Bool
+            ?? Self.defaultSubtitleFontFollowsLyrics
+        subtitleHarmonyEnabled = defaults.object(forKey: Keys.subtitleHarmonyEnabled) as? Bool
+            ?? Self.defaultSubtitleHarmonyEnabled
     }
 }
