@@ -478,7 +478,7 @@ final class SettingsManager: ObservableObject {
         didSet { UserDefaults.standard.set(desktopLyricsCentered, forKey: Keys.desktopLyricsCentered) }
     }
 
-    static let mainWindowAmbientBackgroundIntensityRange = 0.5...1.5
+    nonisolated static let mainWindowAmbientBackgroundIntensityRange = 0.5...1.5
 
     #if os(macOS)
     /// Default song-cache ceiling, shared with `AudioCache` so the two cannot
