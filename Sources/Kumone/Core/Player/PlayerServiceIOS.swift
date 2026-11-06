@@ -249,7 +249,7 @@ final class PlayerService: ObservableObject {
             self.durationMS = durationMS
             self.servedQuality = servedQuality
             self.unblockSourceID = unblockSourceID
-            self.unblockSourceName = unblockName
+            self.unblockSourceName = unblockSourceName
             self.isTrial = isTrial
         }
     }
@@ -1170,7 +1170,7 @@ final class PlayerService: ObservableObject {
                 }
                 await self.installPreparedAsset(
                     AVURLAsset(url: lease.url), for: track, candidate: candidate, epoch: epoch,
-                    durationMS: Int(lease.descriptor.duration * 1000), offlineLease: lease)
+                    offlineLease: lease, durationMS: Int(lease.descriptor.duration * 1000))
                 return
             }
             guard !Task.isCancelled, self.prepareEpoch == epoch else { return }
@@ -1290,8 +1290,8 @@ final class PlayerService: ObservableObject {
         }
         await installPreparedAsset(
             asset, for: track, candidate: candidate, epoch: epoch, remoteURL: remote,
-            resourceLoader: resourceLoader, servedQuality: servedQuality,
-            unblockID: unblockID, unblockName: unblockName, durationMS: durationMS, isTrial: isTrial)
+            resourceLoader: resourceLoader, durationMS: durationMS, servedQuality: servedQuality,
+            unblockID: unblockID, unblockName: unblockName, isTrial: isTrial)
     }
 
     /// Installs a resolved asset on the standby deck, paused at volume 0, and
