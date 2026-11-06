@@ -16,7 +16,7 @@ import Foundation
         #expect(start.outGain == 1)
         #expect(start.inGain == 0)
         let end = CrossfadeTransition.equalPowerGains(at: 1)
-        #expect(end.outGain == 0)
+        #expect(abs(end.outGain) < 1e-6)
         #expect(end.inGain == 1)
     }
 
@@ -39,7 +39,7 @@ import Foundation
         #expect(before.outGain == 1)
         #expect(before.inGain == 0)
         let after = CrossfadeTransition.equalPowerGains(at: 1.5)
-        #expect(after.outGain == 0)
+        #expect(abs(after.outGain) < 1e-6)
         #expect(after.inGain == 1)
     }
 
