@@ -131,7 +131,7 @@ import Foundation
 
         // Out-of-range user value never lifts the planner's own 30 s ceiling.
         let wide = PlayerService.transitionPlannerConfig(
-            mode: .crossfade, crossfadeMaxSeconds: 20)
+            mode: .crossfade, crossfadeMaxSeconds: 40)
         #expect(wide.maxOverlap == 30)
 
         let narrow = PlayerService.transitionPlannerConfig(
