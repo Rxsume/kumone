@@ -1,7 +1,7 @@
+import Foundation
 #if os(iOS)
 import Combine
 import AVFoundation
-import Foundation
 import UIKit
 
 enum RepeatMode: String, CaseIterable {
