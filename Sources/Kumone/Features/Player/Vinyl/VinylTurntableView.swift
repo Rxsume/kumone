@@ -16,6 +16,7 @@ public struct VinylTurntableView: View {
     @State private var isDragging = false
     @State private var isTransitioningTrack = false
     @ObservedObject private var windowVisibility = MainWindowVisibility.shared
+    @EnvironmentObject private var settings: SettingsManager
 
     public init(
         artworkImage: PlatformImage?,
@@ -43,11 +44,15 @@ public struct VinylTurntableView: View {
 
         return ZStack(alignment: .top) {
             // MARK: 1. Rotating Vinyl Disc (with horizontal drag & slide transitions)
+            // C4/C5: static mode — or the micro-motion reduce-motion
+            // override — parks the record instead of spinning it.
             SpinningVinylDisc(
                 artworkImage: artworkImage,
                 discSize: discSize,
                 spinning: isPlaying && !isDragging && !isTransitioningTrack
                     && windowVisibility.isVisible
+                    && !settings.staticMode
+                    && !settings.effectiveReduceMotionMicroMotion
             )
             .offset(x: dragOffset)
             .padding(.top, armHeight * 0.36)
@@ -59,9 +64,13 @@ public struct VinylTurntableView: View {
             .zIndex(1)
 
             // MARK: 2. Tonearm (Placed at the top-center above the disc, reaching down)
+            // C4/C5: static mode — or the micro-motion reduce-motion
+            // override — parks the arm's wobble and jumps its engage swing
+            // straight to the final angle.
             VinylTonearmView(
                 isPlaying: isPlaying && !isDragging && !isTransitioningTrack,
-                height: armHeight
+                height: armHeight,
+                reduceMotion: settings.staticMode || settings.effectiveReduceMotionMicroMotion
             )
             .offset(x: discSize * 0.12, y: -armHeight * 0.08)
             .allowsHitTesting(false)
