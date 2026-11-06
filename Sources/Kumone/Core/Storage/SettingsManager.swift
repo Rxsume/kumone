@@ -74,6 +74,10 @@ public enum NowPlayingMode: String, CaseIterable, Identifiable {
     case classic
     case immersive
     case minimal
+    /// Folia Lattice (P2): cover-wall grid on top, big-lyrics card below.
+    /// iOS only in practice — macOS offers only vinyl/classic in its
+    /// picker, and the macOS compact dispatch falls through to classic.
+    case lattice
 
     public var id: String { rawValue }
 
@@ -83,6 +87,7 @@ public enum NowPlayingMode: String, CaseIterable, Identifiable {
         case .classic: return String(localized: "经典模式")
         case .immersive: return String(localized: "沉浸模式")
         case .minimal: return String(localized: "简洁模式")
+        case .lattice: return String(localized: "格子模式")
         }
     }
 }
@@ -870,6 +875,15 @@ final class SettingsManager: ObservableObject {
             #endif
         }
         return replayGainMode
+    }
+
+    /// Now-playing mode with the Folia master switch off: `.lattice` is a
+    /// Folia (P2) mode, so it falls back to the pre-folia default
+    /// (`.immersive`); vinyl/classic/immersive/minimal predate Folia and
+    /// pass through unchanged.
+    var effectiveNowPlayingMode: NowPlayingMode {
+        guard foliaEnabled || nowPlayingMode != .lattice else { return .immersive }
+        return nowPlayingMode
     }
 
     private init() {
