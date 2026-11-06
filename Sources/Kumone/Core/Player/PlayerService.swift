@@ -2488,7 +2488,7 @@ final class PlayerService: ObservableObject {
     /// The share-of-track bound is not applied here — `crossfadePlan` already
     /// takes the smaller of the ceiling and `maxOverlapShare` of the shorter
     /// track, so the cap composes with it rather than replacing it.
-    static func transitionPlannerConfig(
+    nonisolated static func transitionPlannerConfig(
         mode: TransitionMode, crossfadeMaxSeconds: Double,
         base: TransitionPlanner.Config = .standard
     ) -> TransitionPlanner.Config {
@@ -2579,7 +2579,7 @@ final class PlayerService: ObservableObject {
 
     /// The rule above as a pure function, so it can be stated once and tested
     /// without a player.
-    static func effectiveLoudnessCompensation(
+    nonisolated static func effectiveLoudnessCompensation(
         master: Bool, toggle: Bool, replayGainMode: ReplayGainMode
     ) -> Bool {
         master && toggle && replayGainMode != .off
@@ -2614,7 +2614,7 @@ final class PlayerService: ObservableObject {
 
     /// The rule above as a pure function, so it can be stated once and tested
     /// without a player. A group of one degrades to that track's own value.
-    static func albumGroupReferenceLoudness(
+    nonisolated static func albumGroupReferenceLoudness(
         outgoing: TrackAnalysis?, outgoingAlbumID: Int,
         incoming: TrackAnalysis?, incomingAlbumID: Int
     ) -> Double? {
