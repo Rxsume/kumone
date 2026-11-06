@@ -184,7 +184,7 @@ struct LatticeLyricsCard: View {
                 )
                 // Unconstrained measure: a width cap would wrap a single
                 // chunk and report the cap, breaking the x accumulation.
-                let width = resolved.measure(in: CGSize(width: .greatestFiniteMagnitude, height: .greatestFiniteMagnitude)).width
+                let width = resolved.measure(in: CGSize(width: CGFloat.greatestFiniteMagnitude, height: CGFloat.greatestFiniteMagnitude)).width
                 context.draw(resolved, at: CGPoint(x: x, y: y), anchor: .topLeading)
                 x += width
             }
@@ -208,7 +208,7 @@ struct LatticeLyricsCard: View {
         for word in words {
             let width = context.resolve(
                 Text(word.text).font(font)
-            ).measure(in: CGSize(width: .greatestFiniteMagnitude, height: .greatestFiniteMagnitude)).width
+            ).measure(in: CGSize(width: CGFloat.greatestFiniteMagnitude, height: CGFloat.greatestFiniteMagnitude)).width
             if !current.isEmpty, currentWidth + width > maxWidth {
                 rows.append(VisualRow(chunks: current, font: font, fontSize: fontSize, gapAfter: 2))
                 current = []
