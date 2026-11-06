@@ -19,16 +19,17 @@ struct ThemeParkView: View {
     @State private var savedMessageShown = false
 
     var body: some View {
-        Form {
-            Section {
-                ForEach(ThemePreset.allPresetIDs, id: \.self) { presetID in
-                    presetRow(presetID)
+        ScrollViewReader { proxy in
+            Form {
+                Section {
+                    ForEach(ThemePreset.allPresetIDs, id: \.self) { presetID in
+                        presetRow(presetID, scrollProxy: proxy)
+                    }
+                } header: {
+                    Text("配色主题预设")
+                } footer: {
+                    Text("歌曲主题自动切换开启时，切歌会跟随封面取色；优先自定义主题开启或选中「自定义」时，改用保存的自定义主题。")
                 }
-            } header: {
-                Text("配色主题预设")
-            } footer: {
-                Text("歌曲主题自动切换开启时，切歌会跟随封面取色；优先自定义主题开启或选中「自定义」时，改用保存的自定义主题。")
-            }
 
             Section("编辑自定义主题") {
                 ColorPicker("强调色", selection: $draftAccent)
@@ -61,6 +62,7 @@ struct ThemeParkView: View {
 
                 previewRow
             }
+            .id("customEditor")
 
             Section {
                 Button("保存为自定义预设") {
@@ -83,11 +85,12 @@ struct ThemeParkView: View {
         .onChange(of: settings.themePresetID) { _ in
             syncDraftFromSelection()
         }
+        }
     }
 
     // MARK: - Preset list
 
-    private func presetRow(_ presetID: String) -> some View {
+    private func presetRow(_ presetID: String, scrollProxy: ScrollViewProxy) -> some View {
         let preset = ThemePreset.preset(id: presetID)
         let isSelected = settings.themePresetID == presetID
         let savedCustom = ThemePreset.customTheme(from: settings)
@@ -95,6 +98,15 @@ struct ThemeParkView: View {
         let tintColor = presetID == "custom" ? (savedCustom?.tint.color ?? preset.tint.color) : preset.tint.color
         return Button {
             settings.themePresetID = presetID
+            // No custom theme saved yet: selecting "custom" would land on
+            // the default fallback, so take the user straight to the editor
+            // below to make one. (The hint itself is plain SwiftUI with no
+            // platform guard, so it shows on iOS as well as macOS.)
+            if presetID == "custom", savedCustom == nil {
+                withAnimation {
+                    scrollProxy.scrollTo("customEditor", anchor: .top)
+                }
+            }
         } label: {
             HStack(spacing: 12) {
                 HStack(spacing: -6) {
@@ -109,7 +121,7 @@ struct ThemeParkView: View {
                     Text(preset.displayName)
                         .foregroundStyle(.primary)
                     if presetID == "custom" && savedCustom == nil {
-                        Text("尚未保存自定义主题")
+                        Text("尚未保存自定义主题，点此去做一个")
                             .font(.caption)
                             .foregroundStyle(.secondary)
                     }
