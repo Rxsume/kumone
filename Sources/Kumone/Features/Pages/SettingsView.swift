@@ -16,6 +16,7 @@ struct SettingsView: View {
     private enum SettingsPage: Hashable {
         case storage
         case themePark
+        case lyricStyle
         #if os(macOS)
         case shortcuts
         #endif
@@ -165,10 +166,10 @@ struct SettingsView: View {
                 }
                 #else
                 Picker("播放页模式", selection: $settings.nowPlayingMode) {
-                    // `.lattice` is a Folia mode: it is not offered while
-                    // the master switch is off (the dispatch falls back to
-                    // the pre-folia default then).
-                    ForEach(NowPlayingMode.allCases.filter { settings.foliaEnabled || $0 != .lattice }) { mode in
+                    // `.lattice` and `.luminous` are Folia modes: they are
+                    // not offered while the master switch is off (the
+                    // dispatch falls back to the pre-folia default then).
+                    ForEach(NowPlayingMode.allCases.filter { settings.foliaEnabled || ($0 != .lattice && $0 != .luminous) }) { mode in
                         Text(mode.displayName).tag(mode)
                     }
                 }
@@ -251,6 +252,9 @@ struct SettingsView: View {
                         .foregroundStyle(.secondary)
                     NavigationLink(value: SettingsPage.themePark) {
                         Label("主题乐园", systemImage: "paintpalette")
+                    }
+                    NavigationLink(value: SettingsPage.lyricStyle) {
+                        Label("歌词样式", systemImage: "textformat")
                     }
                     Toggle("歌曲主题自动切换", isOn: $settings.songThemeAutoSwitch)
                     Text("切歌时播放页与主界面跟随当前歌曲封面取色，关闭后使用默认配色")
@@ -449,6 +453,8 @@ struct SettingsView: View {
                 #endif
                 case .themePark:
                     ThemeParkView()
+                case .lyricStyle:
+                    LyricStyleSettingsView()
                 }
             }
             #if os(macOS)
@@ -459,6 +465,7 @@ struct SettingsView: View {
                     switch page {
                     case .storage: Text("存储空间").font(.headline)
                     case .themePark: Text("主题乐园").font(.headline)
+                    case .lyricStyle: Text("歌词样式").font(.headline)
                     case .shortcuts: Text("快捷键").font(.headline)
                     }
                 }
