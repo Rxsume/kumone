@@ -25,12 +25,17 @@ struct NowPlayingView: View {
     @State private var isUserScrolling = false
     @State private var showLyricsOnMobile = false
     @State private var showQueueOnMobile = false
+    #if os(iOS)
+    /// Folia lyric-style window (VisPlayground) sheet, opened from the
+    /// luminous layout's panel button.
+    @State private var showLyricStyleSettings = false
+    #endif
 
     var body: some View {
         GeometryReader { geo in
             let isCompact = geo.size.width < 720
             ZStack {
-                backdrop
+                backdrop(isCompact: isCompact)
 
                 if isCompact {
                     compactLayout(size: geo.size)
@@ -322,7 +327,43 @@ struct NowPlayingView: View {
         lyricAnimationsEnabled ? animation : nil
     }
 
-    private var backdrop: some View {
+    /// The page backdrop. In luminous mode (compact, iOS) the nomand
+    /// halftone cover replaces the artwork gradient — two ambient layers
+    /// stacked would wash the page out grey — or a plain dark colour when
+    /// the background mode is none. Every other mode keeps the gradient.
+    @ViewBuilder
+    private func backdrop(isCompact: Bool) -> some View {
+        #if os(iOS)
+        if isCompact, settings.effectiveNowPlayingMode == .luminous {
+            if settings.effectiveVisualizerBackgroundMode == .nomand {
+                NomandBackgroundView(
+                    cover: artworkImage,
+                    songID: player.currentTrack?.id,
+                    tuning: NomandDitherer.Tuning(
+                        size: settings.effectiveNomandHalftoneSize,
+                        radius: settings.effectiveNomandHalftoneRadius,
+                        contrast: settings.effectiveNomandHalftoneContrast,
+                        originalColors: settings.effectiveNomandOriginalColors,
+                        accent: PlatformColor(theme.accent),
+                        background: PlatformColor(colors.secondary)
+                    ),
+                    overlayOpacity: settings.effectiveNomandOverlayOpacity,
+                    background: colors.secondary
+                )
+                .ignoresSafeArea()
+            } else {
+                colors.secondary
+                    .ignoresSafeArea()
+            }
+        } else {
+            gradientBackdrop
+        }
+        #else
+        gradientBackdrop
+        #endif
+    }
+
+    private var gradientBackdrop: some View {
         ZStack {
             LinearGradient(
                 colors: [colors.primary, colors.secondary],
@@ -644,6 +685,8 @@ struct NowPlayingView: View {
             minimalCompactLayout(size: size)
         case .lattice:
             latticeCompactLayout(size: size)
+        case .luminous:
+            luminousCompactLayout(size: size)
         }
         #else
         switch settings.nowPlayingMode {
@@ -715,7 +758,8 @@ struct NowPlayingView: View {
                 tint: theme.tint,
                 showTranslation: settings.showLyricsTranslation,
                 showRomaji: settings.lyricsAnnotation == .romaji,
-                animate: player.isPlaying && !settings.effectiveStaticMode
+                animate: player.isPlaying && !settings.effectiveStaticMode,
+                fontScale: settings.effectiveLyricsFontScale
             )
             .padding(.horizontal, 20)
             .padding(.top, 12)
@@ -726,6 +770,102 @@ struct NowPlayingView: View {
         }
         .frame(width: max(size.width - 64, 0))
         .padding(.horizontal, 32)
+    }
+
+    /// Folia classic (流光): full-screen big lyrics, one line at a time,
+    /// words glowing in turn over the nomand halftone cover background
+    /// (see `backdrop(isCompact:)`). The header mirrors the lattice
+    /// layout's — the classic chrome overlays stay hidden in this mode,
+    /// so it carries its own back button. The queue toggle swaps the
+    /// lyrics for the queue list, like the other compact layouts.
+    /// The bottom row carries the queue toggle on the left and the
+    /// lyric-style window button (Settings2) on the right.
+    private func luminousCompactLayout(size: CGSize) -> some View {
+        VStack(spacing: 0) {
+            HStack(spacing: 12) {
+                if !settings.effectiveAlwaysShowPlayerBackButton {
+                    collapseButton(diameter: 36, glyphSize: 14)
+                }
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(player.currentTrack?.name ?? String(localized: "正在播放"))
+                        .font(.system(size: 16, weight: .semibold))
+                        .foregroundColor(.white)
+                        .lineLimit(1)
+                    if let artist = player.currentTrack?.artistNames, !artist.isEmpty {
+                        Text(artist)
+                            .font(.caption)
+                            .foregroundColor(.white.opacity(0.65))
+                            .lineLimit(1)
+                    }
+                }
+                Spacer()
+            }
+            .padding(.top, 20)
+            .padding(.horizontal, 20)
+
+            Group {
+                if showQueueOnMobile {
+                    CompactQueueContent()
+                        .transition(.opacity)
+                } else {
+                    LuminousLyricsView(accent: themeAccent)
+                }
+            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .padding(.horizontal, 20)
+            .padding(.top, 8)
+
+            VStack(spacing: 17) {
+                // C6: the progress bar hides with the setting.
+                if !settings.effectiveHidePlayerProgressBar {
+                    NowPlayingScrubber()
+                        .padding(.horizontal, 16)
+                        .padding(.vertical, 10)
+                        .background(.ultraThinMaterial, in: Capsule())
+                }
+                CompactTransportControls()
+                HStack(spacing: 0) {
+                    Button {
+                        withAnimation(AppAnimation.standard) {
+                            showQueueOnMobile.toggle()
+                        }
+                    } label: {
+                        Image(systemName: "list.bullet")
+                            .font(.system(size: 17, weight: .medium))
+                            .foregroundColor(showQueueOnMobile ? themeAccent : .white.opacity(0.72))
+                            .frame(width: 44, height: 44)
+                            .background(.white.opacity(0.08), in: Circle())
+                    }
+                    .buttonStyle(.pressable)
+                    .accessibilityLabel(showQueueOnMobile ? "关闭播放队列" : "显示播放队列")
+                    .accessibilityAddTraits(showQueueOnMobile ? .isSelected : [])
+
+                    Spacer()
+
+                    Button {
+                        showLyricStyleSettings = true
+                    } label: {
+                        Image(systemName: "slider.horizontal.3")
+                            .font(.system(size: 17, weight: .medium))
+                            .foregroundColor(.white.opacity(0.72))
+                            .frame(width: 44, height: 44)
+                            .background(.white.opacity(0.08), in: Circle())
+                    }
+                    .buttonStyle(.pressable)
+                    .accessibilityLabel("歌词样式")
+                }
+            }
+            .padding(.top, 14)
+            .padding(.bottom, 10)
+            .padding(.horizontal, 20)
+        }
+        .frame(width: max(size.width - 64, 0))
+        .padding(.horizontal, 32)
+        .sheet(isPresented: $showLyricStyleSettings) {
+            NavigationStack {
+                LyricStyleSettingsView(showsDoneButton: true)
+            }
+        }
     }
     #endif
 

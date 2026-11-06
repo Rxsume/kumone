@@ -56,6 +56,9 @@ struct LatticeLyricsCard: View {
     /// The wipe advances only while this is true (playing and not in
     /// static mode); otherwise the card draws once at the frozen time.
     let animate: Bool
+    /// Lyric font-size scale (Folia's `lyricsFontScale`): the card's sizes
+    /// follow it, so the Lattice card and the luminous mode agree.
+    var fontScale: CGFloat = 1
 
     @EnvironmentObject private var player: PlayerService
 
@@ -71,9 +74,9 @@ struct LatticeLyricsCard: View {
         var height: CGFloat { fontSize * 1.35 }
     }
 
-    private let activeFontSize: CGFloat = 34
-    private let surroundingFontSize: CGFloat = 20
-    private let secondaryFontSize: CGFloat = 15
+    private var activeFontSize: CGFloat { 34 * fontScale }
+    private var surroundingFontSize: CGFloat { 20 * fontScale }
+    private var secondaryFontSize: CGFloat { 15 * fontScale }
 
     var body: some View {
         ZStack {
