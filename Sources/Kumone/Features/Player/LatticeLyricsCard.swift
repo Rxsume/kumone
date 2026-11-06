@@ -113,7 +113,7 @@ struct LatticeLyricsCard: View {
             let resolved = context.resolve(
                 Text(placeholder)
                     .font(.system(size: 17, weight: .medium))
-                    .foregroundStyle(.white.opacity(0.55))
+                    .foregroundColor(.white.opacity(0.55))
             )
             context.draw(resolved, at: CGPoint(x: 0, y: (size.height - resolved.measure(in: size).height) / 2), anchor: .topLeading)
             return
@@ -180,7 +180,7 @@ struct LatticeLyricsCard: View {
                 let resolved = context.resolve(
                     Text(chunk.text)
                         .font(row.font)
-                        .foregroundStyle(.white.opacity(chunk.alpha))
+                        .foregroundColor(.white.opacity(chunk.alpha))
                 )
                 // Unconstrained measure: a width cap would wrap a single
                 // chunk and report the cap, breaking the x accumulation.
