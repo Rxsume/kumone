@@ -244,7 +244,11 @@ struct LyricStylePreviewCard: View {
     @State private var frozenTime: TimeInterval?
 
     private var sample: LyricStylePreviewSample {
-        LyricStylePreviewSamples.all.first { $0.id == sampleID } ?? .default
+        // `first(where:)` — `first` is a property, not a method, so a
+        // trailing closure cannot call it. The fallback must be spelled
+        // out: `.default` lives on `LyricStylePreviewSamples`, not on
+        // the sample struct itself.
+        LyricStylePreviewSamples.all.first(where: { $0.id == sampleID }) ?? LyricStylePreviewSamples.default
     }
 
     /// The preview clock at `date`: the loop position, or the frozen
@@ -455,7 +459,9 @@ struct LyricStyleSettingsView: View {
             .disabled(!settings.foliaEnabled)
         }
         .navigationTitle("歌词样式")
+        #if os(iOS)
         .navigationBarTitleDisplayMode(.inline)
+        #endif
         .toolbar {
             if showsDoneButton {
                 ToolbarItem(placement: .confirmationAction) {
@@ -480,7 +486,7 @@ struct LyricStyleSettingsView: View {
 
     private var generalSection: some View {
         Group {
-            Section("预览文本") {
+            Section(header: { Text("预览文本") }) {
                 Picker("预览文本", selection: $sampleID) {
                     ForEach(LyricStylePreviewSamples.all, id: \.id) { sample in
                         Text(sample.title).tag(sample.id)
@@ -581,7 +587,7 @@ struct LyricStyleSettingsView: View {
 
     private var backgroundSection: some View {
         Group {
-            Section("背景模式") {
+            Section(header: { Text("背景模式") }) {
                 Picker("背景模式", selection: $settings.visualizerBackgroundMode) {
                     ForEach(VisualizerBackgroundMode.allCases) { mode in
                         Text(mode.displayName).tag(mode)
@@ -636,7 +642,7 @@ struct LyricStyleSettingsView: View {
 
     private var animationSection: some View {
         Group {
-            Section("样式") {
+            Section(header: { Text("样式") }) {
                 Picker("样式", selection: .constant(LyricStyleOption.luminous)) {
                     Text(LyricStyleOption.luminous.displayName).tag(LyricStyleOption.luminous)
                 }
@@ -671,7 +677,7 @@ struct LyricStyleSettingsView: View {
 
     private var subtitleSection: some View {
         Group {
-            Section("内容") {
+            Section(header: { Text("内容") }) {
                 Picker("内容模式", selection: Binding(
                     get: { settings.subtitleContentMode },
                     set: { settings.subtitleContentMode = $0 }
