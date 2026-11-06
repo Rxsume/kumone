@@ -250,10 +250,10 @@ import AVFoundation
     }
 
     @Test func affinityTermsReadThePair() {
-        let a = makeAnalysis(bpm: 120, keyPitchClass: 0, keyConfidence: 0.9,
-                             melProfile: [1, 0, 0, 0])
-        let twin = makeAnalysis(bpm: 120, keyPitchClass: 0, keyConfidence: 0.9,
-                                melProfile: [1, 0, 0, 0])
+        let a = makeAnalysis(bpm: 120, melProfile: [1, 0, 0, 0],
+                             keyPitchClass: 0, keyConfidence: 0.9)
+        let twin = makeAnalysis(bpm: 120, melProfile: [1, 0, 0, 0],
+                                keyPitchClass: 0, keyConfidence: 0.9)
         #expect(QueueOrderScorer.tempoAffinity(a, twin) == 1)
         // Same key at 0.9 confidence: 0.5 + (1 − 0.5) × 0.9.
         #expect(abs(QueueOrderScorer.keyAffinity(a, twin) - 0.95) < 1e-9)
