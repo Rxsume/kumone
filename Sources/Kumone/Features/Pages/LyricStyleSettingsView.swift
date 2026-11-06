@@ -380,7 +380,9 @@ struct LyricFontPicker: UIViewControllerRepresentable {
 
         func fontPickerViewControllerDidPickFont(_ viewController: UIFontPickerViewController) {
             if let descriptor = viewController.selectedFontDescriptor {
-                onPick(descriptor.postScriptName)
+                // `UIFontDescriptor` has no PostScript-name property; go
+                // through `UIFont`, whose `fontName` is the PostScript name.
+                onPick(UIFont(descriptor: descriptor, size: 0).fontName)
             }
         }
 
