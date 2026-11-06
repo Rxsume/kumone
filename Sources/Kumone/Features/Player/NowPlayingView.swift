@@ -338,7 +338,7 @@ struct NowPlayingView: View {
             if settings.effectiveVisualizerBackgroundMode == .nomand {
                 NomandBackgroundView(
                     cover: artworkImage,
-                    songID: player.currentTrack?.id,
+                    songID: player.currentTrack.map { String($0.id) },
                     tuning: NomandDitherer.Tuning(
                         size: settings.effectiveNomandHalftoneSize,
                         radius: settings.effectiveNomandHalftoneRadius,
