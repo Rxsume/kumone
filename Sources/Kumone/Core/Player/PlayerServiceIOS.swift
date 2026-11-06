@@ -303,7 +303,7 @@ final class PlayerService: ObservableObject {
     /// value, i.e. `.auto` behaviour. House level is `Config.standard`
     /// (−14 LUFS), the same target the macOS player ships with.
     private func loudnessTrimDB(for analysis: TrackAnalysis?) -> Double {
-        let mode = SettingsManager.shared.replayGainMode
+        let mode = SettingsManager.shared.effectiveReplayGainMode
         guard mode != .off else { return 0 }
         let reference = mode == .album
             ? LoudnessCompensation.meanReferenceLoudness([analysis])
@@ -327,7 +327,7 @@ final class PlayerService: ObservableObject {
     /// could use it (anything but `.off`) and no analysis is in hand yet.
     /// Only ever runs on a full local file — never on a stream.
     private func analyzeForLoudnessIfNeeded(fileURL: URL, for track: Track) {
-        guard SettingsManager.shared.replayGainMode != .off,
+        guard SettingsManager.shared.effectiveReplayGainMode != .off,
               analysisByTrackID[track.id] == nil else { return }
         analysisTask?.cancel()
         let trackID = track.id
@@ -588,21 +588,21 @@ final class PlayerService: ObservableObject {
     }
 
     /// The single entry point for a generic "add to queue" action: routes to
-    /// play-next or append-to-end per `settings.queueAddBehavior` (default
+    /// play-next or append-to-end per `settings.effectiveQueueAddBehavior` (default
     /// `.next`, identical to the historical behaviour).
     func addTrack(_ track: Track, playNow: Bool = false) {
-        switch SettingsManager.shared.queueAddBehavior {
+        switch SettingsManager.shared.effectiveQueueAddBehavior {
         case .append: addToQueueEnd(track, playNow: playNow)
         case .next: addToPlayNext(track, playNow: playNow)
         }
     }
 
     /// B8: opens the now-playing page for a user-initiated play, per
-    /// `settings.playbackEntryView`. Automatic advances (next/previous, FM,
+    /// `settings.effectivePlaybackEntryView`. Automatic advances (next/previous, FM,
     /// restore, resume) go through `startPlaying`, never here, so they can
     /// never drag the user into the now-playing page.
     private func applyPlaybackEntryView() {
-        if PlaybackEntry.shouldOpenNowPlaying(for: SettingsManager.shared.playbackEntryView) {
+        if PlaybackEntry.shouldOpenNowPlaying(for: SettingsManager.shared.effectivePlaybackEntryView) {
             showNowPlaying = true
         }
     }
@@ -617,7 +617,7 @@ final class PlayerService: ObservableObject {
             // item is not loaded yet, so the ramp would run against silence.
             startPlaying(track, resumeAt: progress)
             return
-        } else if SettingsManager.shared.playbackFadeEnabled, volume > 0 {
+        } else if SettingsManager.shared.effectivePlaybackFadeEnabled, volume > 0 {
             // C1: fade in from silence instead of cutting the volume in.
             cancelFade()
             engine.volume = 0
@@ -638,7 +638,7 @@ final class PlayerService: ObservableObject {
         cancelFade()
         // Fade out only when there is something loaded and audible;
         // otherwise pause at once, exactly as before.
-        guard SettingsManager.shared.playbackFadeEnabled, engine.currentItem != nil, volume > 0 else {
+        guard SettingsManager.shared.effectivePlaybackFadeEnabled, engine.currentItem != nil, volume > 0 else {
             pauseImmediately()
             return
         }
@@ -703,7 +703,7 @@ final class PlayerService: ObservableObject {
     /// C3 (Folia P13): hold the screen awake only while actually playing.
     private func updateIdleTimerDisabled() {
         UIApplication.shared.isIdleTimerDisabled =
-            SettingsManager.shared.preventDisplaySleepDuringPlayback && isPlaying
+            SettingsManager.shared.effectivePreventDisplaySleepDuringPlayback && isPlaying
     }
 
     func next() {
@@ -1138,7 +1138,7 @@ final class PlayerService: ObservableObject {
         if let prepared = preparedNext, !stillHolds(prepared.candidate) {
             discardPrepared()
         }
-        guard SettingsManager.shared.iosCrossfadeEnabled, isPlaying, !transitionInProgress,
+        guard SettingsManager.shared.effectiveIosCrossfadeEnabled, isPlaying, !transitionInProgress,
               transitionTask == nil, preparedNext == nil, prepareTask == nil,
               !usesOfflineQueue, repeatMode != .one,
               let candidate = nextCandidates().first,
@@ -1372,15 +1372,15 @@ final class PlayerService: ObservableObject {
     /// without the fallback Automix would be gapless for almost every
     /// streamed pair.
     private func planTransition(outgoing: Track, incoming: Track) -> ActiveTransition? {
-        let mode = SettingsManager.shared.transitionMode
+        let mode = SettingsManager.shared.effectiveTransitionMode
         let config = CrossfadeTransition.plannerConfig(
-            mode: mode, crossfadeMaxSeconds: SettingsManager.shared.crossfadeMaxSeconds)
+            mode: mode, crossfadeMaxSeconds: SettingsManager.shared.effectiveCrossfadeMaxSeconds)
         let outgoingDuration = duration
         guard outgoingDuration > 0, incoming.duration > 0 else { return nil }
         if mode == .crossfade {
             guard let timed = CrossfadeTransition.timedCrossfade(
                 outgoingDuration: outgoingDuration, incomingDuration: incoming.duration,
-                maxSeconds: SettingsManager.shared.crossfadeMaxSeconds) else { return nil }
+                maxSeconds: SettingsManager.shared.effectiveCrossfadeMaxSeconds) else { return nil }
             return ActiveTransition(duration: timed.duration, outPoint: timed.outPoint, inPoint: 0,
                                     outgoingRate: 1, incomingRate: 1, rateReleaseSeconds: 0,
                                     isBeatMatched: false)
@@ -1390,7 +1390,7 @@ final class PlayerService: ObservableObject {
         if outgoingAnalysis == nil || incomingAnalysis == nil {
             guard let timed = CrossfadeTransition.timedCrossfade(
                 outgoingDuration: outgoingDuration, incomingDuration: incoming.duration,
-                maxSeconds: SettingsManager.shared.crossfadeMaxSeconds) else { return nil }
+                maxSeconds: SettingsManager.shared.effectiveCrossfadeMaxSeconds) else { return nil }
             return ActiveTransition(duration: timed.duration, outPoint: timed.outPoint, inPoint: 0,
                                     outgoingRate: 1, incomingRate: 1, rateReleaseSeconds: 0,
                                     isBeatMatched: false)
@@ -1419,7 +1419,7 @@ final class PlayerService: ObservableObject {
         if let prepared = preparedNext, !stillHolds(prepared.candidate) {
             discardPrepared()
         }
-        guard SettingsManager.shared.iosCrossfadeEnabled, isPlaying, !transitionInProgress,
+        guard SettingsManager.shared.effectiveIosCrossfadeEnabled, isPlaying, !transitionInProgress,
               transitionTask == nil, sleepTimer.state != .endOfCurrentTrack,
               let prepared = preparedNext, prepared.isReady,
               let outgoingTrack = currentTrack,
@@ -1619,7 +1619,7 @@ final class PlayerService: ObservableObject {
         // immediately instead of re-resolving it. The active deck must still
         // be playing the current track — after a natural end the deck has
         // stopped, so that case falls through to the hard cut below.
-        if SettingsManager.shared.iosCrossfadeEnabled, isPlaying, !transitionInProgress,
+        if SettingsManager.shared.effectiveIosCrossfadeEnabled, isPlaying, !transitionInProgress,
            let prepared = preparedNext, prepared.track.id == track.id, prepared.isReady,
            sleepTimer.state != .endOfCurrentTrack, repeatMode != .one,
            engine.timeControlStatus == .playing,
@@ -1871,7 +1871,7 @@ final class PlayerService: ObservableObject {
         // there is no network reason in `TrackPlayability`, so `.playable`
         // is the only signal that separates the two.
         guard UnplayableSkip.shouldAutoSkip(playability: playability,
-                                            autoSkipEnabled: SettingsManager.shared.autoSkipUnplayable),
+                                            autoSkipEnabled: SettingsManager.shared.effectiveAutoSkipUnplayable),
               consecutiveFailures < 5 else {
             isPlaying = false
             NowPlayingManager.shared.updateElapsed(progress, rate: 0)
