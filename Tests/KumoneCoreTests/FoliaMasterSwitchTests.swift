@@ -17,6 +17,10 @@ struct FoliaMasterSwitchTests {
     // MARK: - Snapshot / restore
 
     /// Every folia stored value plus the master switch, as found on entry.
+    /// `@MainActor` because `take()` / `restore()` touch
+    /// `SettingsManager.shared`, which is MainActor-isolated (a nested type
+    /// does not inherit the outer suite's isolation).
+    @MainActor
     private struct Snapshot {
         var foliaEnabled: Bool
         var lyricAnimationStyle: LyricAnimationStyle
@@ -46,13 +50,16 @@ struct FoliaMasterSwitchTests {
         var crossfadeMaxSeconds: Double
         var replayGainMode: ReplayGainMode
         #if os(iOS)
-        var preventDisplaySleepDuringPlayback: Bool
-        var iosCrossfadeEnabled: Bool
+        // Defaults so `take()` can build the snapshot without the iOS-only
+        // fields in the argument list (`#if` cannot split a call's
+        // arguments) and assign them right after instead.
+        var preventDisplaySleepDuringPlayback: Bool = false
+        var iosCrossfadeEnabled: Bool = false
         #endif
 
         static func take() -> Snapshot {
             let s = SettingsManager.shared
-            return Snapshot(
+            var snap = Snapshot(
                 foliaEnabled: s.foliaEnabled,
                 lyricAnimationStyle: s.lyricAnimationStyle,
                 themePresetID: s.themePresetID,
@@ -80,11 +87,12 @@ struct FoliaMasterSwitchTests {
                 transitionMode: s.transitionMode,
                 crossfadeMaxSeconds: s.crossfadeMaxSeconds,
                 replayGainMode: s.replayGainMode
-                #if os(iOS)
-                , preventDisplaySleepDuringPlayback: s.preventDisplaySleepDuringPlayback,
-                iosCrossfadeEnabled: s.iosCrossfadeEnabled
-                #endif
             )
+            #if os(iOS)
+            snap.preventDisplaySleepDuringPlayback = s.preventDisplaySleepDuringPlayback
+            snap.iosCrossfadeEnabled = s.iosCrossfadeEnabled
+            #endif
+            return snap
         }
 
         func restore() {
