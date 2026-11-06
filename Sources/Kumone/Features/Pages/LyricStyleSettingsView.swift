@@ -486,13 +486,15 @@ struct LyricStyleSettingsView: View {
 
     private var generalSection: some View {
         Group {
-            Section(header: { Text("预览文本") }) {
+            Section {
                 Picker("预览文本", selection: $sampleID) {
                     ForEach(LyricStylePreviewSamples.all, id: \.id) { sample in
                         Text(sample.title).tag(sample.id)
                     }
                 }
                 .pickerStyle(.segmented)
+            } header: {
+                Text("预览文本")
             }
 
             Section("字体") {
@@ -587,12 +589,14 @@ struct LyricStyleSettingsView: View {
 
     private var backgroundSection: some View {
         Group {
-            Section(header: { Text("背景模式") }) {
+            Section {
                 Picker("背景模式", selection: $settings.visualizerBackgroundMode) {
                     ForEach(VisualizerBackgroundMode.allCases) { mode in
                         Text(mode.displayName).tag(mode)
                     }
                 }
+            } header: {
+                Text("背景模式")
             }
 
             if settings.visualizerBackgroundMode == .nomand {
@@ -642,10 +646,12 @@ struct LyricStyleSettingsView: View {
 
     private var animationSection: some View {
         Group {
-            Section(header: { Text("样式") }) {
+            Section {
                 Picker("样式", selection: .constant(LyricStyleOption.luminous)) {
                     Text(LyricStyleOption.luminous.displayName).tag(LyricStyleOption.luminous)
                 }
+            } header: {
+                Text("样式")
             } footer: {
                 Text("目前只有流光一种样式。")
             }
@@ -677,7 +683,7 @@ struct LyricStyleSettingsView: View {
 
     private var subtitleSection: some View {
         Group {
-            Section(header: { Text("内容") }) {
+            Section {
                 Picker("内容模式", selection: Binding(
                     get: { settings.subtitleContentMode },
                     set: { settings.subtitleContentMode = $0 }
@@ -688,6 +694,8 @@ struct LyricStyleSettingsView: View {
                 }
                 Toggle("隐藏译文字幕", isOn: $settings.hideTranslationSubtitle)
                 Toggle("和声字幕", isOn: $settings.subtitleHarmonyEnabled)
+            } header: {
+                Text("内容")
             } footer: {
                 Text("内容模式与歌词页的“显示译文 / 罗马音”开关是同一组设置，改一边另一边跟着变。和声字幕只在样式预览里有效——真实歌词没有和声数据。")
             }
