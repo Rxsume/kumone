@@ -228,13 +228,14 @@ import AVFoundation
         #expect(matched.tier == .beatMatched)
         #expect(faded.tier == .crossfade)
         #expect(matched.total > faded.total)
-        // Same pair, same plan: 40 lost rounds add exactly 40 × 0.35.
+        // Same pair, same plan: 60 lost rounds add exactly 60 × 0.35.
         let fresh = QueueOrderScorer.score(
             outgoing: a, incoming: b, planned: planned(.crossfade))
         let aged = QueueOrderScorer.score(
-            outgoing: a, incoming: b, planned: planned(.crossfade), lostRounds: 40)
-        #expect(abs((aged.total - fresh.total) - 14) < 1e-9)
-        // …enough to outrank a whole tier, which is the no-starvation rule.
+            outgoing: a, incoming: b, planned: planned(.crossfade), lostRounds: 60)
+        #expect(abs((aged.total - fresh.total) - 21) < 1e-9)
+        // …enough to outrank a whole tier — here the two-tier gap (20) from
+        // crossfade up to beatMatched — which is the no-starvation rule.
         #expect(aged.total > matched.total)
     }
 
@@ -289,26 +290,51 @@ import AVFoundation
     }
 
     @Test func analyzerDecodesAFile() throws {
-        // The path iOS uses: a local audio file → AVAudioFile decode →
-        // the same sample analysis. Writes a 5 s mono WAV, then analyzes it.
+        // The path iOS uses: a local audio file - AVAudioFile decode - the
+        // same sample analysis. The fixture is a 5 s mono 16-bit WAV written
+        // out by hand (header + PCM), so the test exercises the decode path
+        // only - no AVAudioFile writer is involved.
         let sr = TrackAnalyzer.analysisSampleRate
-        let samples = sine(440, dBFS: -14, seconds: 5, sampleRate: sr)
         let url = FileManager.default.temporaryDirectory
             .appendingPathComponent("folia-ios-analyzer-test-\(UUID().uuidString).wav")
         defer { try? FileManager.default.removeItem(at: url) }
-        let format = AVAudioFormat(standardFormatWithSampleRate: sr, channels: 1)!
-        let file = try AVAudioFile(forWriting: url, settings: format.settings)
-        let buffer = AVAudioPCMBuffer(pcmFormat: format,
-                                      frameCapacity: AVAudioFrameCount(samples.count))!
-        buffer.frameLength = buffer.frameCapacity
-        samples.withUnsafeBufferPointer { src in
-            buffer.floatChannelData![0].update(from: src.baseAddress!,
-                                               count: samples.count)
-        }
-        try file.write(from: buffer)
+        try writeSineWAV(url: url, hz: 440, dBFS: -14, seconds: 5, sampleRate: sr)
         let analysis = try TrackAnalyzer.analyze(fileAt: url)
         #expect(abs(analysis.duration - 5) < 0.5)
         let loudness = try #require(analysis.referenceLoudness)
         #expect(abs(loudness - (-14)) < 1.5)
+    }
+
+    /// Minimal 16-bit mono WAV writer: RIFF header + PCM samples.
+    private func writeSineWAV(url: URL, hz: Double, dBFS: Double, seconds: Double,
+                              sampleRate sr: Double) throws {
+        let samples = sine(hz, dBFS: dBFS, seconds: seconds, sampleRate: sr)
+        var data = Data()
+        data.reserveCapacity(44 + samples.count * 2)
+        func append(_ string: String) { data.append(contentsOf: string.utf8) }
+        func appendLE(_ value: UInt32) {
+            data.append(contentsOf: withUnsafeBytes(of: value.littleEndian) { Array($0) })
+        }
+        func appendLE(_ value: UInt16) {
+            data.append(contentsOf: withUnsafeBytes(of: value.littleEndian) { Array($0) })
+        }
+        append("RIFF")
+        appendLE(UInt32(36 + samples.count * 2))
+        append("WAVE")
+        append("fmt ")
+        appendLE(UInt32(16))
+        appendLE(UInt16(1)) // PCM
+        appendLE(UInt16(1)) // mono
+        appendLE(UInt32(sr))
+        appendLE(UInt32(sr * 2)) // byte rate
+        appendLE(UInt16(2)) // block align
+        appendLE(UInt16(16)) // bits per sample
+        append("data")
+        appendLE(UInt32(samples.count * 2))
+        for sample in samples {
+            let clamped = max(-1, min(1, Double(sample)))
+            appendLE(UInt16(bitPattern: Int16(clamped * 32767)))
+        }
+        try data.write(to: url)
     }
 }
