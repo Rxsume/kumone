@@ -1191,7 +1191,7 @@ final class PlayerService: ObservableObject {
                 await self.installPreparedAsset(
                     AVURLAsset(url: cached.fileURL), for: track, candidate: candidate, epoch: epoch,
                     cacheLease: lease, servedQuality: cached.metadata.servedQuality,
-                    unblockSourceName: unblockName)
+                    unblockName: unblockName)
                 return
             }
             guard !Task.isCancelled, self.prepareEpoch == epoch else { return }
