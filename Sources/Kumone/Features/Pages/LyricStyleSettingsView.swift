@@ -60,11 +60,16 @@ struct LyricStylePreviewSample: Hashable {
 
     /// The active line at `time`, scanning from the end like Folia's
     /// `findPreviewPlaceholderLineIndex`: a line counts while the clock
-    /// is inside its window (start...end).
+    /// is inside its window (start...end). The window is widened by a
+    /// hair (1e-9s) so a loop time that lands a floating-point epsilon
+    /// below a line's start — e.g. `loopTime(for: 15.1)` coming back a
+    /// hair under 0.7 instead of exactly 0.7 — still finds its line
+    /// instead of returning nil for a frame.
     func activeLineIndex(at time: TimeInterval) -> Int? {
+        let epsilon: TimeInterval = 1e-9
         for index in lines.indices.reversed() {
             let line = lines[index].line
-            if time >= line.time, time <= line.end { return index }
+            if time >= line.time - epsilon, time <= line.end + epsilon { return index }
         }
         return nil
     }
