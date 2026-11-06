@@ -6,14 +6,12 @@ import SwiftUI
 /// (`transitionHighlighted`); this view only draws the ring.
 ///
 /// The ring shows only when `isTransitioning` is true *and*
-/// `settings.effectiveTransitionAnimationRing` is on. There is currently no live
-/// signal to drive `isTransitioning` (see `NowPlayingView.transitionInProgress`):
-/// the engine reports transitions only as `transitionMidpoint` /
-/// `transitionCompleted` events on a private `AsyncStream`, and the debug
-/// model's plan is set when the next track is *planned*, not while the
-/// overlap plays — so the view is built and mounted, but stays inert until
-/// the engine publishes a transition-in-progress state. iOS has no handover
-/// engine yet, so the ring cannot activate there in any case.
+/// `settings.effectiveTransitionAnimationRing` is on. `isTransitioning`
+/// comes from `NowPlayingView.transitionInProgress`, which reads the
+/// player's published signal: on iOS the dual-deck crossfade engine drives
+/// it (and it stays false while crossfade is switched off); on macOS the
+/// AutoMix engine does. The ring therefore only appears during an actual
+/// track transition, never on a plain tap.
 struct TransitionAnimationView: View {
     let isTransitioning: Bool
     /// Resolved theme accent, passed down from NowPlayingView (C12/C14).
