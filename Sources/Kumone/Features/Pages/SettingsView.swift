@@ -165,7 +165,10 @@ struct SettingsView: View {
                 }
                 #else
                 Picker("播放页模式", selection: $settings.nowPlayingMode) {
-                    ForEach(NowPlayingMode.allCases) { mode in
+                    // `.lattice` is a Folia mode: it is not offered while
+                    // the master switch is off (the dispatch falls back to
+                    // the pre-folia default then).
+                    ForEach(NowPlayingMode.allCases.filter { settings.foliaEnabled || $0 != .lattice }) { mode in
                         Text(mode.displayName).tag(mode)
                     }
                 }
@@ -239,6 +242,13 @@ struct SettingsView: View {
                         Text("玫瑰").tag("rose")
                         Text("自定义").tag("custom")
                     }
+                    // The theme actually in effect (see `activeThemeCaption`):
+                    // the preset picker alone cannot show it, because
+                    // song-theme auto-switch short-circuits the preset and
+                    // "custom" with no saved theme falls back to default.
+                    Text(activeThemeCaption)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
                     NavigationLink(value: SettingsPage.themePark) {
                         Label("主题乐园", systemImage: "paintpalette")
                     }
@@ -304,16 +314,29 @@ struct SettingsView: View {
 
             Section("播放页") {
                 Toggle("隐藏进度条", isOn: $settings.hidePlayerProgressBar)
-                Toggle("始终显示返回按钮", isOn: $settings.alwaysShowPlayerBackButton)
-                Toggle("始终显示切歌按钮", isOn: $settings.alwaysShowTrackSwitchButtons)
-                Toggle("浮动歌曲卡片", isOn: $settings.stageTrackCardEnabled)
-                Toggle("过渡动画-屏幕圆环", isOn: $settings.transitionAnimationRing)
-                Toggle("过渡动画-卡片描边", isOn: $settings.transitionAnimationCard)
-                #if os(iOS)
-                Text("iOS 需引擎移植后才生效")
+                Text("iOS 可用")
                     .font(.caption)
                     .foregroundStyle(.secondary)
-                #endif
+                Toggle("始终显示返回按钮", isOn: $settings.alwaysShowPlayerBackButton)
+                Text("iOS 可用")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                Toggle("始终显示切歌按钮", isOn: $settings.alwaysShowTrackSwitchButtons)
+                Text("只在 FM 模式下显示切歌按钮")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                Toggle("浮动歌曲卡片", isOn: $settings.stageTrackCardEnabled)
+                Text("iOS 可用")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                Toggle("过渡动画-屏幕圆环", isOn: $settings.transitionAnimationRing)
+                Text("需先打开「切歌淡入淡出」，只在切歌过渡时出现")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                Toggle("过渡动画-卡片描边", isOn: $settings.transitionAnimationCard)
+                Text("需先打开「切歌淡入淡出」，只在切歌过渡时出现")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
             }
             .disabled(!settings.foliaEnabled)
 
@@ -442,6 +465,24 @@ struct SettingsView: View {
             }
             #endif
         }
+    }
+
+    /// The theme actually in effect, by the same priority as
+    /// `ThemePreset.resolvedTheme` (custom > song artwork > preset),
+    /// resolved without an artwork palette — this page has none, so with
+    /// song-theme auto-switch on the caption reads 跟随封面: the palette
+    /// wins whenever a song with artwork is playing, and the preset below
+    /// it is what shows while nothing is. Reads the effective values, so
+    /// the caption stays true with the Folia master switch off too.
+    private var activeThemeCaption: String {
+        if ThemePreset.customTheme(from: settings) != nil,
+           settings.effectivePreferCustomTheme || settings.effectiveThemePresetID == "custom" {
+            return "当前：自定义"
+        }
+        if settings.effectiveSongThemeAutoSwitch {
+            return "当前：跟随封面"
+        }
+        return "当前：\(ThemePreset.preset(id: settings.effectiveThemePresetID).displayName)"
     }
 
     /// Sparkle on macOS; on iOS only sideload builds carry an updater.
