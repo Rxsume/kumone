@@ -81,15 +81,25 @@ enum NomandDitherer {
             hasher.combine(radius)
             hasher.combine(contrast)
             hasher.combine(originalColors)
-            hasher.combine(rgba(accent))
-            hasher.combine(rgba(background))
+            // Tuples are not Hashable: combine the four components
+            // one by one instead of the tuple itself.
+            let accentRGBA = rgba(accent)
+            hasher.combine(accentRGBA.r)
+            hasher.combine(accentRGBA.g)
+            hasher.combine(accentRGBA.b)
+            hasher.combine(accentRGBA.a)
+            let backgroundRGBA = rgba(background)
+            hasher.combine(backgroundRGBA.r)
+            hasher.combine(backgroundRGBA.g)
+            hasher.combine(backgroundRGBA.b)
+            hasher.combine(backgroundRGBA.a)
         }
     }
 
     /// RGBA components of a platform colour, for hashing, cache keys and
     /// building solid-colour `CIImage`s.
     static func rgba(_ color: PlatformColor) -> (r: CGFloat, g: CGFloat, b: CGFloat, a: CGFloat) {
-        let ciColor = CIColor(color: color)
+        guard let ciColor = CIColor(color: color) else { return (0, 0, 0, 1) }
         return (ciColor.red, ciColor.green, ciColor.blue, ciColor.alpha)
     }
 
