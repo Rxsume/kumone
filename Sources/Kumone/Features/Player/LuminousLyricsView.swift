@@ -501,17 +501,6 @@ extension Font.Weight {
     }
 }
 
-extension LyricsFontStyle {
-    /// SwiftUI font design for the style.
-    var design: Font.Design {
-        switch self {
-        case .sans: return .default
-        case .serif: return .serif
-        case .mono: return .monospaced
-        }
-    }
-}
-
 // MARK: - Word-flow layout
 
 /// Word-flow layout for one luminous line: measures each word, then wraps
@@ -548,8 +537,11 @@ struct LuminousWordFlowLayout: Layout {
 
     private func margin(after index: Int, sizes: [CGSize]) -> CGFloat {
         let width = sizes[index].width
-        let placement = placement(at: index)
-        let scale = placement.scale * LuminousLyrics.activeScale
+        // NOTE: the local must not be named `placement` — it would shadow
+        // the `placement(at:)` method below, so the calls at the next
+        // word would resolve to the value instead of the method.
+        let currentPlacement = placement(at: index)
+        let scale = currentPlacement.scale * LuminousLyrics.activeScale
         var nextWidth: CGFloat = 0
         var nextScale: CGFloat = 1
         var nextX: CGFloat = 0
@@ -562,14 +554,14 @@ struct LuminousWordFlowLayout: Layout {
         let gap = 0.05 * fontSize
         let halfOverflow = width * (scale - 1) / 2
         let nextHalfOverflow = nextWidth * (nextScale - 1) / 2
-        let xOffsetDiff = placement.x - nextX
+        let xOffsetDiff = currentPlacement.x - nextX
         let calculated = (halfOverflow + nextHalfOverflow + xOffsetDiff + gap) * wordSpacing
         let minMargin = 0.12 * fontSize * wordSpacing
         var final = max(minMargin, calculated)
         if avoidOverlap, index + 1 < sizes.count {
             let pairGap = LuminousLyrics.pairGap(
                 width: width, nextWidth: nextWidth, fontSize: fontSize,
-                placement: placement, nextPlacement: placement(at: index + 1)
+                placement: currentPlacement, nextPlacement: placement(at: index + 1)
             )
             final = max(final, pairGap + gap)
         }

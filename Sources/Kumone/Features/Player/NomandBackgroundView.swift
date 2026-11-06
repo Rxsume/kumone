@@ -35,15 +35,23 @@ struct NomandBackgroundView: View {
         Request(songID: songID, coverID: cover.map { ObjectIdentifier($0) }, tuning: tuning)
     }
 
+    /// The rendered halftone as a SwiftUI `Image` on either platform.
+    /// A helper (rather than `#if` around the `Image` init) so the
+    /// `.resizable()` chain in `body` applies to an `Image`, not to a
+    /// bare `View` — the `#if`/`#else` branches erase the type.
+    private func halftoneImage(_ image: PlatformImage) -> Image {
+        #if os(iOS)
+        Image(uiImage: image)
+        #else
+        Image(nsImage: image)
+        #endif
+    }
+
     var body: some View {
         ZStack {
             background
             if let halftone {
-                #if os(iOS)
-                Image(uiImage: halftone)
-                #else
-                Image(nsImage: halftone)
-                #endif
+                halftoneImage(halftone)
                     .resizable()
                     .scaledToFill()
                     .transition(.opacity)
