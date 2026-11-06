@@ -139,6 +139,15 @@ final class PlayerService: ObservableObject {
     @Published private(set) var source: PlaySource = .none
     @Published private(set) var isPlaying = false
     @Published private(set) var isBuffering = false
+    /// C11: whether a hand-over is audibly under way. Set from the 0.2 s
+    /// progress tick when the outgoing deck's playhead reaches the armed
+    /// plan's out point (the engine's own overlap-start condition), or at
+    /// the `transitionMidpoint` event as a backstop for gapless /
+    /// pre-rendered hand-overs, which have no out point to cross. Cleared
+    /// by `transitionCompleted` or by `disarmTransition`. Deliberately
+    /// *not* set when a plan is merely armed: arming happens when the next
+    /// track is prefetched, potentially a whole song before the seam.
+    @Published private(set) var transitionInProgress = false
     @Published private(set) var duration: TimeInterval = 0
     @Published private(set) var servedQuality: String?
     @Published private(set) var unblockSource: String?
@@ -400,6 +409,7 @@ final class PlayerService: ObservableObject {
                 let seconds = self.engine.position(of: self.activeDeck)
                 guard seconds.isFinite else { return }
                 self.updateGaplessPrefetch(at: seconds)
+                self.updateTransitionInProgress(at: seconds)
 
                 // Lyrics need this cadence to stay in sync; the cursor itself
                 // only publishes when the line actually changes.
@@ -945,6 +955,7 @@ final class PlayerService: ObservableObject {
     /// compared against it.
     private func disarmTransition(keepingPrerender: Bool = false) {
         engine.cancelScheduledTransition()
+        transitionInProgress = false
         pendingTransitionTrack = nil
         armedPlan = nil
         AutoMixDebugModel.shared.setPlan(nil)
@@ -1288,11 +1299,16 @@ final class PlayerService: ObservableObject {
             guard deck == activeDeck else { return }
             handleStreamFailure()
         case .transitionMidpoint(_, let to, let outcome):
+            // C11 backstop for the tick's out-point latch: a gapless or
+            // pre-rendered hand-over has no out point to cross, so the
+            // midpoint is the first moment it is certainly under way.
+            transitionInProgress = true
             // Freeze the seam *before* adopting: from here on `currentTrack`
             // is the incoming song and the outgoing one is gone.
             recordDebugSeam(outcome)
             adoptTransitionedTrack(on: to)
         case .transitionCompleted:
+            transitionInProgress = false
             armedPlan = nil
             AutoMixDebugModel.shared.setPlan(nil)
             cancelStemPrerender()
@@ -1543,6 +1559,27 @@ final class PlayerService: ObservableObject {
         EngineAudioCache.shared.setFilesInUse(urls)
     }
 
+    /// C11: latch `transitionInProgress` when the hand-over starts sounding.
+    ///
+    /// The engine begins the overlap when the outgoing deck's playhead
+    /// reaches the plan's out point (`beginOverlapLocked`), but it emits no
+    /// "overlap started" event — only `transitionMidpoint` and
+    /// `transitionCompleted`. This mirrors that start condition on the
+    /// 0.2 s progress tick, so the flag lands at most one tick late. It
+    /// only ever sets, never clears: once latched, only
+    /// `transitionCompleted` or a disarm clears it, so a re-adopted
+    /// `activeDeck` (whose position restarts at the in point after the
+    /// midpoint) cannot un-latch it mid-overlap. A gapless plan has no out
+    /// point (`TransitionPlan.outPoint` is nil) and never latches here —
+    /// the midpoint backstop in `handleEngineEvent` covers that path.
+    private func updateTransitionInProgress(at seconds: TimeInterval) {
+        guard !transitionInProgress,
+              let outPoint = armedPlan?.plan.outPoint else { return }
+        if seconds >= outPoint {
+            transitionInProgress = true
+        }
+    }
+
     private func armTransitionIfReady() {
         guard !transitionArmed, let next = prefetchedNext else { return }
         if !SettingsManager.shared.automixEnabled {
@@ -1553,7 +1590,9 @@ final class PlayerService: ObservableObject {
         guard sleepTimer.state != .endOfCurrentTrack else { return }
         let incoming = activeDeck.other
         guard (try? engine.loadFile(at: next.localURL, on: incoming,
-                                    trimDB: loudnessTrimDB(for: next.analysis),
+                                    trimDB: loudnessTrimDB(
+                                        for: next.analysis,
+                                        albumReferenceLoudness: albumReferenceLoudnessForSeam(with: next)),
                                     peakDBFS: next.analysis?.peakDBFS)) != nil else {
             prefetchedNext = nil
             AutoMixDebugModel.shared.setNextStage(.failed("incoming deck would not load the file"))
@@ -1702,7 +1741,14 @@ final class PlayerService: ObservableObject {
                         + " has no analysis yet")
             }
             guard duration > 45 else { return .plain(.gapless) }
-            let fade: TimeInterval = 6
+            // No analysis means no planner, so the 6 s fallback fade is the
+            // plan — but it is still a crossfade, so in crossfade mode it
+            // obeys the same longest-fade cap as a planned one. Automix mode
+            // leaves it at 6 s: the cap is a crossfade-mode setting, not a
+            // global one.
+            let fade: TimeInterval =
+                SettingsManager.shared.transitionMode == .crossfade
+                ? min(6, SettingsManager.shared.crossfadeMaxSeconds) : 6
             return .plain(.crossfade(duration: fade,
                                      outPoint: max(duration - fade, duration * 0.6),
                                      inPoint: 0))
@@ -2241,8 +2287,12 @@ final class PlayerService: ObservableObject {
         if separatesStems, StemSeparation.provider == nil { return }
         let request = TransitionSegmentRenderer.Request(
             planned: planned, outgoingURL: outgoingURL, incomingURL: next.localURL,
-            outgoingTrimDB: loudnessTrimDB(for: currentAnalysis),
-            incomingTrimDB: loudnessTrimDB(for: next.analysis),
+            outgoingTrimDB: loudnessTrimDB(
+                for: currentAnalysis,
+                albumReferenceLoudness: albumReferenceLoudnessForSeam(with: next)),
+            incomingTrimDB: loudnessTrimDB(
+                for: next.analysis,
+                albumReferenceLoudness: albumReferenceLoudnessForSeam(with: next)),
             masterLimiterActive: AutoMixDebugModel.shared.overrides.enableMasterLimiter,
             outgoingAnalysis: currentAnalysis, incomingAnalysis: next.analysis,
             config: plannerConfig)
@@ -2419,10 +2469,36 @@ final class PlayerService: ObservableObject {
     /// the plan was made under. Off — always, on iOS and for anyone who has not
     /// opened the panel — `plannerConfig` returns exactly what it always did.
     private var plannerConfig: TransitionPlanner.Config {
-        var config = TransitionPlanner.Config.standard
+        var config = Self.transitionPlannerConfig(
+            mode: SettingsManager.shared.transitionMode,
+            crossfadeMaxSeconds: SettingsManager.shared.crossfadeMaxSeconds)
         config.loudnessCompensation = loudnessCompensationEnabled
         return AutoMixDebugOverrides.plannerConfig(
             config, overrides: AutoMixDebugModel.shared.overrides)
+    }
+
+    /// Pure mapping from the user's transition settings onto the planner
+    /// config fields B4/B5 own: the hand-over mode, and — in crossfade mode
+    /// only — the overlap ceiling.
+    ///
+    /// `.automix` leaves the config exactly as `base` (the shipped planner:
+    /// beat-match / crossfade / gapless by analysis, `maxOverlap` 30 s).
+    /// `.crossfade` forces the plain crossfade path and caps the overlap at
+    /// the user's longest fade, never above the planner's own 30 s ceiling.
+    /// The share-of-track bound is not applied here — `crossfadePlan` already
+    /// takes the smaller of the ceiling and `maxOverlapShare` of the shorter
+    /// track, so the cap composes with it rather than replacing it.
+    nonisolated static func transitionPlannerConfig(
+        mode: TransitionMode, crossfadeMaxSeconds: Double,
+        base: TransitionPlanner.Config = .standard
+    ) -> TransitionPlanner.Config {
+        var config = base
+        config.handoverMode = mode == .crossfade ? .crossfade : .automix
+        if mode == .crossfade {
+            config.maxOverlap = min(crossfadeMaxSeconds,
+                                    TransitionPlanner.Config.standard.maxOverlap)
+        }
+        return config
     }
 
     /// Flip the debug panel's overrides and re-derive the hand-over that is
@@ -2484,9 +2560,66 @@ final class PlayerService: ObservableObject {
     /// Whether cross-track gain compensation is active right now. AutoMix off
     /// means no analyses are computed at all, so there is nothing to compensate
     /// with either.
+    ///
+    /// The ReplayGain mode rides on top of the existing master + toggle:
+    /// `.off` turns compensation off exactly as the toggle would, while
+    /// `.auto` is the shipped analysis-based behaviour. `.track` and `.album`
+    /// keep compensation on — there is no ReplayGain tag reader anywhere in
+    /// the app (`TrackAnalyzer` decodes audio with `AVAudioFile` and never
+    /// reads `AVAsset` metadata), so "按单曲" falls back to the per-track
+    /// analysis trim, which already is a per-track value, and "按专辑" falls
+    /// back to the album-group mean in `albumReferenceLoudnessForSeam`.
     private var loudnessCompensationEnabled: Bool {
-        return SettingsManager.shared.automixEnabled
-            && SettingsManager.shared.loudnessCompensationEnabled
+        let settings = SettingsManager.shared
+        return Self.effectiveLoudnessCompensation(
+            master: settings.automixEnabled,
+            toggle: settings.loudnessCompensationEnabled,
+            replayGainMode: settings.replayGainMode)
+    }
+
+    /// The rule above as a pure function, so it can be stated once and tested
+    /// without a player.
+    nonisolated static func effectiveLoudnessCompensation(
+        master: Bool, toggle: Bool, replayGainMode: ReplayGainMode
+    ) -> Bool {
+        master && toggle && replayGainMode != .off
+    }
+
+    /// The album-group reference loudness for the seam in hand, or nil.
+    ///
+    /// Album mode groups by the analyses actually in hand — the outgoing
+    /// track and the incoming one — because the trim is a load-time size and
+    /// the analysis store cannot be consulted synchronously here. A track
+    /// loaded fresh, with no sibling in hand, keeps its own analysis (auto
+    /// behaviour); a seam between two tracks of one album trims both sides
+    /// against the pair's mean, so the album keeps its internal level
+    /// differences instead of each track being pulled exactly to the house
+    /// level. Non-album seams (different albums, or the empty album id a
+    /// search result carries) return nil.
+    ///
+    /// One approximation to be honest about: the outgoing deck was loaded
+    /// against *its* arrival seam (or its own analysis, if loaded fresh), so
+    /// a stem pre-render that re-trims it against this seam's pair mean can
+    /// sit a fraction of a dB off the live deck. The rendered segment stays
+    /// internally level-consistent, and the incoming side — the one this seam
+    /// is loading — matches its deck exactly, since both are computed from
+    /// the same two analyses. Same-album masters are close enough that the
+    /// outgoing difference is sub-dB in practice.
+    private func albumReferenceLoudnessForSeam(with next: PrefetchedNext) -> Double? {
+        guard SettingsManager.shared.replayGainMode == .album else { return nil }
+        return Self.albumGroupReferenceLoudness(
+            outgoing: currentAnalysis, outgoingAlbumID: currentTrack?.album.id ?? 0,
+            incoming: next.analysis, incomingAlbumID: next.track.album.id)
+    }
+
+    /// The rule above as a pure function, so it can be stated once and tested
+    /// without a player. A group of one degrades to that track's own value.
+    nonisolated static func albumGroupReferenceLoudness(
+        outgoing: TrackAnalysis?, outgoingAlbumID: Int,
+        incoming: TrackAnalysis?, incomingAlbumID: Int
+    ) -> Double? {
+        guard outgoingAlbumID != 0, outgoingAlbumID == incomingAlbumID else { return nil }
+        return LoudnessCompensation.meanReferenceLoudness([outgoing, incoming])
     }
 
     /// The playback trim to load a track at, given whatever analysis is in hand.
@@ -2496,8 +2629,14 @@ final class PlayerService: ObservableObject {
     /// deck and the plan must never be trimmed to two different targets, or the
     /// gate would judge a seam the player does not play. See
     /// `TransitionPlanner.Config.loudnessTargetLUFS`.
-    private func loudnessTrimDB(for analysis: TrackAnalysis?) -> Double {
+    ///
+    /// - Parameter albumReferenceLoudness: album-group mean from
+    ///   `albumReferenceLoudnessForSeam`, for ReplayGain album mode. Nil trims
+    ///   the track against its own analysis.
+    private func loudnessTrimDB(for analysis: TrackAnalysis?,
+                                albumReferenceLoudness: Double? = nil) -> Double {
         LoudnessCompensation.trimDB(for: analysis, enabled: loudnessCompensationEnabled,
+                                    referenceLoudness: albumReferenceLoudness,
                                     config: plannerConfig.loudnessConfig)
     }
 
@@ -2516,7 +2655,10 @@ final class PlayerService: ObservableObject {
         return Self.analysisWanted(master: settings.automixEnabled,
                                    transitions: settings.automixTransitionsEnabled,
                                    order: settings.automixOrderEnabled,
-                                   loudness: settings.loudnessCompensationEnabled)
+                                   loudness: Self.effectiveLoudnessCompensation(
+                                    master: settings.automixEnabled,
+                                    toggle: settings.loudnessCompensationEnabled,
+                                    replayGainMode: settings.replayGainMode))
     }
 
     /// The rule above as a pure function, so it can be stated once and tested

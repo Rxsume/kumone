@@ -115,58 +115,77 @@ struct PlayerBar: View {
     private var centerSection: some View {
         VStack(spacing: 3) {
             HStack(spacing: 6) {
+                // FM mode keeps its dislike button in place of the shuffle
+                // slot (it is not a slot, so it is always shown there).
                 if player.isFMMode {
                     PlayerIconButton(icon: "trash", size: 12) {
                         player.fmTrash()
                     }
                     .help("不喜欢，换一首")
-                } else {
-                    // One control for all three queue orders: the third state
-                    // is a *kind* of shuffle, so it lives inside the shuffle
-                    // button rather than beside it. The cycle skips it wherever
-                    // it could do nothing (AutoMix off, order off), which
-                    // leaves the familiar two-state button untouched there —
-                    // and iOS, which has no AutoMix at all, keeps the plain
-                    // two-state shuffle toggle. Only the three values below
-                    // differ per platform; the button itself is one button.
-                    PlayerIconButton(
-                        icon: queueOrderIcon, size: 12,
-                        isActive: queueOrderIsActive,
-                        action: cycleQueueOrder
-                    )
-                    .help(queueOrderHelp)
                 }
-
-                PlayerIconButton(icon: "backward.fill", size: 14, disabled: player.isFMMode) {
-                    player.previous()
-                }
-
-                playPauseButton
-
-                PlayerIconButton(icon: "forward.fill", size: 14) {
-                    player.next()
-                }
-
-                if player.isFMMode {
-                    Image(systemName: "wave.3.right.circle.fill")
-                        .font(.system(size: 12))
-                        .foregroundStyle(Theme.accent)
-                        .frame(width: 26, height: 26)
-                        .help("私人漫游中")
-                } else {
-                    PlayerIconButton(
-                        icon: player.repeatMode == .one ? "repeat.1" : "repeat", size: 12,
-                        isActive: player.repeatMode != .off
-                    ) {
-                        player.cycleRepeatMode()
-                    }
-                    .help("循环模式")
+                // C8: the transport buttons render in the configured slot
+                // order and subset.
+                ForEach(PlayerControlSlot.effectiveSlots(from: settings)) { slot in
+                    playerBarSlotControl(slot)
                 }
             }
             ScrubberLane()
         }
         .padding(.vertical, 5)
         .opacity(player.hasCurrentTrack ? 1 : 0.5)
+    }
+
+    /// C8: the button for one control slot in the player bar, or nothing
+    /// when the slot has no button in the current mode (shuffle in FM is
+    /// the trash button above). Actions and disabled states are the ones
+    /// the bar had before slots existed.
+    @ViewBuilder
+    private func playerBarSlotControl(_ slot: PlayerControlSlot) -> some View {
+        switch slot {
+        case .shuffle:
+            if !player.isFMMode {
+                // One control for all three queue orders: the third state
+                // is a *kind* of shuffle, so it lives inside the shuffle
+                // button rather than beside it. The cycle skips it wherever
+                // it could do nothing (AutoMix off, order off), which
+                // leaves the familiar two-state button untouched there —
+                // and iOS, which has no AutoMix at all, keeps the plain
+                // two-state shuffle toggle. Only the three values below
+                // differ per platform; the button itself is one button.
+                PlayerIconButton(
+                    icon: queueOrderIcon, size: 12,
+                    isActive: queueOrderIsActive,
+                    action: cycleQueueOrder
+                )
+                .help(queueOrderHelp)
+            }
+        case .previous:
+            PlayerIconButton(icon: "backward.fill", size: 14, disabled: player.isFMMode) {
+                player.previous()
+            }
+        case .playPause:
+            playPauseButton
+        case .next:
+            PlayerIconButton(icon: "forward.fill", size: 14) {
+                player.next()
+            }
+        case .repeatMode:
+            if player.isFMMode {
+                Image(systemName: "wave.3.right.circle.fill")
+                    .font(.system(size: 12))
+                    .foregroundStyle(Theme.accent)
+                    .frame(width: 26, height: 26)
+                    .help("私人漫游中")
+            } else {
+                PlayerIconButton(
+                    icon: player.repeatMode == .one ? "repeat.1" : "repeat", size: 12,
+                    isActive: player.repeatMode != .off
+                ) {
+                    player.cycleRepeatMode()
+                }
+                .help("循环模式")
+            }
+        }
     }
 
     private var playPauseButton: some View {

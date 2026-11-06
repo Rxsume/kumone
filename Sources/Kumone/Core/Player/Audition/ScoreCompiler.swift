@@ -1,4 +1,3 @@
-#if os(macOS)
 import Foundation
 
 // From a score to audio: bars and beats → seconds → per-sample gain lanes.
@@ -1008,6 +1007,7 @@ enum ScoreCompiler {
     static func lineEnd(nearest seam: TimeInterval, within: TimeInterval,
                         outgoingURL: URL?,
                         notBefore: TimeInterval) -> (end: TimeInterval, text: String)? {
+#if os(macOS)
         guard let outgoingURL, let lines = Audition.Lyrics.load(for: outgoingURL),
               !lines.isEmpty else { return nil }
         let ends = Audition.Lyrics.lineEnds(lines)
@@ -1019,6 +1019,11 @@ enum ScoreCompiler {
             }
         }
         return best
+#else
+        // iOS has no `.lrc` sidecar next to a streamed or cached track, so the
+        // lyric anchor can never resolve there. Returning nil degrades the echo
+        // throw to a cut, exactly as the call site handles it.
+        return nil
+#endif
     }
 }
-#endif

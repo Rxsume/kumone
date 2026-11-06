@@ -1,4 +1,3 @@
-#if os(macOS)
 import Foundation
 
 /// Cross-track loudness compensation: one constant playback gain per song, so
@@ -99,15 +98,39 @@ enum LoudnessCompensation {
         }
     }
 
+    /// The mean of the finite `referenceLoudness` values in hand, or nil
+    /// when none of the analyses carries one.
+    ///
+    /// The album-group basis for ReplayGain "按专辑" mode: tracks of one album
+    /// are trimmed against the album's mean loudness instead of each against
+    /// its own, so the album keeps its internal level differences. The caller
+    /// supplies the analyses it actually has — the seam pair in
+    /// `PlayerService` — because the trim is a load-time size and the analysis
+    /// store cannot be consulted synchronously there; a group of one degrades
+    /// to that track's own value, i.e. auto behaviour.
+    static func meanReferenceLoudness(_ analyses: [TrackAnalysis?]) -> Double? {
+        let values = analyses.compactMap { $0?.referenceLoudness }.filter { $0.isFinite }
+        guard !values.isEmpty else { return nil }
+        return values.reduce(0, +) / Double(values.count)
+    }
+
     /// The playback trim, in dB, for a track that is about to be loaded.
     ///
     /// Zero — unity gain, byte-identical to the pre-compensation player — when
     /// compensation is off, when there is no analysis yet (first listen of a
     /// streamed track), or when the analysis carries no loudness reading.
+    ///
+    /// - Parameter referenceLoudness: loudness to trim against instead of the
+    ///   track's own `referenceLoudness`. Nil (the default) trims the track
+    ///   against itself, which is the shipped behaviour; ReplayGain "按专辑"
+    ///   mode passes the album-group mean from `meanReferenceLoudness`. The
+    ///   clip guard still reads the track's own peak either way.
     static func trimDB(
-        for analysis: TrackAnalysis?, enabled: Bool = true, config: Config = .standard
+        for analysis: TrackAnalysis?, enabled: Bool = true,
+        referenceLoudness: Double? = nil, config: Config = .standard
     ) -> Double {
-        guard enabled, let loudness = analysis?.referenceLoudness, loudness.isFinite else {
+        guard enabled, let loudness = referenceLoudness ?? analysis?.referenceLoudness,
+              loudness.isFinite else {
             return 0
         }
         let wanted = config.targetLUFS - loudness
@@ -210,4 +233,3 @@ enum LoudnessCompensation {
     /// every rendered envelope so far was computed with.
     static func linearGain(_ db: Float) -> Float { db == 0 ? 1 : pow(10, db / 20) }
 }
-#endif

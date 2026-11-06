@@ -12,6 +12,31 @@ struct AutoMixSettingsSection: View {
                 .foregroundStyle(.secondary)
             if settings.automixEnabled {
                 Toggle("自动过渡", isOn: $settings.automixTransitionsEnabled)
+                Picker("过渡模式", selection: $settings.transitionMode) {
+                    ForEach(TransitionMode.allCases) { mode in
+                        Text(mode.displayName).tag(mode)
+                    }
+                }
+                if settings.transitionMode == .crossfade {
+                    HStack {
+                        Text("最长淡入淡出")
+                        Spacer()
+                        Text("\(Int(settings.crossfadeMaxSeconds)) 秒")
+                            .foregroundStyle(.secondary)
+                    }
+                    Slider(
+                        value: $settings.crossfadeMaxSeconds,
+                        in: SettingsManager.crossfadeMaxSecondsRange,
+                        step: 1
+                    )
+                    HStack {
+                        Text("2 秒")
+                        Spacer()
+                        Text("12 秒")
+                    }
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                }
                 Toggle(isOn: $settings.automixOrderEnabled) {
                     VStack(alignment: .leading, spacing: 4) {
                         Text("智能顺序")
@@ -23,6 +48,11 @@ struct AutoMixSettingsSection: View {
                 .accessibilityLabel("智能顺序")
                 .accessibilityHint("按歌曲契合度排序，会增加网络用量。")
                 Toggle("响度均衡", isOn: $settings.loudnessCompensationEnabled)
+                Picker("响度模式", selection: $settings.replayGainMode) {
+                    ForEach(ReplayGainMode.allCases) { mode in
+                        Text(mode.displayName).tag(mode)
+                    }
+                }
                 #if arch(arm64)
                 StemTransitionSettings()
                 #endif

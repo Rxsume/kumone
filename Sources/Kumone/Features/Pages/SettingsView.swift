@@ -15,6 +15,7 @@ struct SettingsView: View {
 
     private enum SettingsPage: Hashable {
         case storage
+        case themePark
         #if os(macOS)
         case shortcuts
         #endif
@@ -56,6 +57,64 @@ struct SettingsView: View {
                     .foregroundStyle(.secondary)
                 Toggle("灰色歌曲解锁", isOn: $settings.enableUnblock)
                 Text("无版权或下架歌曲将从已启用音源中匹配播放")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                Toggle("暂停/播放淡入淡出", isOn: $settings.playbackFadeEnabled)
+                Text("暂停与恢复播放时音量短暂淡入淡出，避免声音突变")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                Picker("加歌默认行为", selection: $settings.queueAddBehavior) {
+                    ForEach(QueueAddBehavior.allCases) { behavior in
+                        Text(behavior.displayName).tag(behavior)
+                    }
+                }
+                Toggle("无法播放自动跳过", isOn: $settings.autoSkipUnplayable)
+                Text("无法播放的歌曲自动跳到下一首")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                #if os(iOS)
+                Toggle("播放时防息屏", isOn: $settings.preventDisplaySleepDuringPlayback)
+                Text("播放期间屏幕不自动息屏，暂停或切到后台后恢复")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                Toggle("切歌淡入淡出", isOn: $settings.iosCrossfadeEnabled)
+                Text("切歌时两首歌重叠淡入淡出；关闭后恢复原来的直接切歌")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                if settings.iosCrossfadeEnabled {
+                    Picker("过渡模式", selection: $settings.transitionMode) {
+                        ForEach(TransitionMode.allCases) { mode in
+                            Text(mode.displayName).tag(mode)
+                        }
+                    }
+                    if settings.transitionMode == .crossfade {
+                        HStack {
+                            Text("最长淡入淡出")
+                            Spacer()
+                            Text("\(Int(settings.crossfadeMaxSeconds)) 秒")
+                                .foregroundStyle(.secondary)
+                        }
+                        Slider(
+                            value: $settings.crossfadeMaxSeconds,
+                            in: SettingsManager.crossfadeMaxSecondsRange,
+                            step: 1
+                        )
+                        HStack {
+                            Text("2 秒")
+                            Spacer()
+                            Text("12 秒")
+                        }
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                    }
+                }
+                #endif
+                Picker("响度平衡（ReplayGain）", selection: $settings.replayGainMode) {
+                    ForEach(ReplayGainMode.allCases) { mode in
+                        Text(mode.displayName).tag(mode)
+                    }
+                }
+                Text("按单曲或专辑统一播放响度；iOS 上只对已缓存分析过的歌曲生效")
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
@@ -160,6 +219,112 @@ struct SettingsView: View {
                     .font(.caption)
                     .foregroundStyle(.secondary)
                 #endif
+                Picker("歌词动画样式", selection: $settings.lyricAnimationStyle) {
+                    ForEach(LyricAnimationStyle.allCases) { style in
+                        Text(style.displayName).tag(style)
+                    }
+                }
+                Picker("配色主题预设", selection: $settings.themePresetID) {
+                    Text("默认").tag("default")
+                    Text("暮色").tag("dusk")
+                    Text("海洋").tag("ocean")
+                    Text("林深").tag("forest")
+                    Text("玫瑰").tag("rose")
+                    Text("自定义").tag("custom")
+                }
+                NavigationLink(value: SettingsPage.themePark) {
+                    Label("主题乐园", systemImage: "paintpalette")
+                }
+                Toggle("歌曲主题自动切换", isOn: $settings.songThemeAutoSwitch)
+                Text("切歌时播放页与主界面跟随当前歌曲封面取色，关闭后使用默认配色")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                Toggle("优先使用自定义主题", isOn: $settings.preferCustomTheme)
+                Toggle("静态模式", isOn: $settings.staticMode)
+                Text("关闭动态效果（环境色过渡、黑胶旋转、歌词动效）")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                Picker("减弱动态-背景", selection: $settings.reduceMotionBackground) {
+                    Text("跟随系统").tag(nil as Bool?)
+                    Text("开").tag(true as Bool?)
+                    Text("关").tag(false as Bool?)
+                }
+                Picker("减弱动态-过渡", selection: $settings.reduceMotionTransitions) {
+                    Text("跟随系统").tag(nil as Bool?)
+                    Text("开").tag(true as Bool?)
+                    Text("关").tag(false as Bool?)
+                }
+                Picker("减弱动态-微动效", selection: $settings.reduceMotionMicroMotion) {
+                    Text("跟随系统").tag(nil as Bool?)
+                    Text("开").tag(true as Bool?)
+                    Text("关").tag(false as Bool?)
+                }
+                Text("未选择时跟随系统减弱动态设置")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                Toggle("首页动态背景", isOn: $settings.homeDynamicBackground)
+                Toggle("播放页原生模糊", isOn: $settings.playerPageNativeBlur)
+                VStack(alignment: .leading, spacing: 6) {
+                    HStack {
+                        Text("播放页背景着色强度")
+                        Spacer()
+                        Text("\(Int(settings.playerPageTintIntensity * 100))%")
+                            .foregroundStyle(.secondary)
+                    }
+                    Slider(
+                        value: $settings.playerPageTintIntensity,
+                        in: SettingsManager.playerPageTintIntensityRange,
+                        step: 0.1
+                    )
+                    HStack {
+                        Text("50%")
+                        Spacer()
+                        Text("150%")
+                    }
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                }
+                Picker("播放时打开", selection: $settings.playbackEntryView) {
+                    ForEach(PlaybackEntryView.allCases) { entry in
+                        Text(entry.displayName).tag(entry)
+                    }
+                }
+                Text("点播开始播放时打开播放页，还是留在当前页")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+
+            Section("播放页") {
+                Toggle("隐藏进度条", isOn: $settings.hidePlayerProgressBar)
+                Toggle("始终显示返回按钮", isOn: $settings.alwaysShowPlayerBackButton)
+                Toggle("始终显示切歌按钮", isOn: $settings.alwaysShowTrackSwitchButtons)
+                Toggle("浮动歌曲卡片", isOn: $settings.stageTrackCardEnabled)
+                Toggle("过渡动画-屏幕圆环", isOn: $settings.transitionAnimationRing)
+                Toggle("过渡动画-卡片描边", isOn: $settings.transitionAnimationCard)
+                #if os(iOS)
+                Text("iOS 需引擎移植后才生效")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                #endif
+            }
+
+            Section("播放器控制槽位") {
+                ForEach(PlayerControlSlot.allCases) { slot in
+                    Toggle(slot.displayName, isOn: Binding(
+                        get: { settings.playerControlSlots.contains(slot.rawValue) },
+                        set: { isOn in
+                            var slots = Set(settings.playerControlSlots)
+                            if isOn {
+                                slots.insert(slot.rawValue)
+                            } else {
+                                slots.remove(slot.rawValue)
+                            }
+                            settings.playerControlSlots = PlayerControlSlot.allCases
+                                .map(\.rawValue)
+                                .filter { slots.contains($0) }
+                        }
+                    ))
+                }
             }
 
             Section("存储") {
@@ -249,6 +414,8 @@ struct SettingsView: View {
                 case .shortcuts:
                     ShortcutSettingsView()
                 #endif
+                case .themePark:
+                    ThemeParkView()
                 }
             }
             #if os(macOS)
@@ -258,6 +425,7 @@ struct SettingsView: View {
                 ToolbarItem(placement: .principal) {
                     switch page {
                     case .storage: Text("存储空间").font(.headline)
+                    case .themePark: Text("主题乐园").font(.headline)
                     case .shortcuts: Text("快捷键").font(.headline)
                     }
                 }

@@ -11,47 +11,78 @@ struct MainWindowAmbientBackground: View {
     let intensity: Double
 
     @Environment(\.colorScheme) private var colorScheme
+    @EnvironmentObject private var settings: SettingsManager
+
+    /// C12/C14: the ambient tint follows the resolved theme (custom → song
+    /// artwork → selected preset). The passed-in palette is the artwork
+    /// palette, or `.fallback` when nothing is playing — that sentinel reads
+    /// as "no palette" so a non-default preset still wins with no song.
+    /// Default preset + no custom theme resolves exactly to the old
+    /// behaviour (artwork palette while auto-switch is on, fallback
+    /// otherwise).
+    private var resolvedTheme: ResolvedTheme {
+        ThemePreset.resolvedTheme(
+            settings: settings,
+            palette: colors == .fallback ? nil : colors
+        )
+    }
+
+    private var displayColors: ArtworkColors {
+        ArtworkColors(primary: resolvedTheme.tint, secondary: resolvedTheme.secondaryTint)
+    }
+
+    /// The theme's own tint strength (1 for built-in presets and the
+    /// artwork theme) scales the caller-supplied ambient intensity.
+    private var effectiveIntensity: Double {
+        intensity * resolvedTheme.intensity
+    }
 
     private var gradientOpacity: Double {
         MainWindowAmbientOpacity.gradient(
             isDark: colorScheme == .dark,
-            intensity: intensity
+            intensity: effectiveIntensity
         )
     }
 
     private var glowOpacity: Double {
         MainWindowAmbientOpacity.glow(
             isDark: colorScheme == .dark,
-            intensity: intensity
+            intensity: effectiveIntensity
         )
     }
 
-    var body: some View {
-        ZStack {
-            LinearGradient(
-                colors: [colors.primary, colors.secondary],
-                startPoint: .topLeading,
-                endPoint: .bottomTrailing
-            )
-            .opacity(gradientOpacity)
+    /// Ambient transitions still in static mode, or when the background
+    /// reduce-motion override says so (C4/C5).
+    private var ambientAnimation: Animation? {
+        settings.staticMode || settings.effectiveReduceMotionBackground
+            ? nil : .easeInOut(duration: 0.6)
+    }
 
-            RadialGradient(
-                colors: [colors.primary.opacity(glowOpacity), .clear],
-                center: .topTrailing,
-                startRadius: 0,
-                endRadius: 680
-            )
+    var body: some View {
+        // B2: the home dynamic background has its own switch; off hides the
+        // ambient tint entirely. The master switch still gates this view at
+        // the call site.
+        if settings.homeDynamicBackground {
+            ZStack {
+                LinearGradient(
+                    colors: [displayColors.primary, displayColors.secondary],
+                    startPoint: .topLeading,
+                    endPoint: .bottomTrailing
+                )
+                .opacity(gradientOpacity)
+
+                RadialGradient(
+                    colors: [displayColors.primary.opacity(glowOpacity), .clear],
+                    center: .topTrailing,
+                    startRadius: 0,
+                    endRadius: 680
+                )
+            }
+            .allowsHitTesting(false)
+            .accessibilityHidden(true)
+            .animation(ambientAnimation, value: displayColors)
+            .animation(ambientAnimation, value: effectiveIntensity)
         }
-        .allowsHitTesting(false)
-        .accessibilityHidden(true)
-        .animation(
-            Platform.isReduceMotionEnabled ? nil : .easeInOut(duration: 0.6),
-            value: colors
-        )
-        .animation(
-            Platform.isReduceMotionEnabled ? nil : .easeInOut(duration: 0.6),
-            value: intensity
-        )
     }
 }
 
@@ -124,10 +155,28 @@ final class MainWindowAmbientAppearanceController {
     }
 
     func configure(_ configuration: MainWindowAmbientConfiguration, in window: NSWindow) {
+        // C12/C14: the macOS titlebar tint follows the resolved theme, the
+        // same as the main-window ambient background — the artwork palette
+        // while song-theme auto-switch is on, the selected preset (or the
+        // neutral default palette) otherwise. `.fallback` as the incoming
+        // palette means nothing is playing, so it reads as "no palette".
+        let resolved = ThemePreset.resolvedTheme(
+            settings: SettingsManager.shared,
+            palette: configuration.colors == .fallback ? nil : configuration.colors
+        )
+        let effectiveConfiguration = MainWindowAmbientConfiguration(
+            showsAmbientBackground: configuration.showsAmbientBackground,
+            showsTitlebarAmbientBackground: configuration.showsTitlebarAmbientBackground,
+            showsNowPlaying: configuration.showsNowPlaying,
+            colors: ArtworkColors(primary: resolved.tint, secondary: resolved.secondaryTint),
+            mainColumnLeadingInset: configuration.mainColumnLeadingInset,
+            intensity: configuration.intensity * resolved.intensity,
+            isDark: configuration.isDark
+        )
         let wasExtendingContent = extendsContentIntoTitlebar
         let toolbarVisibilityChanged = self.configuration.showsTitlebarAmbientBackground
-            != configuration.showsTitlebarAmbientBackground
-        self.configuration = configuration
+            != effectiveConfiguration.showsTitlebarAmbientBackground
+        self.configuration = effectiveConfiguration
 
         if !wasExtendingContent, extendsContentIntoTitlebar {
             titlebarWasTransparent = window.titlebarAppearsTransparent
@@ -232,7 +281,12 @@ final class MainWindowAmbientAppearanceController {
         mask.update(
             colors: configuration.colors,
             intensity: configuration.intensity,
-            isDark: configuration.isDark
+            isDark: configuration.isDark,
+            // C4/C5: the titlebar tint change is a transition; static mode
+            // or the transitions reduce-motion override jumps it to the
+            // final colours instead of animating.
+            disableAnimations: SettingsManager.shared.staticMode
+                || SettingsManager.shared.effectiveReduceMotionTransitions
         )
     }
 }
@@ -262,7 +316,7 @@ private final class TitlebarMaskView: NSView {
 
     override func hitTest(_ point: NSPoint) -> NSView? { nil }
 
-    func update(colors: ArtworkColors, intensity: Double, isDark: Bool) {
+    func update(colors: ArtworkColors, intensity: Double, isDark: Bool, disableAnimations: Bool) {
         guard appliedColors != colors
                 || appliedIntensity != intensity
                 || appliedIsDark != isDark else {
@@ -286,7 +340,7 @@ private final class TitlebarMaskView: NSView {
         let secondary = blended(NSColor(colors.secondary), over: base, opacity: opacity)
 
         CATransaction.begin()
-        CATransaction.setDisableActions(Platform.isReduceMotionEnabled)
+        CATransaction.setDisableActions(disableAnimations)
         CATransaction.setAnimationDuration(0.6)
         CATransaction.setAnimationTimingFunction(CAMediaTimingFunction(name: .easeInEaseOut))
         gradientLayer.colors = [primary.cgColor, secondary.cgColor]

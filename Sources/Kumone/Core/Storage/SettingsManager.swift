@@ -109,6 +109,124 @@ public enum LandscapeNowPlayingStyle: String, CaseIterable, Identifiable {
     }
 }
 
+/// How lyric lines animate as they become current. `fade` cross-fades lines;
+/// `karaokeZoom` scales the active word (needs verbatim lyrics); `lineHighlight`
+/// emphasises the whole current line; `none` switches lines without animation.
+enum LyricAnimationStyle: String, CaseIterable, Identifiable {
+    case none
+    case fade
+    case karaokeZoom
+    case lineHighlight
+
+    var id: String { rawValue }
+
+    var displayName: String {
+        switch self {
+        case .none: return String(localized: "无动画")
+        case .fade: return String(localized: "淡入")
+        case .karaokeZoom: return String(localized: "逐字放大")
+        case .lineHighlight: return String(localized: "逐行高亮")
+        }
+    }
+}
+
+/// Where a track goes when added from a list: the end of the queue, or right
+/// after the current track (the historical behaviour).
+enum QueueAddBehavior: String, CaseIterable, Identifiable {
+    case append
+    case next
+
+    var id: String { rawValue }
+
+    var displayName: String {
+        switch self {
+        case .append: return String(localized: "追加到队尾")
+        case .next: return String(localized: "插到下一首")
+        }
+    }
+}
+
+/// Which view opens when playback starts from a list.
+enum PlaybackEntryView: String, CaseIterable, Identifiable {
+    case nowPlaying
+    case stay
+
+    var id: String { rawValue }
+
+    var displayName: String {
+        switch self {
+        case .nowPlaying: return String(localized: "打开播放页")
+        case .stay: return String(localized: "保持当前页")
+        }
+    }
+}
+
+/// One transport button in the player bar / now-playing controls. The order of
+/// `allCases` is the default bar layout.
+enum PlayerControlSlot: String, CaseIterable, Identifiable {
+    case shuffle
+    case previous
+    case playPause
+    case next
+    case repeatMode
+
+    var id: String { rawValue }
+
+    var displayName: String {
+        switch self {
+        case .shuffle: return String(localized: "随机")
+        case .previous: return String(localized: "上一首")
+        case .playPause: return String(localized: "播放/暂停")
+        case .next: return String(localized: "下一首")
+        case .repeatMode: return String(localized: "循环")
+        }
+    }
+}
+
+/// How one track hands over to the next. `crossfade` forces a plain
+/// crossfade; `automix` lets the planner pick the best plan.
+///
+/// Dual-platform: macOS AutoMix uses it, and the iOS dual-deck crossfade
+/// engine (Folia P2/P3) reads the same setting.
+enum TransitionMode: String, CaseIterable, Identifiable {
+    case crossfade
+    case automix
+
+    var id: String { rawValue }
+
+    var displayName: String {
+        switch self {
+        case .crossfade: return String(localized: "淡入淡出")
+        case .automix: return String(localized: "Automix 智能混音")
+        }
+    }
+}
+
+/// How ReplayGain loudness levelling applies. `auto` is the existing
+/// analysis-based compensation; `track`/`album` group by the track's own
+/// ReplayGain tags when present (falling back to the analysed value).
+///
+/// Dual-platform: macOS reads it in `PlayerService`, iOS in
+/// `PlayerServiceIOS` (per-track `AVPlayer.volume` gain). iOS defaults to
+/// `.off` — compensation only applies once the user turns it on.
+enum ReplayGainMode: String, CaseIterable, Identifiable {
+    case off
+    case auto
+    case track
+    case album
+
+    var id: String { rawValue }
+
+    var displayName: String {
+        switch self {
+        case .off: return String(localized: "关闭")
+        case .auto: return String(localized: "自动")
+        case .track: return String(localized: "按单曲")
+        case .album: return String(localized: "按专辑")
+        }
+    }
+}
+
 @MainActor
 final class SettingsManager: ObservableObject {
     static let shared = SettingsManager()
@@ -148,6 +266,36 @@ final class SettingsManager: ObservableObject {
         static let enableAudioCache = "settings.enableAudioCache"
         static let audioCacheSizeMB = "settings.audioCacheSizeMB"
         static let audioCacheAutomatic = "settings.audioCacheAutomatic"
+        static let lyricAnimationStyle = "settings.lyricAnimationStyle"
+        static let themePreset = "settings.themePreset"
+        static let customTheme = "settings.customTheme"
+        static let preferCustomTheme = "settings.preferCustomTheme"
+        static let songThemeAutoSwitch = "settings.songThemeAutoSwitch"
+        static let homeDynamicBackground = "settings.homeDynamicBackground"
+        static let playerPageNativeBlur = "settings.playerPageNativeBlur"
+        static let staticMode = "settings.staticMode"
+        static let reduceMotionBackground = "settings.reduceMotionBackground"
+        static let reduceMotionTransitions = "settings.reduceMotionTransitions"
+        static let reduceMotionMicroMotion = "settings.reduceMotionMicroMotion"
+        static let playbackFadeEnabled = "settings.playbackFadeEnabled"
+        static let queueAddBehavior = "settings.queueAddBehavior"
+        static let autoSkipUnplayable = "settings.autoSkipUnplayable"
+        static let playbackEntryView = "settings.playbackEntryView"
+        static let playerPageTintIntensity = "settings.playerPageTintIntensity"
+        static let hidePlayerProgressBar = "settings.hidePlayerProgressBar"
+        static let alwaysShowPlayerBackButton = "settings.alwaysShowPlayerBackButton"
+        static let alwaysShowTrackSwitchButtons = "settings.alwaysShowTrackSwitchButtons"
+        static let playerControlSlots = "settings.playerControlSlots"
+        static let stageTrackCardEnabled = "settings.stageTrackCardEnabled"
+        static let transitionAnimationRing = "settings.transitionAnimationRing"
+        static let transitionAnimationCard = "settings.transitionAnimationCard"
+        #if os(iOS)
+        static let preventDisplaySleep = "settings.preventDisplaySleepDuringPlayback"
+        static let iosCrossfadeEnabled = "settings.iosCrossfadeEnabled"
+        #endif
+        static let transitionMode = "settings.transitionMode"
+        static let crossfadeMaxSeconds = "settings.crossfadeMaxSeconds"
+        static let replayGainMode = "settings.replayGainMode"
     }
 
     @Published var audioQuality: AudioQuality {
@@ -330,7 +478,7 @@ final class SettingsManager: ObservableObject {
         didSet { UserDefaults.standard.set(desktopLyricsCentered, forKey: Keys.desktopLyricsCentered) }
     }
 
-    static let mainWindowAmbientBackgroundIntensityRange = 0.5...1.5
+    nonisolated static let mainWindowAmbientBackgroundIntensityRange = 0.5...1.5
 
     #if os(macOS)
     /// Default song-cache ceiling, shared with `AudioCache` so the two cannot
@@ -357,6 +505,192 @@ final class SettingsManager: ObservableObject {
             )
         }
     }
+
+    // MARK: - Folia visual / playback settings
+
+    /// Lyric line animation style on the now-playing page.
+    @Published var lyricAnimationStyle: LyricAnimationStyle {
+        didSet { UserDefaults.standard.set(lyricAnimationStyle.rawValue, forKey: Keys.lyricAnimationStyle) }
+    }
+
+    /// Built-in colour theme preset id; "default" follows the system light/dark
+    /// artwork tint, "custom" uses `customThemeJSON`.
+    @Published var themePresetID: String {
+        didSet { UserDefaults.standard.set(themePresetID, forKey: Keys.themePreset) }
+    }
+
+    /// JSON-encoded custom theme (see `ThemePreset`), empty when none is saved.
+    @Published var customThemeJSON: String {
+        didSet { UserDefaults.standard.set(customThemeJSON, forKey: Keys.customTheme) }
+    }
+
+    /// Prefer the custom theme over the current song's artwork theme.
+    @Published var preferCustomTheme: Bool {
+        didSet { UserDefaults.standard.set(preferCustomTheme, forKey: Keys.preferCustomTheme) }
+    }
+
+    /// Let the now-playing page and main interface follow the current song's
+    /// artwork palette. Off keeps the default theme colours.
+    @Published var songThemeAutoSwitch: Bool {
+        didSet { UserDefaults.standard.set(songThemeAutoSwitch, forKey: Keys.songThemeAutoSwitch) }
+    }
+
+    /// Home page artwork-tinted dynamic background, separate from the main
+    /// interface ambient background switch.
+    @Published var homeDynamicBackground: Bool {
+        didSet { UserDefaults.standard.set(homeDynamicBackground, forKey: Keys.homeDynamicBackground) }
+    }
+
+    /// Native blur (ultraThinMaterial) behind the now-playing page.
+    @Published var playerPageNativeBlur: Bool {
+        didSet { UserDefaults.standard.set(playerPageNativeBlur, forKey: Keys.playerPageNativeBlur) }
+    }
+
+    /// Static mode: a master switch that stills ambient transitions, vinyl
+    /// rotation and lyric animations (on top of the system Reduce Motion).
+    @Published var staticMode: Bool {
+        didSet { UserDefaults.standard.set(staticMode, forKey: Keys.staticMode) }
+    }
+
+    /// Reduce-motion overrides, per area. `nil` means "follow the system"
+    /// (`Platform.isReduceMotionEnabled`).
+    @Published var reduceMotionBackground: Bool? {
+        didSet { Self.setOptionalBool(reduceMotionBackground, forKey: Keys.reduceMotionBackground) }
+    }
+
+    @Published var reduceMotionTransitions: Bool? {
+        didSet { Self.setOptionalBool(reduceMotionTransitions, forKey: Keys.reduceMotionTransitions) }
+    }
+
+    @Published var reduceMotionMicroMotion: Bool? {
+        didSet { Self.setOptionalBool(reduceMotionMicroMotion, forKey: Keys.reduceMotionMicroMotion) }
+    }
+
+    /// Effective Reduce Motion per area: the manual override, else the system.
+    var effectiveReduceMotionBackground: Bool {
+        reduceMotionBackground ?? Platform.isReduceMotionEnabled
+    }
+
+    var effectiveReduceMotionTransitions: Bool {
+        reduceMotionTransitions ?? Platform.isReduceMotionEnabled
+    }
+
+    var effectiveReduceMotionMicroMotion: Bool {
+        reduceMotionMicroMotion ?? Platform.isReduceMotionEnabled
+    }
+
+    private static func setOptionalBool(_ value: Bool?, forKey key: String) {
+        if let value {
+            UserDefaults.standard.set(value, forKey: key)
+        } else {
+            UserDefaults.standard.removeObject(forKey: key)
+        }
+    }
+
+    /// Short volume ramp on pause/resume instead of an abrupt cut.
+    @Published var playbackFadeEnabled: Bool {
+        didSet { UserDefaults.standard.set(playbackFadeEnabled, forKey: Keys.playbackFadeEnabled) }
+    }
+
+    /// Default behaviour when adding a track from a list.
+    @Published var queueAddBehavior: QueueAddBehavior {
+        didSet { UserDefaults.standard.set(queueAddBehavior.rawValue, forKey: Keys.queueAddBehavior) }
+    }
+
+    /// Skip unplayable tracks automatically (VIP-only, region-locked, removed).
+    /// Network failures never skip.
+    @Published var autoSkipUnplayable: Bool {
+        didSet { UserDefaults.standard.set(autoSkipUnplayable, forKey: Keys.autoSkipUnplayable) }
+    }
+
+    /// Which view opens when playback starts from a list.
+    @Published var playbackEntryView: PlaybackEntryView {
+        didSet { UserDefaults.standard.set(playbackEntryView.rawValue, forKey: Keys.playbackEntryView) }
+    }
+
+    static let playerPageTintIntensityRange = 0.5...1.5
+
+    /// Multiplier applied to the now-playing page's artwork tint.
+    @Published var playerPageTintIntensity: Double {
+        didSet {
+            UserDefaults.standard.set(playerPageTintIntensity, forKey: Keys.playerPageTintIntensity)
+        }
+    }
+
+    /// Hide the progress bar / scrubber on the now-playing page.
+    @Published var hidePlayerProgressBar: Bool {
+        didSet { UserDefaults.standard.set(hidePlayerProgressBar, forKey: Keys.hidePlayerProgressBar) }
+    }
+
+    /// Always show the back button on the now-playing page.
+    @Published var alwaysShowPlayerBackButton: Bool {
+        didSet {
+            UserDefaults.standard.set(alwaysShowPlayerBackButton, forKey: Keys.alwaysShowPlayerBackButton)
+        }
+    }
+
+    /// Always show the previous/next buttons on the now-playing page.
+    @Published var alwaysShowTrackSwitchButtons: Bool {
+        didSet {
+            UserDefaults.standard.set(alwaysShowTrackSwitchButtons, forKey: Keys.alwaysShowTrackSwitchButtons)
+        }
+    }
+
+    /// Transport buttons shown in the player bar, as slot ids in order.
+    @Published var playerControlSlots: [String] {
+        didSet { UserDefaults.standard.set(playerControlSlots, forKey: Keys.playerControlSlots) }
+    }
+
+    /// Floating song card on the now-playing page (tap to return to the page).
+    @Published var stageTrackCardEnabled: Bool {
+        didSet { UserDefaults.standard.set(stageTrackCardEnabled, forKey: Keys.stageTrackCardEnabled) }
+    }
+
+    /// Transition animations while a handover plays: a ring on screen…
+    @Published var transitionAnimationRing: Bool {
+        didSet { UserDefaults.standard.set(transitionAnimationRing, forKey: Keys.transitionAnimationRing) }
+    }
+
+    /// …and an outline around the song card.
+    @Published var transitionAnimationCard: Bool {
+        didSet { UserDefaults.standard.set(transitionAnimationCard, forKey: Keys.transitionAnimationCard) }
+    }
+
+    #if os(iOS)
+    /// Keep the screen awake while playing.
+    @Published var preventDisplaySleepDuringPlayback: Bool {
+        didSet {
+            UserDefaults.standard.set(preventDisplaySleepDuringPlayback, forKey: Keys.preventDisplaySleep)
+        }
+    }
+
+    /// iOS crossfade (Folia P2/P3): cut between songs with a dual-deck
+    /// overlap instead of a hard cut. Default off — the single-`AVPlayer`
+    /// path is used until the user turns it on.
+    @Published var iosCrossfadeEnabled: Bool {
+        didSet { UserDefaults.standard.set(iosCrossfadeEnabled, forKey: Keys.iosCrossfadeEnabled) }
+    }
+    #endif
+
+    static let crossfadeMaxSecondsRange = 2.0...12.0
+
+    /// Handover mode: plain crossfade, or the planner's full Automix.
+    @Published var transitionMode: TransitionMode {
+        didSet { UserDefaults.standard.set(transitionMode.rawValue, forKey: Keys.transitionMode) }
+    }
+
+    /// Longest crossfade the planner may use, in seconds.
+    @Published var crossfadeMaxSeconds: Double {
+        didSet {
+            UserDefaults.standard.set(crossfadeMaxSeconds, forKey: Keys.crossfadeMaxSeconds)
+        }
+    }
+
+    /// ReplayGain loudness levelling mode.
+    @Published var replayGainMode: ReplayGainMode {
+        didSet { UserDefaults.standard.set(replayGainMode.rawValue, forKey: Keys.replayGainMode) }
+    }
+
     private init() {
         let defaults = UserDefaults.standard
         audioQuality = defaults.string(forKey: Keys.quality).flatMap(AudioQuality.init) ?? .exhigh
@@ -415,5 +749,60 @@ final class SettingsManager: ObservableObject {
             max(storedAmbientBackgroundIntensity, Self.mainWindowAmbientBackgroundIntensityRange.lowerBound),
             Self.mainWindowAmbientBackgroundIntensityRange.upperBound
         )
+        lyricAnimationStyle = defaults.string(forKey: Keys.lyricAnimationStyle)
+            .flatMap(LyricAnimationStyle.init) ?? .fade
+        themePresetID = defaults.string(forKey: Keys.themePreset) ?? "default"
+        customThemeJSON = defaults.string(forKey: Keys.customTheme) ?? ""
+        preferCustomTheme = defaults.object(forKey: Keys.preferCustomTheme) as? Bool ?? false
+        songThemeAutoSwitch = defaults.object(forKey: Keys.songThemeAutoSwitch) as? Bool ?? true
+        homeDynamicBackground = defaults.object(forKey: Keys.homeDynamicBackground) as? Bool ?? true
+        playerPageNativeBlur = defaults.object(forKey: Keys.playerPageNativeBlur) as? Bool ?? true
+        staticMode = defaults.object(forKey: Keys.staticMode) as? Bool ?? false
+        reduceMotionBackground = defaults.object(forKey: Keys.reduceMotionBackground) as? Bool
+        reduceMotionTransitions = defaults.object(forKey: Keys.reduceMotionTransitions) as? Bool
+        reduceMotionMicroMotion = defaults.object(forKey: Keys.reduceMotionMicroMotion) as? Bool
+        playbackFadeEnabled = defaults.object(forKey: Keys.playbackFadeEnabled) as? Bool ?? true
+        queueAddBehavior = defaults.string(forKey: Keys.queueAddBehavior)
+            .flatMap(QueueAddBehavior.init) ?? .next
+        autoSkipUnplayable = defaults.object(forKey: Keys.autoSkipUnplayable) as? Bool ?? true
+        playbackEntryView = defaults.string(forKey: Keys.playbackEntryView)
+            .flatMap(PlaybackEntryView.init) ?? .nowPlaying
+        let storedTintIntensity = defaults.object(forKey: Keys.playerPageTintIntensity) as? Double ?? 1
+        playerPageTintIntensity = min(
+            max(storedTintIntensity, Self.playerPageTintIntensityRange.lowerBound),
+            Self.playerPageTintIntensityRange.upperBound
+        )
+        hidePlayerProgressBar = defaults.object(forKey: Keys.hidePlayerProgressBar) as? Bool ?? false
+        alwaysShowPlayerBackButton =
+            defaults.object(forKey: Keys.alwaysShowPlayerBackButton) as? Bool ?? false
+        alwaysShowTrackSwitchButtons =
+            defaults.object(forKey: Keys.alwaysShowTrackSwitchButtons) as? Bool ?? false
+        playerControlSlots = defaults.stringArray(forKey: Keys.playerControlSlots)
+            ?? PlayerControlSlot.allCases.map(\.rawValue)
+        stageTrackCardEnabled = defaults.object(forKey: Keys.stageTrackCardEnabled) as? Bool ?? false
+        transitionAnimationRing = defaults.object(forKey: Keys.transitionAnimationRing) as? Bool ?? false
+        transitionAnimationCard = defaults.object(forKey: Keys.transitionAnimationCard) as? Bool ?? false
+        #if os(iOS)
+        preventDisplaySleepDuringPlayback =
+            defaults.object(forKey: Keys.preventDisplaySleep) as? Bool ?? true
+        iosCrossfadeEnabled =
+            defaults.object(forKey: Keys.iosCrossfadeEnabled) as? Bool ?? false
+        #endif
+        transitionMode = defaults.string(forKey: Keys.transitionMode)
+            .flatMap(TransitionMode.init) ?? .automix
+        let storedCrossfadeMaxSeconds = defaults.object(forKey: Keys.crossfadeMaxSeconds) as? Double ?? 8
+        crossfadeMaxSeconds = min(
+            max(storedCrossfadeMaxSeconds, Self.crossfadeMaxSecondsRange.lowerBound),
+            Self.crossfadeMaxSecondsRange.upperBound
+        )
+        // iOS defaults to .off: the per-track volume trim only applies once
+        // the user turns it on. macOS keeps its shipped .auto default.
+        #if os(iOS)
+        replayGainMode = defaults.string(forKey: Keys.replayGainMode)
+            .flatMap(ReplayGainMode.init) ?? .off
+        #else
+        replayGainMode = defaults.string(forKey: Keys.replayGainMode)
+            .flatMap(ReplayGainMode.init) ?? .auto
+        #endif
     }
 }

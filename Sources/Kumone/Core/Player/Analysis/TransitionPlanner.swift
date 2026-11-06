@@ -1,4 +1,3 @@
-#if os(macOS)
 import Foundation
 
 // Pure decision function: two analyses in, one TransitionPlan out (spec §5).
@@ -18,6 +17,18 @@ enum TransitionPlanner {
         case clash        // boundary-respecting short fade
     }
 
+    /// Which hand-over family the planner may choose. `.automix` is the
+    /// shipped behaviour: the planner picks beat-matched / crossfade / gapless
+    /// by analysis, exactly as before. `.crossfade` forces a plain crossfade
+    /// plan for every pair — the "淡入淡出" transition mode — and never
+    /// beat-matches, whatever the analyses say. The tier caps still bound the
+    /// fade (see the `cap` below), so a clashing pair still gets its short
+    /// boundary-respecting hand-over rather than a long blend.
+    enum HandoverMode: String, Sendable, Equatable {
+        case crossfade
+        case automix
+    }
+
     /// Every tunable the decision turns on, in one value. `Config.standard`
     /// holds the shipped numbers and is the default everywhere, so the
     /// product path behaves exactly as it did when these were bare
@@ -29,6 +40,14 @@ enum TransitionPlanner {
         var bpmConfidenceThreshold: Double = 0.6
         var maxBPMDeltaRatio: Double = 0.08
         var maxRateDeviation: Double = 0.04
+
+        /// Which hand-over family this config allows. `.automix` (the
+        /// default) is the shipped planner: `Config.standard` decides exactly
+        /// what it always decided. `.crossfade` forces the plain crossfade
+        /// path — the beat-match branch in `plan` is never entered — and the
+        /// tier caps still bound the fade. Set from the user's transition-mode
+        /// setting by `PlayerService.transitionPlannerConfig`.
+        var handoverMode: HandoverMode = .automix
 
         // --- Tempo ramp.
         //
@@ -1131,7 +1150,7 @@ enum TransitionPlanner {
         let restrained = intent?.class == .restrained
 
         var matched: (plan: BeatMatchedPlan, stem: StemTechnique?, vocalEntry: String?)?
-        if tier == .compatible, !restrained {
+        if tier == .compatible, !restrained, config.handoverMode == .automix {
             matched = beatMatchedPlan(outgoing: outgoing, incoming: incoming,
                                       candidates: candidates.points, inAnchor: inChoice.point,
                                       stems: stems, intentVocalRequest: intentVocalRequest,
@@ -1450,13 +1469,16 @@ enum TransitionPlanner {
         // to nothing.
         let geometry = TransitionAutomation.Geometry(plan: .beatMatched(p))
         let glide = TransitionAutomation.incomingGlide(for: .beatMatched(p), geometry: geometry)
-        let clock = StemTechniqueLayer.SourceClock(
-            rate: Double(max(0.5, min(2, p.incomingRate))), glide: glide)
+        // The incoming deck's own clock: source seconds consumed over the
+        // overlap. Inlined from `StemTechniqueLayer.SourceClock` (same
+        // arithmetic — glide integral, else rate × time) so the planner stays
+        // dual-platform; the stem layer keeps its own copy for the renderer.
+        let incomingRate = Double(max(0.5, min(2, p.incomingRate)))
         // Which instant of the *hand-over* the target is being made to land on:
         // the swap point for a cut (the seam), the end of the overlap for a
         // blend. Read on the incoming deck's own clock either way.
         let landingOffset = landing == .seam ? geometry.swapOffset : geometry.overlapDuration
-        let advance = clock.sourceAdvance(to: landingOffset)
+        let advance = glide?.sourceAdvance(to: landingOffset) ?? landingOffset * incomingRate
         let leadBars = max(1, Int((advance / max(bar, 0.05)).rounded()))
         guard index - leadBars >= 0 else {
             return unaimed(String(format: "the %@ at %.2f s is fewer than %d bars into the track",
@@ -2938,4 +2960,3 @@ enum TransitionPlanner {
         return (.crossfade(duration: fade, outPoint: outPoint, inPoint: inPoint), nil)
     }
 }
-#endif

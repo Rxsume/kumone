@@ -51,7 +51,9 @@ struct NowPlayingView: View {
             // stretch the ZStack and push the corner overlays off-screen.
             .frame(width: geo.size.width)
             .overlay(alignment: .topLeading) {
-                if showsClassicChrome(isCompact: isCompact) {
+                // C7: the setting pins the back button visible even where the
+                // compact layouts would otherwise hide it.
+                if settings.alwaysShowPlayerBackButton || showsClassicChrome(isCompact: isCompact) {
                     #if os(macOS)
                     // The window keeps its own buttons while this page is up
                     // (#128). Beside them the chevron reads as one toolbar row:
@@ -76,7 +78,7 @@ struct NowPlayingView: View {
                     } label: {
                         Image(systemName: showLyricsOnMobile ? "music.note" : "quote.bubble")
                             .font(.system(size: 14, weight: .semibold))
-                            .foregroundStyle(showLyricsOnMobile ? Theme.accent : .white.opacity(0.85))
+                            .foregroundStyle(showLyricsOnMobile ? themeAccent : .white.opacity(0.85))
                             .frame(width: 36, height: 36)
                             .background(.white.opacity(0.12), in: Circle())
                     }
@@ -84,6 +86,28 @@ struct NowPlayingView: View {
                     .padding(.top, 20)
                     .padding(.trailing, 20)
                 }
+            }
+            .overlay(alignment: .bottomTrailing) {
+                // C9: floating song card (tap returns to the main view).
+                if settings.stageTrackCardEnabled, player.hasCurrentTrack {
+                    StageTrackCard(
+                        accent: themeAccent,
+                        // C11: the card outline while a handover plays.
+                        transitionHighlighted: settings.transitionAnimationCard && transitionInProgress
+                    ) {
+                        withAnimation(AppAnimation.standard) {
+                            showLyricsOnMobile = false
+                            showQueueOnMobile = false
+                        }
+                    }
+                    .padding(.trailing, 20)
+                    .padding(.bottom, 108)
+                }
+            }
+            .overlay {
+                // C11: the transition ring floats over the page while a
+                // handover plays; inert until a transition signal exists.
+                TransitionAnimationView(isTransitioning: transitionInProgress, accent: themeAccent)
             }
             #if os(iOS)
             .overlay {
@@ -202,12 +226,100 @@ struct NowPlayingView: View {
         #endif
     }
 
-    private var colors: ArtworkColors {
+    /// Raw artwork palette for theme resolution, or nil when no artwork is
+    /// loaded — nil (not `.fallback`) is what lets a non-default preset win
+    /// when nothing is playing.
+    private var artworkPalette: ArtworkColors? {
         #if os(macOS)
-        artworkStore.colors
+        artworkStore.artwork == nil ? nil : artworkStore.colors
         #else
-        artworkImage == nil ? .fallback : loadedArtworkColors
+        artworkImage == nil ? nil : loadedArtworkColors
         #endif
+    }
+
+    /// C12/C14: the effective theme (custom → song artwork → selected
+    /// preset). The default preset with no saved custom theme resolves to
+    /// the pre-existing colours — `Theme.accent` over the fallback palette,
+    /// or the artwork palette while song-theme auto-switch is on — so the
+    /// default look is unchanged.
+    private var theme: ResolvedTheme {
+        ThemePreset.resolvedTheme(settings: settings, palette: artworkPalette)
+    }
+
+    /// Accent colour for controls and highlights, from the resolved theme.
+    private var themeAccent: Color { theme.accent }
+
+    /// C11: whether a hand-over is currently playing, from the player's
+    /// published signal: true from the playhead entering the overlap (or
+    /// the midpoint, whichever first) until the engine reports completion
+    /// or the transition is disarmed. On macOS this is the AutoMix engine;
+    /// on iOS it is the dual-deck crossfade engine, and stays false while
+    /// that engine is switched off.
+    private var transitionInProgress: Bool {
+        player.transitionInProgress
+    }
+
+    private var colors: ArtworkColors {
+        let base = ArtworkColors(primary: theme.tint, secondary: theme.secondaryTint)
+        // C10: the player-page tint intensity still scales the artwork tint;
+        // a preset or custom theme carries its own intensity instead.
+        let intensity = theme.source == .artwork
+            ? settings.playerPageTintIntensity : theme.intensity
+        return tintedColors(base, intensity: intensity)
+    }
+
+    /// Scales an artwork palette toward the neutral fallback (intensity < 1)
+    /// or past it (intensity > 1), so 1.0 returns the extracted colours
+    /// unchanged. Component math, not opacity: the backdrop gradient is
+    /// opaque, so there is nothing underneath to show through.
+    private func tintedColors(_ colors: ArtworkColors, intensity: Double) -> ArtworkColors {
+        guard intensity != 1 else { return colors }
+        let amount = intensity - 1 // -0.5 ... 0.5
+        return ArtworkColors(
+            primary: shifted(colors.primary, from: ArtworkColors.fallback.primary, by: amount),
+            secondary: shifted(colors.secondary, from: ArtworkColors.fallback.secondary, by: amount)
+        )
+    }
+
+    /// `color + (color - base) * amount`: amount 0 returns `color`, -1
+    /// returns `base`, positive values push past `color` away from `base`.
+    private func shifted(_ color: Color, from base: Color, by amount: Double) -> Color {
+        guard amount != 0,
+              let mine = PlatformColor(color).cgColor.components,
+              let other = PlatformColor(base).cgColor.components,
+              mine.count >= 4, other.count >= 4
+        else { return color }
+        func clamped(_ value: CGFloat) -> Double {
+            min(max(Double(value), 0), 1)
+        }
+        return Color(
+            red: clamped(mine[0] + (mine[0] - other[0]) * CGFloat(amount)),
+            green: clamped(mine[1] + (mine[1] - other[1]) * CGFloat(amount)),
+            blue: clamped(mine[2] + (mine[2] - other[2]) * CGFloat(amount)),
+            opacity: clamped(mine[3])
+        )
+    }
+
+    /// Ambient colour transitions still in static mode, or when the
+    /// background reduce-motion override says so (C4/C5).
+    private var backdropAnimation: Animation? {
+        settings.staticMode || settings.effectiveReduceMotionBackground
+            ? nil : .easeInOut(duration: 0.8)
+    }
+
+    /// Line motion (activation springs, scroll-to-line) stills in static
+    /// mode, with the "no animation" lyric style, or when transitions are
+    /// reduced (C4/C5/C15).
+    private var lyricAnimationsEnabled: Bool {
+        !settings.staticMode
+            && settings.lyricAnimationStyle != .none
+            && !settings.effectiveReduceMotionTransitions
+    }
+
+    /// Returns `animation` unless lyric motion is stilled, in which case nil
+    /// (the view jumps straight to its final state).
+    private func lyricAnimation(_ animation: Animation) -> Animation? {
+        lyricAnimationsEnabled ? animation : nil
     }
 
     private var backdrop: some View {
@@ -226,7 +338,7 @@ struct NowPlayingView: View {
             )
         }
         .ignoresSafeArea()
-        .animation(.easeInOut(duration: 0.8), value: colors)
+        .animation(backdropAnimation, value: colors)
     }
 
     #if os(iOS)
@@ -334,7 +446,7 @@ struct NowPlayingView: View {
 
             circleButton(
                 icon: "list.bullet", size: 15,
-                tint: showQueueOnMobile ? Theme.accent : nil
+                tint: showQueueOnMobile ? themeAccent : nil
             ) {
                 withAnimation(AppAnimation.standard) {
                     showQueueOnMobile.toggle()
@@ -376,17 +488,25 @@ struct NowPlayingView: View {
 
     private var landscapeTransportRow: some View {
         HStack(spacing: 14) {
-            circleButton(icon: "backward.fill", size: 18) {
-                player.previous()
+            // C8: only the configured slots render (shuffle / repeat have no
+            // button in this row, so those slots do not affect it).
+            if PlayerControlSlot.isSelected(.previous, in: settings) {
+                circleButton(icon: "backward.fill", size: 18) {
+                    player.previous()
+                }
+                .accessibilityLabel("上一首")
             }
-            .accessibilityLabel("上一首")
 
-            playPauseButton(diameter: 50, glyphSize: 20)
-
-            circleButton(icon: "forward.fill", size: 18) {
-                player.next()
+            if PlayerControlSlot.isSelected(.playPause, in: settings) {
+                playPauseButton(diameter: 50, glyphSize: 20)
             }
-            .accessibilityLabel("下一首")
+
+            if PlayerControlSlot.isSelected(.next, in: settings) {
+                circleButton(icon: "forward.fill", size: 18) {
+                    player.next()
+                }
+                .accessibilityLabel("下一首")
+            }
 
             if let track = player.currentTrack {
                 let liked = account.isLiked(track.id)
@@ -395,7 +515,7 @@ struct NowPlayingView: View {
                 } label: {
                     Image(systemName: liked ? "heart.fill" : "heart")
                         .font(.system(size: 20, weight: .medium))
-                        .foregroundStyle(liked ? Theme.accent : .white.opacity(0.85))
+                        .foregroundStyle(liked ? themeAccent : .white.opacity(0.85))
                         .frame(width: 40, height: 40)
                         .contentShape(Rectangle())
                 }
@@ -422,16 +542,23 @@ struct NowPlayingView: View {
         var isPaused = false
 
         @Environment(\.accessibilityReduceMotion) private var reduceMotion
+        @EnvironmentObject private var settings: SettingsManager
 
         private static let cycle: TimeInterval = 18
+
+        /// The drifting backdrop stills in static mode, or when the
+        /// background reduce-motion override says so (C4/C5).
+        private var motionStilled: Bool {
+            reduceMotion || settings.staticMode || settings.effectiveReduceMotionBackground
+        }
 
         var body: some View {
             // Reduce Motion holds the backdrop at its rest pose instead of
             // redrawing a full-screen blur 24 times a second.
-            TimelineView(.animation(minimumInterval: 1.0 / 24.0, paused: reduceMotion || isPaused)) { context in
+            TimelineView(.animation(minimumInterval: 1.0 / 24.0, paused: motionStilled || isPaused)) { context in
                 let t = context.date.timeIntervalSinceReferenceDate
-                let sway = reduceMotion ? 0 : sin(t * 2 * .pi / Self.cycle)
-                let breathe = reduceMotion ? 0 : cos(t * 2 * .pi / (Self.cycle * 0.78))
+                let sway = motionStilled ? 0 : sin(t * 2 * .pi / Self.cycle)
+                let breathe = motionStilled ? 0 : cos(t * 2 * .pi / (Self.cycle * 0.78))
 
                 GeometryReader { geo in
                     ZStack {
@@ -440,7 +567,10 @@ struct NowPlayingView: View {
                             startPoint: .topLeading, endPoint: .bottomTrailing
                         )
 
-                        if let image {
+                        // B3: with native blur off, the blurred artwork layer
+                        // is omitted outright (an unblurred 1.5x cover would
+                        // read as a smear); the tinted gradients remain.
+                        if settings.playerPageNativeBlur, let image {
                             Image(platformImage: image)
                                 .resizable()
                                 .scaledToFill()
@@ -535,6 +665,7 @@ struct NowPlayingView: View {
 
             CompactTrackHeader(
                 showsExpandedArtwork: showsVinyl,
+                accent: themeAccent,
                 onOpenDestination: onOpenDestination
             )
                 .padding(.bottom, 10)
@@ -614,8 +745,11 @@ struct NowPlayingView: View {
             immersiveControls
             #else
             VStack(spacing: 12) {
-                NowPlayingScrubber()
-                    .padding(.horizontal, 24)
+                // C6: the progress bar hides with the setting.
+                if !settings.hidePlayerProgressBar {
+                    NowPlayingScrubber()
+                        .padding(.horizontal, 24)
+                }
                 controls
             }
             .padding(.bottom, 24)
@@ -647,8 +781,11 @@ struct NowPlayingView: View {
                 .transition(.opacity)
             }
             VStack(spacing: 12) {
-                NowPlayingScrubber()
-                    .padding(.horizontal, 24)
+                // C6: the progress bar hides with the setting.
+                if !settings.hidePlayerProgressBar {
+                    NowPlayingScrubber()
+                        .padding(.horizontal, 24)
+                }
                 controls
             }
             .padding(.bottom, 24)
@@ -668,6 +805,7 @@ struct NowPlayingView: View {
 
             CompactTrackHeader(
                 showsExpandedArtwork: showsExpandedArtwork,
+                accent: themeAccent,
                 onOpenDestination: onOpenDestination,
                 onTapArtwork: collapseImmersiveArtwork
             )
@@ -718,9 +856,13 @@ struct NowPlayingView: View {
 
     private var immersiveControls: some View {
         VStack(spacing: 17) {
-            NowPlayingScrubber()
+            // C6: the progress bar hides with the setting.
+            if !settings.hidePlayerProgressBar {
+                NowPlayingScrubber()
+            }
             CompactTransportControls()
             CompactSecondaryControls(
+                accent: themeAccent,
                 showsLyrics: showLyricsOnMobile,
                 showsQueue: showQueueOnMobile,
                 onToggleLyrics: toggleImmersiveLyrics,
@@ -819,6 +961,7 @@ struct NowPlayingView: View {
             ZStack(alignment: .top) {
                 Color.clear
                 MinimalTrackInfoRow(
+                    accent: themeAccent,
                     onOpenDestination: onOpenDestination,
                     metadataOnly: true
                 )
@@ -868,11 +1011,12 @@ struct NowPlayingView: View {
     private var minimalControls: some View {
         VStack(spacing: 22) {
             ZStack {
-                MinimalTrackInfoRow(onOpenDestination: onOpenDestination)
+                MinimalTrackInfoRow(accent: themeAccent, onOpenDestination: onOpenDestination)
                     .opacity(showLyricsOnMobile ? 0 : 1)
                     .allowsHitTesting(!showLyricsOnMobile)
                     .accessibilityHidden(showLyricsOnMobile)
                 MinimalTrackInfoRow(
+                    accent: themeAccent,
                     onOpenDestination: onOpenDestination,
                     actionsOnly: true
                 )
@@ -881,10 +1025,14 @@ struct NowPlayingView: View {
                     .accessibilityHidden(!showLyricsOnMobile)
             }
             .frame(height: 44)
-            NowPlayingScrubber()
-                .padding(.horizontal, 2)
-                .padding(.top, 16)
+            // C6: the progress bar hides with the setting.
+            if !settings.hidePlayerProgressBar {
+                NowPlayingScrubber()
+                    .padding(.horizontal, 2)
+                    .padding(.top, 16)
+            }
             MinimalTransportControls(
+                accent: themeAccent,
                 backdrop: colors,
                 showQueue: $showQueueOnMobile,
                 onOpenDestination: onOpenDestination
@@ -968,9 +1116,18 @@ struct NowPlayingView: View {
         .frame(width: size, height: size)
         .clipShape(RoundedRectangle(cornerRadius: cornerRadius, style: .continuous))
         .shadow(color: .black.opacity(0.45), radius: shadowRadius, y: shadowRadius * 0.5)
-        .animation(.easeIn(duration: 0.25), value: artworkImage != nil)
+        .animation(
+            settings.staticMode || settings.effectiveReduceMotionTransitions
+                ? nil : .easeIn(duration: 0.25),
+            value: artworkImage != nil
+        )
         .scaleEffect(player.isPlaying ? 1 : 0.95)
-        .animation(AppAnimation.bouncy, value: player.isPlaying)
+        // The play/pause pulse is a micro-motion (C4/C5).
+        .animation(
+            settings.staticMode || settings.effectiveReduceMotionMicroMotion
+                ? nil : AppAnimation.bouncy,
+            value: player.isPlaying
+        )
     }
 
     private var trackMetaView: some View {
@@ -1022,8 +1179,11 @@ struct NowPlayingView: View {
             trackMetaView
 
             VStack(spacing: 14) {
-                NowPlayingScrubber()
-                    .frame(maxWidth: 380)
+                // C6: the progress bar hides with the setting.
+                if !settings.hidePlayerProgressBar {
+                    NowPlayingScrubber()
+                        .frame(maxWidth: 380)
+                }
                 controls
             }
 
@@ -1041,13 +1201,14 @@ struct NowPlayingView: View {
         HStack(spacing: 0) {
             // The like slot stays even when the track is briefly unavailable:
             // adding or removing it re-divides the equal-width row, which made
-            // every other control jump sideways during a track change.
+            // every other control jump sideways during a track change. It is
+            // not a control slot, so it is always shown.
             Group {
                 if let track = player.currentTrack {
                     let liked = account.isLiked(track.id)
                     circleButton(
                         icon: liked ? "heart.fill" : "heart",
-                        size: 15, tint: liked ? Theme.accent : nil
+                        size: 15, tint: liked ? themeAccent : nil
                     ) {
                         Task { await account.toggleLike(trackID: track.id) }
                     }
@@ -1058,13 +1219,44 @@ struct NowPlayingView: View {
             }
             .frame(maxWidth: .infinity)
 
+            // C8: the transport buttons render in the configured slot order
+            // and subset. FM mode keeps its dislike button in place of the
+            // shuffle slot (it is not a slot, so it is always shown there).
             if player.isFMMode {
                 circleButton(icon: "trash", size: 14) {
                     player.fmTrash()
                 }
                 .accessibilityLabel("不喜欢")
                 .frame(maxWidth: .infinity)
-            } else {
+            }
+            ForEach(PlayerControlSlot.effectiveSlots(from: settings)) { slot in
+                // The route picker is not a slot; it keeps its old place
+                // immediately before the repeat button, or at the end of the
+                // row when repeat is hidden.
+                if slot == .repeatMode {
+                    RoutePickerButton(diameter: 40, glyphSize: 15)
+                        .frame(maxWidth: .infinity)
+                }
+                transportSlotControl(slot)
+                    .frame(maxWidth: .infinity)
+            }
+            if !PlayerControlSlot.effectiveSlots(from: settings).contains(.repeatMode) {
+                RoutePickerButton(diameter: 40, glyphSize: 15)
+                    .frame(maxWidth: .infinity)
+            }
+        }
+        .accessibilityIdentifier("nowPlayingTransport")
+    }
+
+    /// C8: the button for one control slot, or nothing when the slot has no
+    /// button in the current mode (shuffle in FM is the trash button above;
+    /// previous in FM only with the C7 pin). Actions and disabled states are
+    /// the ones the row had before slots existed.
+    @ViewBuilder
+    private func transportSlotControl(_ slot: PlayerControlSlot) -> some View {
+        switch slot {
+        case .shuffle:
+            if !player.isFMMode {
                 // All three queue orders on the one button; the cycle skips
                 // AutoMix wherever it could do nothing (AutoMix off, order
                 // off), so this row keeps its present width and its two-state
@@ -1072,7 +1264,7 @@ struct NowPlayingView: View {
                 // all. Only the three values below differ per platform.
                 circleButton(
                     icon: queueOrderIcon, size: 14,
-                    tint: queueOrderIsActive ? Theme.accent : nil,
+                    tint: queueOrderIsActive ? themeAccent : nil,
                     action: cycleQueueOrder
                 )
                 #if os(macOS)
@@ -1081,46 +1273,41 @@ struct NowPlayingView: View {
                 .accessibilityLabel("随机播放")
                 .accessibilityAddTraits(player.shuffleEnabled ? .isSelected : [])
                 #endif
-                .frame(maxWidth: .infinity)
+            }
+        case .previous:
+            // C7: the setting pins the previous button visible even where FM
+            // mode would otherwise swap its slot for dislike.
+            if !player.isFMMode || settings.alwaysShowTrackSwitchButtons {
                 circleButton(icon: "backward.fill", size: 16) {
                     player.previous()
                 }
                 .accessibilityLabel("上一首")
-                .frame(maxWidth: .infinity)
             }
-
+        case .playPause:
             playPauseButton()
-                .frame(maxWidth: .infinity)
-
+        case .next:
             circleButton(icon: "forward.fill", size: 16) {
                 player.next()
             }
             .accessibilityLabel("下一首")
-            .frame(maxWidth: .infinity)
-
-            RoutePickerButton(diameter: 40, glyphSize: 15)
-                .frame(maxWidth: .infinity)
-
+        case .repeatMode:
             if player.isFMMode {
                 Image(systemName: "wave.3.right.circle.fill")
                     .font(.system(size: 15))
                     .foregroundStyle(.white.opacity(0.5))
                     .frame(width: 40, height: 40)
-                    .frame(maxWidth: .infinity)
             } else {
                 circleButton(
                     icon: player.repeatMode == .one ? "repeat.1" : "repeat",
                     size: 14,
-                    tint: player.repeatMode != .off ? Theme.accent : nil
+                    tint: player.repeatMode != .off ? themeAccent : nil
                 ) {
                     player.cycleRepeatMode()
                 }
                 .accessibilityLabel("循环播放")
                 .accessibilityValue(repeatModeAccessibilityValue)
-                .frame(maxWidth: .infinity)
             }
         }
-        .accessibilityIdentifier("nowPlayingTransport")
     }
 
     private func playPauseButton(diameter: CGFloat = 58, glyphSize: CGFloat = 21) -> some View {
@@ -1252,7 +1439,7 @@ struct NowPlayingView: View {
                     guard index != activeIndex else { return }
                     activeIndex = index
                     guard !isUserScrolling, let index else { return }
-                    withAnimation(.spring(response: 0.8, dampingFraction: 0.85)) {
+                    withAnimation(lyricAnimation(.spring(response: 0.8, dampingFraction: 0.85))) {
                         proxy.scrollTo(index, anchor: .center)
                     }
                 }
@@ -1313,8 +1500,8 @@ struct NowPlayingView: View {
             .scaleEffect(isActive ? 1.02 : 1, anchor: .leading)
         }
         .buttonStyle(.plain)
-        .animation(.spring(response: 0.4, dampingFraction: 0.8), value: isActive)
-        .animation(.easeOut(duration: 0.25), value: isUserScrolling)
+        .animation(lyricAnimation(.spring(response: 0.4, dampingFraction: 0.8)), value: isActive)
+        .animation(lyricAnimation(.easeOut(duration: 0.25)), value: isUserScrolling)
     }
 
     /// Centre-aligned karaoke line for the landscape page. The active line is
@@ -1353,8 +1540,8 @@ struct NowPlayingView: View {
                     radius: isActive ? 18 : 0, y: isActive ? 6 : 0)
         }
         .buttonStyle(.plain)
-        .animation(.spring(response: 0.4, dampingFraction: 0.85), value: isActive)
-        .animation(.easeOut(duration: 0.25), value: isUserScrolling)
+        .animation(lyricAnimation(.spring(response: 0.4, dampingFraction: 0.85)), value: isActive)
+        .animation(lyricAnimation(.easeOut(duration: 0.25)), value: isUserScrolling)
     }
 }
 
@@ -1375,10 +1562,18 @@ struct LyricMainText: View {
     var alignment: NSTextAlignment = .left
 
     @EnvironmentObject private var player: PlayerService
+    @EnvironmentObject private var settings: SettingsManager
     @ObservedObject private var windowVisibility = MainWindowVisibility.shared
 
+    /// The word-by-word wipe only runs for styles that animate word by word;
+    /// `none` and `lineHighlight` render the line as a unit (C15).
+    private var usesWordWipe: Bool {
+        settings.lyricAnimationStyle == .fade
+            || settings.lyricAnimationStyle == .karaokeZoom
+    }
+
     var body: some View {
-        if isActive, verbatim, let words = line.words, !words.isEmpty {
+        if isActive, verbatim, usesWordWipe, let words = line.words, !words.isEmpty {
             #if os(macOS)
             // The wipe runs on a display link inside the host: a per-frame
             // SwiftUI value here re-measured the page's whole layout while a
@@ -1396,10 +1591,19 @@ struct LyricMainText: View {
                 minimumInterval: 1 / 30,
                 paused: !player.isPlaying || !windowVisibility.isVisible
             )) { _ in
+                let alphas = Self.alphas(for: line, words: words, at: player.livePlaybackTime)
                 LyricText(
                     line: line, size: size, weight: weight, color: .white,
                     alignment: alignment,
-                    alphas: Self.alphas(for: line, words: words, at: player.livePlaybackTime)
+                    alphas: alphas
+                )
+                // C15 karaokeZoom: the line grows as its words are sung,
+                // driven by the same verbatim timings as the wipe. Every
+                // other style reads scale 1 (no visible change), so the
+                // default `fade` behaviour is untouched.
+                .scaleEffect(
+                    karaokeZoomScale(alphas: alphas),
+                    anchor: alignment == .center ? .center : .leading
                 )
             }
             #endif
@@ -1409,7 +1613,20 @@ struct LyricMainText: View {
                 color: .white.opacity(isActive ? 1 : inactiveOpacity),
                 alignment: alignment
             )
+            // C15 lineHighlight: the active line sits on a highlight bar.
+            .lineHighlight(when: settings.lyricAnimationStyle == .lineHighlight && isActive)
         }
+    }
+
+    /// Whole-line scale for the karaokeZoom style: 1.0 at the line's start,
+    /// growing to 1.05 as the last word is sung. On macOS the wipe runs on
+    /// the display-link host, so there is no per-frame SwiftUI value to
+    /// scale with — the style falls back to the wipe alone there.
+    private func karaokeZoomScale(alphas: [Double]) -> CGFloat {
+        guard settings.lyricAnimationStyle == .karaokeZoom,
+              !settings.staticMode, !alphas.isEmpty else { return 1 }
+        let sung = alphas.filter { $0 > 0.9 }.count
+        return 1 + 0.05 * CGFloat(sung) / CGFloat(alphas.count)
     }
 
     /// One opacity per character of `line.text`: sung characters are bright,
@@ -1445,6 +1662,25 @@ struct LyricMainText: View {
     }
 }
 
+private extension View {
+    /// C15: the lineHighlight lyric style puts the active line on a soft
+    /// highlight bar; every other style leaves the line untouched.
+    @ViewBuilder
+    func lineHighlight(when highlighted: Bool) -> some View {
+        if highlighted {
+            self
+                .padding(.vertical, 5)
+                .padding(.horizontal, 10)
+                .background(
+                    RoundedRectangle(cornerRadius: 10, style: .continuous)
+                        .fill(.white.opacity(0.14))
+                )
+        } else {
+            self
+        }
+    }
+}
+
 #if os(iOS)
 private struct IOSImmersiveLyricsColumn: View {
     @EnvironmentObject private var player: PlayerService
@@ -1453,6 +1689,20 @@ private struct IOSImmersiveLyricsColumn: View {
 
     @State private var activeIndex: Int?
     @State private var isUserScrolling = false
+
+    /// Line motion stills in static mode, with the "no animation" lyric
+    /// style, or when transitions are reduced (C4/C5/C15).
+    private var lyricAnimationsEnabled: Bool {
+        !settings.staticMode
+            && settings.lyricAnimationStyle != .none
+            && !settings.effectiveReduceMotionTransitions
+    }
+
+    /// Returns `animation` unless lyric motion is stilled, in which case nil
+    /// (the view jumps straight to its final state).
+    private func lyricAnimation(_ animation: Animation) -> Animation? {
+        lyricAnimationsEnabled ? animation : nil
+    }
 
     var body: some View {
         Group {
@@ -1478,7 +1728,7 @@ private struct IOSImmersiveLyricsColumn: View {
                         guard index != activeIndex else { return }
                         activeIndex = index
                         guard !isUserScrolling, let index else { return }
-                        withAnimation(.timingCurve(0.22, 1, 0.36, 1, duration: 0.38)) {
+                        withAnimation(lyricAnimation(.timingCurve(0.22, 1, 0.36, 1, duration: 0.38))) {
                             proxy.scrollTo(index, anchor: .center)
                         }
                     }
@@ -1490,7 +1740,7 @@ private struct IOSImmersiveLyricsColumn: View {
                     }
                     .lyricsScrollTracking(isUserScrolling: $isUserScrolling) {
                         guard let activeIndex else { return }
-                        withAnimation(.spring(response: 0.45, dampingFraction: 0.85)) {
+                        withAnimation(lyricAnimation(.spring(response: 0.45, dampingFraction: 0.85))) {
                             proxy.scrollTo(activeIndex, anchor: .center)
                         }
                     }
@@ -1524,7 +1774,7 @@ private struct IOSImmersiveLyricsColumn: View {
         activeIndex = index
         guard let index else { return }
         DispatchQueue.main.async {
-            withAnimation(.spring(response: 0.5, dampingFraction: 0.85)) {
+            withAnimation(lyricAnimation(.spring(response: 0.5, dampingFraction: 0.85))) {
                 proxy.scrollTo(index, anchor: .center)
             }
         }
@@ -1575,8 +1825,8 @@ private struct IOSImmersiveLyricsColumn: View {
             .scaleEffect(isActive ? 1.02 : 1.0, anchor: .leading)
         }
         .buttonStyle(.plain)
-        .animation(.spring(response: 0.35, dampingFraction: 0.85), value: isActive)
-        .animation(.easeOut(duration: 0.25), value: isUserScrolling)
+        .animation(lyricAnimation(.spring(response: 0.35, dampingFraction: 0.85)), value: isActive)
+        .animation(lyricAnimation(.easeOut(duration: 0.25)), value: isUserScrolling)
     }
 }
 
@@ -1620,6 +1870,8 @@ private struct CompactTrackHeader: View {
     @State private var showAddToPlaylist = false
 
     let showsExpandedArtwork: Bool
+    /// Resolved theme accent, passed down from NowPlayingView (C12/C14).
+    let accent: Color
     let onOpenDestination: (Destination) -> Void
     /// Tap handler for the compact cover (used to collapse lyrics back to
     /// artwork). The real image floats above this placeholder with hit-testing
@@ -1676,7 +1928,7 @@ private struct CompactTrackHeader: View {
                     } label: {
                         Image(systemName: liked ? "heart.fill" : "heart")
                             .font(.system(size: 21, weight: .medium))
-                            .foregroundStyle(liked ? Theme.accent : .white.opacity(0.88))
+                            .foregroundStyle(liked ? accent : .white.opacity(0.88))
                             .frame(width: 44, height: 44)
                     }
                     .buttonStyle(.pressable)
@@ -1738,30 +1990,50 @@ private struct CompactTrackHeader: View {
 
 private struct CompactTransportControls: View {
     @EnvironmentObject private var player: PlayerService
+    @EnvironmentObject private var settings: SettingsManager
 
     var body: some View {
         HStack(spacing: 0) {
-            Button(action: player.isFMMode ? player.fmTrash : player.previous) {
-                Image(systemName: player.isFMMode ? "trash" : "backward.fill")
-                    .font(.system(size: 25, weight: .semibold))
-                    .frame(maxWidth: .infinity, minHeight: 58)
+            // C7: the setting pins the previous button visible even where
+            // FM mode would otherwise swap its slot for dislike.
+            // C8: each transport button renders only when its slot is on.
+            if player.isFMMode, settings.alwaysShowTrackSwitchButtons,
+               PlayerControlSlot.isSelected(.previous, in: settings) {
+                Button(action: player.previous) {
+                    Image(systemName: "backward.fill")
+                        .font(.system(size: 25, weight: .semibold))
+                        .frame(maxWidth: .infinity, minHeight: 58)
+                }
+                .accessibilityLabel("上一首")
             }
-            .accessibilityLabel(player.isFMMode ? "不喜欢" : "上一首")
 
-            Button(action: player.togglePlayPause) {
-                Image(systemName: player.isPlaying ? "pause.fill" : "play.fill")
-                    .font(.system(size: 36, weight: .bold))
-                    .contentTransition(.opacity)
-                    .frame(maxWidth: .infinity, minHeight: 64)
+            if PlayerControlSlot.isSelected(.previous, in: settings) {
+                Button(action: player.isFMMode ? player.fmTrash : player.previous) {
+                    Image(systemName: player.isFMMode ? "trash" : "backward.fill")
+                        .font(.system(size: 25, weight: .semibold))
+                        .frame(maxWidth: .infinity, minHeight: 58)
+                }
+                .accessibilityLabel(player.isFMMode ? "不喜欢" : "上一首")
             }
-            .accessibilityLabel(player.isPlaying ? "暂停" : "播放")
 
-            Button(action: player.next) {
-                Image(systemName: "forward.fill")
-                    .font(.system(size: 25, weight: .semibold))
-                    .frame(maxWidth: .infinity, minHeight: 58)
+            if PlayerControlSlot.isSelected(.playPause, in: settings) {
+                Button(action: player.togglePlayPause) {
+                    Image(systemName: player.isPlaying ? "pause.fill" : "play.fill")
+                        .font(.system(size: 36, weight: .bold))
+                        .contentTransition(.opacity)
+                        .frame(maxWidth: .infinity, minHeight: 64)
+                }
+                .accessibilityLabel(player.isPlaying ? "暂停" : "播放")
             }
-            .accessibilityLabel("下一首")
+
+            if PlayerControlSlot.isSelected(.next, in: settings) {
+                Button(action: player.next) {
+                    Image(systemName: "forward.fill")
+                        .font(.system(size: 25, weight: .semibold))
+                        .frame(maxWidth: .infinity, minHeight: 58)
+                }
+                .accessibilityLabel("下一首")
+            }
         }
         .foregroundStyle(.white)
         .buttonStyle(.pressable)
@@ -1771,6 +2043,7 @@ private struct CompactTransportControls: View {
 #if os(iOS)
 private struct CompactVolumePopover: View {
     @EnvironmentObject private var player: PlayerService
+    @EnvironmentObject private var settings: SettingsManager
     @State private var isDragging = false
 
     var body: some View {
@@ -1814,7 +2087,14 @@ private struct CompactVolumePopover: View {
         .foregroundStyle(.white.opacity(0.85))
         .padding(.horizontal, 16)
         .padding(.vertical, 14)
-        .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 20, style: .continuous))
+        // B3: with native blur off, a plain translucent fill replaces the
+        // ultraThinMaterial behind the popover.
+        .background(
+            settings.playerPageNativeBlur
+                ? AnyShapeStyle(.ultraThinMaterial)
+                : AnyShapeStyle(.white.opacity(0.16)),
+            in: RoundedRectangle(cornerRadius: 20, style: .continuous)
+        )
         .overlay(alignment: .bottom) {
             Triangle()
                 .fill(.white.opacity(0.18))
@@ -1844,6 +2124,8 @@ private struct CompactVolumePopover: View {
 private struct CompactSecondaryControls: View {
     @EnvironmentObject private var player: PlayerService
     @State private var showsVolumeControl = false
+    /// Resolved theme accent, passed down from NowPlayingView (C12/C14).
+    let accent: Color
     let showsLyrics: Bool
     let showsQueue: Bool
     let onToggleLyrics: () -> Void
@@ -1902,7 +2184,7 @@ private struct CompactSecondaryControls: View {
         Button(action: action) {
             Image(systemName: icon)
                 .font(.system(size: 17, weight: .medium))
-                .foregroundStyle(isActive ? Theme.accent : .white.opacity(0.72))
+                .foregroundStyle(isActive ? accent : .white.opacity(0.72))
                 .frame(width: 44, height: 44)
                 .background(.white.opacity(0.08), in: Circle())
                 .frame(maxWidth: .infinity)
@@ -2091,6 +2373,20 @@ private struct IOSMinimalLyricsColumn: View {
     @State private var scrollSettleTask: Task<Void, Never>?
     @State private var selectionTimeoutTask: Task<Void, Never>?
 
+    /// Line motion stills in static mode, with the "no animation" lyric
+    /// style, or when transitions are reduced (C4/C5/C15).
+    private var lyricAnimationsEnabled: Bool {
+        !settings.staticMode
+            && settings.lyricAnimationStyle != .none
+            && !settings.effectiveReduceMotionTransitions
+    }
+
+    /// Returns `animation` unless lyric motion is stilled, in which case nil
+    /// (the view jumps straight to its final state).
+    private func lyricAnimation(_ animation: Animation) -> Animation? {
+        lyricAnimationsEnabled ? animation : nil
+    }
+
     var body: some View {
         GeometryReader { geometry in
             Group {
@@ -2176,7 +2472,7 @@ private struct IOSMinimalLyricsColumn: View {
                             guard !suppressesAutoScroll,
                                   !isDragging, scrollSettleTask == nil,
                                   selectedIndex == nil, let index else { return }
-                            withAnimation(.timingCurve(0.22, 1, 0.36, 1, duration: 0.38)) {
+                            withAnimation(lyricAnimation(.timingCurve(0.22, 1, 0.36, 1, duration: 0.38))) {
                                 proxy.scrollTo(index, anchor: .center)
                             }
                         }
@@ -2389,8 +2685,8 @@ private struct IOSMinimalLyricsColumn: View {
         }
         .buttonStyle(.plain)
         .accessibilityAddTraits(isSelected ? .isSelected : [])
-        .animation(.spring(response: 0.28, dampingFraction: 0.9), value: isActive)
-        .animation(.easeOut(duration: 0.18), value: isSelected)
+        .animation(lyricAnimation(.spring(response: 0.28, dampingFraction: 0.9)), value: isActive)
+        .animation(lyricAnimation(.easeOut(duration: 0.18)), value: isSelected)
     }
 }
 
@@ -2409,6 +2705,8 @@ private struct MinimalTrackInfoRow: View {
     @EnvironmentObject private var account: AccountStore
     @State private var showAddToPlaylist = false
     @State private var airPlayRequest = 0
+    /// Resolved theme accent, passed down from NowPlayingView (C12/C14).
+    let accent: Color
     let onOpenDestination: (Destination) -> Void
     var metadataOnly = false
     var actionsOnly = false
@@ -2480,7 +2778,7 @@ private struct MinimalTrackInfoRow: View {
         } label: {
             Image(systemName: liked ? "heart.fill" : "heart")
                 .font(.system(size: 22, weight: .medium))
-                .foregroundStyle(liked ? Theme.accent : .white.opacity(0.88))
+                .foregroundStyle(liked ? accent : .white.opacity(0.88))
                 .frame(width: 44, height: 44)
         }
         .buttonStyle(.pressable)
@@ -2548,6 +2846,9 @@ private struct MinimalTrackInfoRow: View {
 
 private struct MinimalTransportControls: View {
     @EnvironmentObject private var player: PlayerService
+    @EnvironmentObject private var settings: SettingsManager
+    /// Resolved theme accent, passed down from NowPlayingView (C12/C14).
+    let accent: Color
     let backdrop: ArtworkColors
     @Binding var showQueue: Bool
     let onOpenDestination: (Destination) -> Void
@@ -2565,30 +2866,54 @@ private struct MinimalTransportControls: View {
             .accessibilityIdentifier("immersivePlaylistButton")
                 .frame(maxWidth: .infinity)
 
-            Button(action: player.isFMMode ? player.fmTrash : player.previous) {
-                Image(systemName: player.isFMMode ? "trash" : "backward.fill")
-                    .font(.system(size: 25, weight: .semibold))
-                    .frame(maxWidth: .infinity, minHeight: 58)
+            // C7: the setting pins the previous button visible even where
+            // FM mode would otherwise swap its slot for dislike.
+            // C8: each transport button renders only when its slot is on.
+            if player.isFMMode, settings.alwaysShowTrackSwitchButtons,
+               PlayerControlSlot.isSelected(.previous, in: settings) {
+                Button(action: player.previous) {
+                    Image(systemName: "backward.fill")
+                        .font(.system(size: 25, weight: .semibold))
+                        .frame(maxWidth: .infinity, minHeight: 58)
+                }
+                .accessibilityLabel("上一首")
             }
-            .accessibilityLabel(player.isFMMode ? "不喜欢" : "上一首")
 
-            Button(action: player.togglePlayPause) {
-                Image(systemName: player.isPlaying ? "pause.fill" : "play.fill")
-                    .font(.system(size: 38, weight: .bold))
-                    .contentTransition(.opacity)
-                    .frame(maxWidth: .infinity, minHeight: 64)
+            if PlayerControlSlot.isSelected(.previous, in: settings) {
+                Button(action: player.isFMMode ? player.fmTrash : player.previous) {
+                    Image(systemName: player.isFMMode ? "trash" : "backward.fill")
+                        .font(.system(size: 25, weight: .semibold))
+                        .frame(maxWidth: .infinity, minHeight: 58)
+                }
+                .accessibilityLabel(player.isFMMode ? "不喜欢" : "上一首")
             }
-            .accessibilityLabel(player.isPlaying ? "暂停" : "播放")
 
-            Button(action: player.next) {
-                Image(systemName: "forward.fill")
-                    .font(.system(size: 25, weight: .semibold))
-                    .frame(maxWidth: .infinity, minHeight: 58)
+            if PlayerControlSlot.isSelected(.playPause, in: settings) {
+                Button(action: player.togglePlayPause) {
+                    Image(systemName: player.isPlaying ? "pause.fill" : "play.fill")
+                        .font(.system(size: 38, weight: .bold))
+                        .contentTransition(.opacity)
+                        .frame(maxWidth: .infinity, minHeight: 64)
+                }
+                .accessibilityLabel(player.isPlaying ? "暂停" : "播放")
             }
-            .accessibilityLabel("下一首")
 
-            playbackModeButton
-                .frame(maxWidth: .infinity)
+            if PlayerControlSlot.isSelected(.next, in: settings) {
+                Button(action: player.next) {
+                    Image(systemName: "forward.fill")
+                        .font(.system(size: 25, weight: .semibold))
+                        .frame(maxWidth: .infinity, minHeight: 58)
+                }
+                .accessibilityLabel("下一首")
+            }
+
+            // The one playback-mode button stands for both the shuffle and
+            // the repeat slot, so it shows when either is on.
+            if PlayerControlSlot.isSelected(.shuffle, in: settings)
+                || PlayerControlSlot.isSelected(.repeatMode, in: settings) {
+                playbackModeButton
+                    .frame(maxWidth: .infinity)
+            }
         }
         .foregroundStyle(.white)
         .buttonStyle(.pressable)
@@ -2642,7 +2967,7 @@ private struct MinimalTransportControls: View {
 
     private var playbackModeTint: Color {
         (player.shuffleEnabled || player.repeatMode != .off)
-            ? Theme.accent
+            ? accent
             : .white.opacity(0.88)
     }
 
@@ -2740,7 +3065,22 @@ struct MiniLyricsView: View {
     let onOpen: () -> Void
 
     @EnvironmentObject private var player: PlayerService
+    @EnvironmentObject private var settings: SettingsManager
     @ObservedObject private var lyricsCursor = PlayerService.shared.lyricsCursor
+
+    /// Line motion stills in static mode, with the "no animation" lyric
+    /// style, or when transitions are reduced (C4/C5/C15).
+    private var lyricAnimationsEnabled: Bool {
+        !settings.staticMode
+            && settings.lyricAnimationStyle != .none
+            && !settings.effectiveReduceMotionTransitions
+    }
+
+    /// Returns `animation` unless lyric motion is stilled, in which case nil
+    /// (the view jumps straight to its final state).
+    private func lyricAnimation(_ animation: Animation) -> Animation? {
+        lyricAnimationsEnabled ? animation : nil
+    }
 
     private var lines: (previous: LyricLine?, current: LyricLine?, next: LyricLine?) {
         guard let lyrics = player.lyrics, !lyrics.isEmpty else { return (nil, nil, nil) }
@@ -2767,7 +3107,7 @@ struct MiniLyricsView: View {
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
                 .contentShape(Rectangle())
                 .onTapGesture(perform: onOpen)
-                .animation(.spring(response: 0.4, dampingFraction: 0.85), value: current?.id)
+                .animation(lyricAnimation(.spring(response: 0.4, dampingFraction: 0.85)), value: current?.id)
             } else {
                 Color.clear
             }
@@ -2783,6 +3123,34 @@ struct MiniLyricsView: View {
             .multilineTextAlignment(.center)
             .padding(.horizontal, 28)
             .id(line?.id)
-            .transition(.opacity.combined(with: .move(edge: .bottom)))
+            .transition(
+                lyricAnimationsEnabled
+                    ? .opacity.combined(with: .move(edge: .bottom))
+                    : .identity
+            )
+    }
+}
+
+// MARK: - C8: player control slots
+
+extension PlayerControlSlot {
+    /// Slots to render, in the stored order. Unknown ids are dropped,
+    /// duplicates collapsed, and an empty selection falls back to the full
+    /// default set so playback stays possible.
+    @MainActor
+    static func effectiveSlots(from settings: SettingsManager) -> [PlayerControlSlot] {
+        var seen = Set<String>()
+        let slots = settings.playerControlSlots.compactMap { raw -> PlayerControlSlot? in
+            guard !seen.contains(raw), let slot = PlayerControlSlot(rawValue: raw) else { return nil }
+            seen.insert(raw)
+            return slot
+        }
+        return slots.isEmpty ? allCases : slots
+    }
+
+    /// Whether this slot is rendered, under the same empty-fallback rule.
+    @MainActor
+    static func isSelected(_ slot: PlayerControlSlot, in settings: SettingsManager) -> Bool {
+        effectiveSlots(from: settings).contains(slot)
     }
 }
