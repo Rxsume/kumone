@@ -285,8 +285,8 @@ struct NowPlayingView: View {
     /// returns `base`, positive values push past `color` away from `base`.
     private func shifted(_ color: Color, from base: Color, by amount: Double) -> Color {
         guard amount != 0,
-              let mine = PlatformColor(color).cgColor?.components,
-              let other = PlatformColor(base).cgColor?.components,
+              let mine = PlatformColor(color).cgColor.components,
+              let other = PlatformColor(base).cgColor.components,
               mine.count >= 4, other.count >= 4
         else { return color }
         func clamped(_ value: CGFloat) -> Double {
@@ -3137,6 +3137,7 @@ extension PlayerControlSlot {
     /// Slots to render, in the stored order. Unknown ids are dropped,
     /// duplicates collapsed, and an empty selection falls back to the full
     /// default set so playback stays possible.
+    @MainActor
     static func effectiveSlots(from settings: SettingsManager) -> [PlayerControlSlot] {
         var seen = Set<String>()
         let slots = settings.playerControlSlots.compactMap { raw -> PlayerControlSlot? in
@@ -3148,6 +3149,7 @@ extension PlayerControlSlot {
     }
 
     /// Whether this slot is rendered, under the same empty-fallback rule.
+    @MainActor
     static func isSelected(_ slot: PlayerControlSlot, in settings: SettingsManager) -> Bool {
         effectiveSlots(from: settings).contains(slot)
     }
