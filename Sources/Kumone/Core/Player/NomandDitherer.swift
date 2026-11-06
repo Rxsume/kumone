@@ -99,7 +99,13 @@ enum NomandDitherer {
     /// RGBA components of a platform colour, for hashing, cache keys and
     /// building solid-colour `CIImage`s.
     static func rgba(_ color: PlatformColor) -> (r: CGFloat, g: CGFloat, b: CGFloat, a: CGFloat) {
+        // `CIColor(color:)` returns `CIColor?` on macOS but a plain
+        // `CIColor` on iOS, so the unwrap is platform-conditional.
+        #if os(iOS)
+        let ciColor = CIColor(color: color)
+        #else
         guard let ciColor = CIColor(color: color) else { return (0, 0, 0, 1) }
+        #endif
         return (ciColor.red, ciColor.green, ciColor.blue, ciColor.alpha)
     }
 
