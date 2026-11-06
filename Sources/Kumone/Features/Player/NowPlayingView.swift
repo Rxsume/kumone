@@ -633,7 +633,7 @@ struct NowPlayingView: View {
     @ViewBuilder
     private func compactLayout(size: CGSize) -> some View {
         #if os(iOS)
-        switch settings.nowPlayingMode {
+        switch settings.effectiveNowPlayingMode {
         case .vinyl:
             vinylCompactLayout(size: size)
         case .classic:
@@ -642,6 +642,8 @@ struct NowPlayingView: View {
             immersiveCompactLayout(size: size)
         case .minimal:
             minimalCompactLayout(size: size)
+        case .lattice:
+            latticeCompactLayout(size: size)
         }
         #else
         switch settings.nowPlayingMode {
@@ -652,6 +654,80 @@ struct NowPlayingView: View {
         }
         #endif
     }
+
+    #if os(iOS)
+    /// Folia Lattice (P2): cover wall on top, big-lyrics card below,
+    /// transport at the bottom. The wall *is* the queue — tap a tile to
+    /// jump to that track — and the card is one static big-text style
+    /// rendered on Canvas (no WebGL/PixiJS).
+    ///
+    /// Chosen as a compact-layout mode rather than a separate page so the
+    /// existing backdrop, chrome rules and transport keep working
+    /// unchanged. The queue toggle in the transport swaps the wall for
+    /// the queue list (`CompactQueueContent`), like the other compact
+    /// layouts do.
+    private func latticeCompactLayout(size: CGSize) -> some View {
+        VStack(spacing: 0) {
+            HStack(spacing: 12) {
+                // The classic chrome overlays stay hidden in this mode (like
+                // vinyl), so the header carries its own back button —
+                // unless the always-show setting already puts one in the
+                // overlay, in which case a second chevron would double up.
+                if !settings.effectiveAlwaysShowPlayerBackButton {
+                    collapseButton(diameter: 36, glyphSize: 14)
+                }
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(player.currentTrack?.name ?? String(localized: "正在播放"))
+                        .font(.system(size: 16, weight: .semibold))
+                        .foregroundStyle(.white)
+                        .lineLimit(1)
+                    if let artist = player.currentTrack?.artistNames, !artist.isEmpty {
+                        Text(artist)
+                            .font(.caption)
+                            .foregroundStyle(.white.opacity(0.65))
+                            .lineLimit(1)
+                    }
+                }
+                Spacer()
+            }
+            .padding(.top, 20)
+            .padding(.horizontal, 20)
+
+            Group {
+                if showQueueOnMobile {
+                    CompactQueueContent()
+                        .transition(.opacity)
+                } else {
+                    LatticeWallView(
+                        queue: player.queue,
+                        currentTrackID: player.currentTrack?.id,
+                        onSelect: { player.jumpTo($0) }
+                    )
+                }
+            }
+            .frame(height: min(max(size.height * 0.30, 150), 260))
+            .padding(.top, 12)
+
+            LatticeLyricsCard(
+                lyrics: player.lyrics,
+                activeIndex: lyricsCursor.activeIndex,
+                accent: themeAccent,
+                tint: theme.tint,
+                showTranslation: settings.showLyricsTranslation,
+                showRomaji: settings.lyricsAnnotation == .romaji,
+                animate: player.isPlaying && !settings.effectiveStaticMode
+            )
+            .padding(.horizontal, 20)
+            .padding(.top, 12)
+
+            Spacer(minLength: 8)
+
+            immersiveControls
+        }
+        .frame(width: max(size.width - 64, 0))
+        .padding(.horizontal, 32)
+    }
+    #endif
 
     private func vinylCompactLayout(size: CGSize) -> some View {
         let discDimension = min(size.width - 64, size.height * 0.42, 320)
