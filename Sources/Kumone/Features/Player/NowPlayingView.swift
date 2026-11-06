@@ -53,7 +53,7 @@ struct NowPlayingView: View {
             .overlay(alignment: .topLeading) {
                 // C7: the setting pins the back button visible even where the
                 // compact layouts would otherwise hide it.
-                if settings.alwaysShowPlayerBackButton || showsClassicChrome(isCompact: isCompact) {
+                if settings.effectiveAlwaysShowPlayerBackButton || showsClassicChrome(isCompact: isCompact) {
                     #if os(macOS)
                     // The window keeps its own buttons while this page is up
                     // (#128). Beside them the chevron reads as one toolbar row:
@@ -89,11 +89,11 @@ struct NowPlayingView: View {
             }
             .overlay(alignment: .bottomTrailing) {
                 // C9: floating song card (tap returns to the main view).
-                if settings.stageTrackCardEnabled, player.hasCurrentTrack {
+                if settings.effectiveStageTrackCardEnabled, player.hasCurrentTrack {
                     StageTrackCard(
                         accent: themeAccent,
                         // C11: the card outline while a handover plays.
-                        transitionHighlighted: settings.transitionAnimationCard && transitionInProgress
+                        transitionHighlighted: settings.effectiveTransitionAnimationCard && transitionInProgress
                     ) {
                         withAnimation(AppAnimation.standard) {
                             showLyricsOnMobile = false
@@ -264,7 +264,7 @@ struct NowPlayingView: View {
         // C10: the player-page tint intensity still scales the artwork tint;
         // a preset or custom theme carries its own intensity instead.
         let intensity = theme.source == .artwork
-            ? settings.playerPageTintIntensity : theme.intensity
+            ? settings.effectivePlayerPageTintIntensity : theme.intensity
         return tintedColors(base, intensity: intensity)
     }
 
@@ -303,7 +303,7 @@ struct NowPlayingView: View {
     /// Ambient colour transitions still in static mode, or when the
     /// background reduce-motion override says so (C4/C5).
     private var backdropAnimation: Animation? {
-        settings.staticMode || settings.effectiveReduceMotionBackground
+        settings.effectiveStaticMode || settings.effectiveReduceMotionBackground
             ? nil : .easeInOut(duration: 0.8)
     }
 
@@ -311,8 +311,8 @@ struct NowPlayingView: View {
     /// mode, with the "no animation" lyric style, or when transitions are
     /// reduced (C4/C5/C15).
     private var lyricAnimationsEnabled: Bool {
-        !settings.staticMode
-            && settings.lyricAnimationStyle != .none
+        !settings.effectiveStaticMode
+            && settings.effectiveLyricAnimationStyle != .none
             && !settings.effectiveReduceMotionTransitions
     }
 
@@ -549,7 +549,7 @@ struct NowPlayingView: View {
         /// The drifting backdrop stills in static mode, or when the
         /// background reduce-motion override says so (C4/C5).
         private var motionStilled: Bool {
-            reduceMotion || settings.staticMode || settings.effectiveReduceMotionBackground
+            reduceMotion || settings.effectiveStaticMode || settings.effectiveReduceMotionBackground
         }
 
         var body: some View {
@@ -570,7 +570,7 @@ struct NowPlayingView: View {
                         // B3: with native blur off, the blurred artwork layer
                         // is omitted outright (an unblurred 1.5x cover would
                         // read as a smear); the tinted gradients remain.
-                        if settings.playerPageNativeBlur, let image {
+                        if settings.effectivePlayerPageNativeBlur, let image {
                             Image(platformImage: image)
                                 .resizable()
                                 .scaledToFill()
@@ -746,7 +746,7 @@ struct NowPlayingView: View {
             #else
             VStack(spacing: 12) {
                 // C6: the progress bar hides with the setting.
-                if !settings.hidePlayerProgressBar {
+                if !settings.effectiveHidePlayerProgressBar {
                     NowPlayingScrubber()
                         .padding(.horizontal, 24)
                 }
@@ -782,7 +782,7 @@ struct NowPlayingView: View {
             }
             VStack(spacing: 12) {
                 // C6: the progress bar hides with the setting.
-                if !settings.hidePlayerProgressBar {
+                if !settings.effectiveHidePlayerProgressBar {
                     NowPlayingScrubber()
                         .padding(.horizontal, 24)
                 }
@@ -857,7 +857,7 @@ struct NowPlayingView: View {
     private var immersiveControls: some View {
         VStack(spacing: 17) {
             // C6: the progress bar hides with the setting.
-            if !settings.hidePlayerProgressBar {
+            if !settings.effectiveHidePlayerProgressBar {
                 NowPlayingScrubber()
             }
             CompactTransportControls()
@@ -1026,7 +1026,7 @@ struct NowPlayingView: View {
             }
             .frame(height: 44)
             // C6: the progress bar hides with the setting.
-            if !settings.hidePlayerProgressBar {
+            if !settings.effectiveHidePlayerProgressBar {
                 NowPlayingScrubber()
                     .padding(.horizontal, 2)
                     .padding(.top, 16)
@@ -1117,14 +1117,14 @@ struct NowPlayingView: View {
         .clipShape(RoundedRectangle(cornerRadius: cornerRadius, style: .continuous))
         .shadow(color: .black.opacity(0.45), radius: shadowRadius, y: shadowRadius * 0.5)
         .animation(
-            settings.staticMode || settings.effectiveReduceMotionTransitions
+            settings.effectiveStaticMode || settings.effectiveReduceMotionTransitions
                 ? nil : .easeIn(duration: 0.25),
             value: artworkImage != nil
         )
         .scaleEffect(player.isPlaying ? 1 : 0.95)
         // The play/pause pulse is a micro-motion (C4/C5).
         .animation(
-            settings.staticMode || settings.effectiveReduceMotionMicroMotion
+            settings.effectiveStaticMode || settings.effectiveReduceMotionMicroMotion
                 ? nil : AppAnimation.bouncy,
             value: player.isPlaying
         )
@@ -1180,7 +1180,7 @@ struct NowPlayingView: View {
 
             VStack(spacing: 14) {
                 // C6: the progress bar hides with the setting.
-                if !settings.hidePlayerProgressBar {
+                if !settings.effectiveHidePlayerProgressBar {
                     NowPlayingScrubber()
                         .frame(maxWidth: 380)
                 }
@@ -1277,7 +1277,7 @@ struct NowPlayingView: View {
         case .previous:
             // C7: the setting pins the previous button visible even where FM
             // mode would otherwise swap its slot for dislike.
-            if !player.isFMMode || settings.alwaysShowTrackSwitchButtons {
+            if !player.isFMMode || settings.effectiveAlwaysShowTrackSwitchButtons {
                 circleButton(icon: "backward.fill", size: 16) {
                     player.previous()
                 }
@@ -1568,8 +1568,8 @@ struct LyricMainText: View {
     /// The word-by-word wipe only runs for styles that animate word by word;
     /// `none` and `lineHighlight` render the line as a unit (C15).
     private var usesWordWipe: Bool {
-        settings.lyricAnimationStyle == .fade
-            || settings.lyricAnimationStyle == .karaokeZoom
+        settings.effectiveLyricAnimationStyle == .fade
+            || settings.effectiveLyricAnimationStyle == .karaokeZoom
     }
 
     var body: some View {
@@ -1614,7 +1614,7 @@ struct LyricMainText: View {
                 alignment: alignment
             )
             // C15 lineHighlight: the active line sits on a highlight bar.
-            .lineHighlight(when: settings.lyricAnimationStyle == .lineHighlight && isActive)
+            .lineHighlight(when: settings.effectiveLyricAnimationStyle == .lineHighlight && isActive)
         }
     }
 
@@ -1623,8 +1623,8 @@ struct LyricMainText: View {
     /// the display-link host, so there is no per-frame SwiftUI value to
     /// scale with — the style falls back to the wipe alone there.
     private func karaokeZoomScale(alphas: [Double]) -> CGFloat {
-        guard settings.lyricAnimationStyle == .karaokeZoom,
-              !settings.staticMode, !alphas.isEmpty else { return 1 }
+        guard settings.effectiveLyricAnimationStyle == .karaokeZoom,
+              !settings.effectiveStaticMode, !alphas.isEmpty else { return 1 }
         let sung = alphas.filter { $0 > 0.9 }.count
         return 1 + 0.05 * CGFloat(sung) / CGFloat(alphas.count)
     }
@@ -1693,8 +1693,8 @@ private struct IOSImmersiveLyricsColumn: View {
     /// Line motion stills in static mode, with the "no animation" lyric
     /// style, or when transitions are reduced (C4/C5/C15).
     private var lyricAnimationsEnabled: Bool {
-        !settings.staticMode
-            && settings.lyricAnimationStyle != .none
+        !settings.effectiveStaticMode
+            && settings.effectiveLyricAnimationStyle != .none
             && !settings.effectiveReduceMotionTransitions
     }
 
@@ -1997,7 +1997,7 @@ private struct CompactTransportControls: View {
             // C7: the setting pins the previous button visible even where
             // FM mode would otherwise swap its slot for dislike.
             // C8: each transport button renders only when its slot is on.
-            if player.isFMMode, settings.alwaysShowTrackSwitchButtons,
+            if player.isFMMode, settings.effectiveAlwaysShowTrackSwitchButtons,
                PlayerControlSlot.isSelected(.previous, in: settings) {
                 Button(action: player.previous) {
                     Image(systemName: "backward.fill")
@@ -2090,7 +2090,7 @@ private struct CompactVolumePopover: View {
         // B3: with native blur off, a plain translucent fill replaces the
         // ultraThinMaterial behind the popover.
         .background(
-            settings.playerPageNativeBlur
+            settings.effectivePlayerPageNativeBlur
                 ? AnyShapeStyle(.ultraThinMaterial)
                 : AnyShapeStyle(.white.opacity(0.16)),
             in: RoundedRectangle(cornerRadius: 20, style: .continuous)
@@ -2376,8 +2376,8 @@ private struct IOSMinimalLyricsColumn: View {
     /// Line motion stills in static mode, with the "no animation" lyric
     /// style, or when transitions are reduced (C4/C5/C15).
     private var lyricAnimationsEnabled: Bool {
-        !settings.staticMode
-            && settings.lyricAnimationStyle != .none
+        !settings.effectiveStaticMode
+            && settings.effectiveLyricAnimationStyle != .none
             && !settings.effectiveReduceMotionTransitions
     }
 
@@ -2869,7 +2869,7 @@ private struct MinimalTransportControls: View {
             // C7: the setting pins the previous button visible even where
             // FM mode would otherwise swap its slot for dislike.
             // C8: each transport button renders only when its slot is on.
-            if player.isFMMode, settings.alwaysShowTrackSwitchButtons,
+            if player.isFMMode, settings.effectiveAlwaysShowTrackSwitchButtons,
                PlayerControlSlot.isSelected(.previous, in: settings) {
                 Button(action: player.previous) {
                     Image(systemName: "backward.fill")
@@ -3071,8 +3071,8 @@ struct MiniLyricsView: View {
     /// Line motion stills in static mode, with the "no animation" lyric
     /// style, or when transitions are reduced (C4/C5/C15).
     private var lyricAnimationsEnabled: Bool {
-        !settings.staticMode
-            && settings.lyricAnimationStyle != .none
+        !settings.effectiveStaticMode
+            && settings.effectiveLyricAnimationStyle != .none
             && !settings.effectiveReduceMotionTransitions
     }
 
@@ -3140,7 +3140,7 @@ extension PlayerControlSlot {
     @MainActor
     static func effectiveSlots(from settings: SettingsManager) -> [PlayerControlSlot] {
         var seen = Set<String>()
-        let slots = settings.playerControlSlots.compactMap { raw -> PlayerControlSlot? in
+        let slots = settings.effectivePlayerControlSlots.compactMap { raw -> PlayerControlSlot? in
             guard !seen.contains(raw), let slot = PlayerControlSlot(rawValue: raw) else { return nil }
             seen.insert(raw)
             return slot

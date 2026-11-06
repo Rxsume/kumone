@@ -6,7 +6,7 @@ import SwiftUI
 /// (`transitionHighlighted`); this view only draws the ring.
 ///
 /// The ring shows only when `isTransitioning` is true *and*
-/// `settings.transitionAnimationRing` is on. There is currently no live
+/// `settings.effectiveTransitionAnimationRing` is on. There is currently no live
 /// signal to drive `isTransitioning` (see `NowPlayingView.transitionInProgress`):
 /// the engine reports transitions only as `transitionMidpoint` /
 /// `transitionCompleted` events on a private `AsyncStream`, and the debug
@@ -25,11 +25,11 @@ struct TransitionAnimationView: View {
     /// The spin stills in static mode, or when the transitions
     /// reduce-motion override says so (C4/C5); the ring itself stays put.
     private var motionStilled: Bool {
-        settings.staticMode || settings.effectiveReduceMotionTransitions
+        settings.effectiveStaticMode || settings.effectiveReduceMotionTransitions
     }
 
     var body: some View {
-        if isTransitioning, settings.transitionAnimationRing {
+        if isTransitioning, settings.effectiveTransitionAnimationRing {
             ZStack {
                 Circle()
                     .stroke(.white.opacity(0.18), lineWidth: 3)

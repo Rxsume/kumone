@@ -4,7 +4,7 @@ import SwiftUI
 /// track's artwork, title and artist; tapping it returns to the page's main
 /// view (the caller closes any lyrics / queue overlay it opened). The card
 /// itself is inert unless mounted — `NowPlayingView` only mounts it while
-/// `settings.stageTrackCardEnabled` is on.
+/// `settings.effectiveStageTrackCardEnabled` is on.
 struct StageTrackCard: View {
     /// Resolved theme accent, passed down from NowPlayingView (C12/C14).
     let accent: Color

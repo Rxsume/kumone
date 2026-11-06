@@ -17,26 +17,29 @@ struct AutoMixSettingsSection: View {
                         Text(mode.displayName).tag(mode)
                     }
                 }
-                if settings.transitionMode == .crossfade {
-                    HStack {
-                        Text("最长淡入淡出")
-                        Spacer()
-                        Text("\(Int(settings.crossfadeMaxSeconds)) 秒")
-                            .foregroundStyle(.secondary)
+                .disabled(!settings.foliaEnabled)
+                Group {
+                    if settings.transitionMode == .crossfade {
+                        HStack {
+                            Text("最长淡入淡出")
+                            Spacer()
+                            Text("\(Int(settings.crossfadeMaxSeconds)) 秒")
+                                .foregroundStyle(.secondary)
+                        }
+                        Slider(
+                            value: $settings.crossfadeMaxSeconds,
+                            in: SettingsManager.crossfadeMaxSecondsRange,
+                            step: 1
+                        )
+                        HStack {
+                            Text("2 秒")
+                            Spacer()
+                            Text("12 秒")
+                        }
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
                     }
-                    Slider(
-                        value: $settings.crossfadeMaxSeconds,
-                        in: SettingsManager.crossfadeMaxSecondsRange,
-                        step: 1
-                    )
-                    HStack {
-                        Text("2 秒")
-                        Spacer()
-                        Text("12 秒")
-                    }
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                }
+                }.disabled(!settings.foliaEnabled)
                 Toggle(isOn: $settings.automixOrderEnabled) {
                     VStack(alignment: .leading, spacing: 4) {
                         Text("智能顺序")
@@ -53,6 +56,7 @@ struct AutoMixSettingsSection: View {
                         Text(mode.displayName).tag(mode)
                     }
                 }
+                .disabled(!settings.foliaEnabled)
                 #if arch(arm64)
                 StemTransitionSettings()
                 #endif

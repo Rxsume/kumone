@@ -296,6 +296,7 @@ final class SettingsManager: ObservableObject {
         static let transitionMode = "settings.transitionMode"
         static let crossfadeMaxSeconds = "settings.crossfadeMaxSeconds"
         static let replayGainMode = "settings.replayGainMode"
+        static let foliaEnabled = "settings.foliaEnabled"
     }
 
     @Published var audioQuality: AudioQuality {
@@ -508,9 +509,24 @@ final class SettingsManager: ObservableObject {
 
     // MARK: - Folia visual / playback settings
 
+    /// Master switch for all Folia visual / playback settings in this
+    /// section. Off restores the pre-folia behaviour (what the app did
+    /// at bb21dd8, before PR #8): every `effective*` property below
+    /// returns its pre-folia value. The stored values are kept, so
+    /// turning it back on restores the user's choices.
+    @Published var foliaEnabled: Bool {
+        didSet { UserDefaults.standard.set(foliaEnabled, forKey: Keys.foliaEnabled) }
+    }
+
     /// Lyric line animation style on the now-playing page.
     @Published var lyricAnimationStyle: LyricAnimationStyle {
         didSet { UserDefaults.standard.set(lyricAnimationStyle.rawValue, forKey: Keys.lyricAnimationStyle) }
+    }
+
+    /// Lyric animation with the master switch off: the pre-folia
+    /// word wipe (verbatim word-by-word alphas) is the `.fade` style.
+    var effectiveLyricAnimationStyle: LyricAnimationStyle {
+        foliaEnabled ? lyricAnimationStyle : .fade
     }
 
     /// Built-in colour theme preset id; "default" follows the system light/dark
@@ -519,14 +535,33 @@ final class SettingsManager: ObservableObject {
         didSet { UserDefaults.standard.set(themePresetID, forKey: Keys.themePreset) }
     }
 
+    /// Theme preset with the master switch off: `"default"`, whose
+    /// colours are the pre-folia ones (`Theme.accent` over the
+    /// fallback artwork tint). No custom theme existed before PR #8.
+    var effectiveThemePresetID: String {
+        foliaEnabled ? themePresetID : "default"
+    }
+
     /// JSON-encoded custom theme (see `ThemePreset`), empty when none is saved.
     @Published var customThemeJSON: String {
         didSet { UserDefaults.standard.set(customThemeJSON, forKey: Keys.customTheme) }
     }
 
+    /// Custom theme JSON with the master switch off: none was saved
+    /// before PR #8, so there is no custom theme.
+    var effectiveCustomThemeJSON: String {
+        foliaEnabled ? customThemeJSON : ""
+    }
+
     /// Prefer the custom theme over the current song's artwork theme.
     @Published var preferCustomTheme: Bool {
         didSet { UserDefaults.standard.set(preferCustomTheme, forKey: Keys.preferCustomTheme) }
+    }
+
+    /// Prefer-custom-theme with the master switch off: no custom
+    /// theme existed before PR #8, so there is nothing to prefer.
+    var effectivePreferCustomTheme: Bool {
+        foliaEnabled ? preferCustomTheme : false
     }
 
     /// Let the now-playing page and main interface follow the current song's
@@ -535,10 +570,23 @@ final class SettingsManager: ObservableObject {
         didSet { UserDefaults.standard.set(songThemeAutoSwitch, forKey: Keys.songThemeAutoSwitch) }
     }
 
+    /// Song-theme auto-switch with the master switch off: pre-folia
+    /// the now-playing page always followed the artwork palette, so
+    /// it stays on.
+    var effectiveSongThemeAutoSwitch: Bool {
+        foliaEnabled ? songThemeAutoSwitch : true
+    }
+
     /// Home page artwork-tinted dynamic background, separate from the main
     /// interface ambient background switch.
     @Published var homeDynamicBackground: Bool {
         didSet { UserDefaults.standard.set(homeDynamicBackground, forKey: Keys.homeDynamicBackground) }
+    }
+
+    /// Home dynamic background with the master switch off: pre-folia
+    /// the ambient gradient was unconditional, so it stays on.
+    var effectiveHomeDynamicBackground: Bool {
+        foliaEnabled ? homeDynamicBackground : true
     }
 
     /// Native blur (ultraThinMaterial) behind the now-playing page.
@@ -546,10 +594,23 @@ final class SettingsManager: ObservableObject {
         didSet { UserDefaults.standard.set(playerPageNativeBlur, forKey: Keys.playerPageNativeBlur) }
     }
 
+    /// Native blur with the master switch off: pre-folia the blurred
+    /// artwork layer and the ultraThinMaterial popover were
+    /// unconditional, so it stays on.
+    var effectivePlayerPageNativeBlur: Bool {
+        foliaEnabled ? playerPageNativeBlur : true
+    }
+
     /// Static mode: a master switch that stills ambient transitions, vinyl
     /// rotation and lyric animations (on top of the system Reduce Motion).
     @Published var staticMode: Bool {
         didSet { UserDefaults.standard.set(staticMode, forKey: Keys.staticMode) }
+    }
+
+    /// Static mode with the master switch off: it did not exist
+    /// before PR #8.
+    var effectiveStaticMode: Bool {
+        foliaEnabled ? staticMode : false
     }
 
     /// Reduce-motion overrides, per area. `nil` means "follow the system"
@@ -567,16 +628,18 @@ final class SettingsManager: ObservableObject {
     }
 
     /// Effective Reduce Motion per area: the manual override, else the system.
+    /// With the Folia master switch off the overrides are inert — pre-folia
+    /// there were no per-area overrides — so the system value applies.
     var effectiveReduceMotionBackground: Bool {
-        reduceMotionBackground ?? Platform.isReduceMotionEnabled
+        (foliaEnabled ? reduceMotionBackground : nil) ?? Platform.isReduceMotionEnabled
     }
 
     var effectiveReduceMotionTransitions: Bool {
-        reduceMotionTransitions ?? Platform.isReduceMotionEnabled
+        (foliaEnabled ? reduceMotionTransitions : nil) ?? Platform.isReduceMotionEnabled
     }
 
     var effectiveReduceMotionMicroMotion: Bool {
-        reduceMotionMicroMotion ?? Platform.isReduceMotionEnabled
+        (foliaEnabled ? reduceMotionMicroMotion : nil) ?? Platform.isReduceMotionEnabled
     }
 
     private static func setOptionalBool(_ value: Bool?, forKey key: String) {
@@ -592,9 +655,21 @@ final class SettingsManager: ObservableObject {
         didSet { UserDefaults.standard.set(playbackFadeEnabled, forKey: Keys.playbackFadeEnabled) }
     }
 
+    /// Pause/resume fade with the master switch off: pre-folia the
+    /// volume cut in and out at once, with no ramp.
+    var effectivePlaybackFadeEnabled: Bool {
+        foliaEnabled ? playbackFadeEnabled : false
+    }
+
     /// Default behaviour when adding a track from a list.
     @Published var queueAddBehavior: QueueAddBehavior {
         didSet { UserDefaults.standard.set(queueAddBehavior.rawValue, forKey: Keys.queueAddBehavior) }
+    }
+
+    /// Queue-add behaviour with the master switch off: `.next`, the
+    /// historical behaviour (insert after the current track).
+    var effectiveQueueAddBehavior: QueueAddBehavior {
+        foliaEnabled ? queueAddBehavior : .next
     }
 
     /// Skip unplayable tracks automatically (VIP-only, region-locked, removed).
@@ -603,9 +678,22 @@ final class SettingsManager: ObservableObject {
         didSet { UserDefaults.standard.set(autoSkipUnplayable, forKey: Keys.autoSkipUnplayable) }
     }
 
+    /// Auto-skip with the master switch off: pre-folia an unplayable
+    /// track just failed instead of skipping to the next one.
+    var effectiveAutoSkipUnplayable: Bool {
+        foliaEnabled ? autoSkipUnplayable : false
+    }
+
     /// Which view opens when playback starts from a list.
     @Published var playbackEntryView: PlaybackEntryView {
         didSet { UserDefaults.standard.set(playbackEntryView.rawValue, forKey: Keys.playbackEntryView) }
+    }
+
+    /// Playback entry view with the master switch off: `.stay` —
+    /// auto-opening the now-playing page (B8) is new; pre-folia
+    /// playback stayed on the list it started from.
+    var effectivePlaybackEntryView: PlaybackEntryView {
+        foliaEnabled ? playbackEntryView : .stay
     }
 
     static let playerPageTintIntensityRange = 0.5...1.5
@@ -617,9 +705,22 @@ final class SettingsManager: ObservableObject {
         }
     }
 
+    /// Player-page tint intensity with the master switch off: 1.0
+    /// returns the extracted colours unchanged; pre-folia there was
+    /// no intensity scaling.
+    var effectivePlayerPageTintIntensity: Double {
+        foliaEnabled ? playerPageTintIntensity : 1
+    }
+
     /// Hide the progress bar / scrubber on the now-playing page.
     @Published var hidePlayerProgressBar: Bool {
         didSet { UserDefaults.standard.set(hidePlayerProgressBar, forKey: Keys.hidePlayerProgressBar) }
+    }
+
+    /// Hide-progress-bar with the master switch off: the scrubber
+    /// was unconditional before PR #8, so it stays shown.
+    var effectiveHidePlayerProgressBar: Bool {
+        foliaEnabled ? hidePlayerProgressBar : false
     }
 
     /// Always show the back button on the now-playing page.
@@ -629,6 +730,13 @@ final class SettingsManager: ObservableObject {
         }
     }
 
+    /// Always-show-back-button with the master switch off: pre-folia
+    /// the button only appeared where the compact layouts show
+    /// their classic chrome.
+    var effectiveAlwaysShowPlayerBackButton: Bool {
+        foliaEnabled ? alwaysShowPlayerBackButton : false
+    }
+
     /// Always show the previous/next buttons on the now-playing page.
     @Published var alwaysShowTrackSwitchButtons: Bool {
         didSet {
@@ -636,9 +744,23 @@ final class SettingsManager: ObservableObject {
         }
     }
 
+    /// Always-show-track-switch-buttons with the master switch off:
+    /// pre-folia FM mode swapped the previous slot for dislike, so
+    /// the buttons only show outside FM.
+    var effectiveAlwaysShowTrackSwitchButtons: Bool {
+        foliaEnabled ? alwaysShowTrackSwitchButtons : false
+    }
+
     /// Transport buttons shown in the player bar, as slot ids in order.
     @Published var playerControlSlots: [String] {
         didSet { UserDefaults.standard.set(playerControlSlots, forKey: Keys.playerControlSlots) }
+    }
+
+    /// Transport slots with the master switch off: the full fixed
+    /// set (shuffle, previous, play/pause, next, repeat), which is
+    /// what the pre-folia transport bar showed.
+    var effectivePlayerControlSlots: [String] {
+        foliaEnabled ? playerControlSlots : PlayerControlSlot.allCases.map(\.rawValue)
     }
 
     /// Floating song card on the now-playing page (tap to return to the page).
@@ -646,14 +768,32 @@ final class SettingsManager: ObservableObject {
         didSet { UserDefaults.standard.set(stageTrackCardEnabled, forKey: Keys.stageTrackCardEnabled) }
     }
 
+    /// Floating song card with the master switch off: it did not
+    /// exist before PR #8.
+    var effectiveStageTrackCardEnabled: Bool {
+        foliaEnabled ? stageTrackCardEnabled : false
+    }
+
     /// Transition animations while a handover plays: a ring on screen…
     @Published var transitionAnimationRing: Bool {
         didSet { UserDefaults.standard.set(transitionAnimationRing, forKey: Keys.transitionAnimationRing) }
     }
 
+    /// Transition-animation ring with the master switch off: it did
+    /// not exist before PR #8.
+    var effectiveTransitionAnimationRing: Bool {
+        foliaEnabled ? transitionAnimationRing : false
+    }
+
     /// …and an outline around the song card.
     @Published var transitionAnimationCard: Bool {
         didSet { UserDefaults.standard.set(transitionAnimationCard, forKey: Keys.transitionAnimationCard) }
+    }
+
+    /// Transition-animation card outline with the master switch off:
+    /// it did not exist before PR #8.
+    var effectiveTransitionAnimationCard: Bool {
+        foliaEnabled ? transitionAnimationCard : false
     }
 
     #if os(iOS)
@@ -664,11 +804,23 @@ final class SettingsManager: ObservableObject {
         }
     }
 
+    /// Prevent-display-sleep with the master switch off: pre-folia
+    /// nothing held the idle timer while playing.
+    var effectivePreventDisplaySleepDuringPlayback: Bool {
+        foliaEnabled ? preventDisplaySleepDuringPlayback : false
+    }
+
     /// iOS crossfade (Folia P2/P3): cut between songs with a dual-deck
     /// overlap instead of a hard cut. Default off — the single-`AVPlayer`
     /// path is used until the user turns it on.
     @Published var iosCrossfadeEnabled: Bool {
         didSet { UserDefaults.standard.set(iosCrossfadeEnabled, forKey: Keys.iosCrossfadeEnabled) }
+    }
+
+    /// iOS crossfade with the master switch off: pre-folia iOS
+    /// played through a single `AVPlayer` with hard cuts.
+    var effectiveIosCrossfadeEnabled: Bool {
+        foliaEnabled ? iosCrossfadeEnabled : false
     }
     #endif
 
@@ -679,6 +831,13 @@ final class SettingsManager: ObservableObject {
         didSet { UserDefaults.standard.set(transitionMode.rawValue, forKey: Keys.transitionMode) }
     }
 
+    /// Handover mode with the master switch off: `.automix` —
+    /// pre-folia `plannerConfig` was `Config.standard`, and
+    /// `.automix` leaves the config exactly as base.
+    var effectiveTransitionMode: TransitionMode {
+        foliaEnabled ? transitionMode : .automix
+    }
+
     /// Longest crossfade the planner may use, in seconds.
     @Published var crossfadeMaxSeconds: Double {
         didSet {
@@ -686,9 +845,31 @@ final class SettingsManager: ObservableObject {
         }
     }
 
+    /// Longest crossfade with the master switch off: pre-folia there
+    /// was no such setting and the fallback fade was capped at 6 s.
+    /// Inert in practice — `.automix` mode ignores the cap, and the
+    /// iOS engine is off with the master switch off.
+    var effectiveCrossfadeMaxSeconds: Double {
+        foliaEnabled ? crossfadeMaxSeconds : 6
+    }
+
     /// ReplayGain loudness levelling mode.
     @Published var replayGainMode: ReplayGainMode {
         didSet { UserDefaults.standard.set(replayGainMode.rawValue, forKey: Keys.replayGainMode) }
+    }
+
+    /// ReplayGain mode with the master switch off: iOS had no
+    /// ReplayGain before PR #8 (`.off`); macOS keeps its shipped
+    /// analysis-based compensation (`.auto`).
+    var effectiveReplayGainMode: ReplayGainMode {
+        guard foliaEnabled else {
+            #if os(iOS)
+            return .off
+            #else
+            return .auto
+            #endif
+        }
+        return replayGainMode
     }
 
     private init() {
@@ -749,6 +930,7 @@ final class SettingsManager: ObservableObject {
             max(storedAmbientBackgroundIntensity, Self.mainWindowAmbientBackgroundIntensityRange.lowerBound),
             Self.mainWindowAmbientBackgroundIntensityRange.upperBound
         )
+        foliaEnabled = defaults.object(forKey: Keys.foliaEnabled) as? Bool ?? true
         lyricAnimationStyle = defaults.string(forKey: Keys.lyricAnimationStyle)
             .flatMap(LyricAnimationStyle.init) ?? .fade
         themePresetID = defaults.string(forKey: Keys.themePreset) ?? "default"

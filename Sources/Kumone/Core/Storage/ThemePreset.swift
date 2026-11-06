@@ -138,7 +138,10 @@ struct ThemePreset: Codable, Equatable, Hashable, Identifiable {
         return theme
     }
 
-    /// The custom theme currently saved in settings, if any.
+    /// The custom theme currently saved in settings, if any. Reads the
+    /// stored value directly: the theme editor UI shows the saved theme
+    /// even when the Folia master switch is off, while `resolvedTheme`
+    /// (the behaviour path) reads `settings.effectiveCustomThemeJSON`.
     @MainActor
     static func customTheme(from settings: SettingsManager) -> ThemePreset? {
         decodeCustomTheme(from: settings.customThemeJSON)
@@ -180,20 +183,20 @@ extension ThemePreset {
     /// palette (`nil` when no song/artwork is available). Priority:
     ///
     /// 1. Custom theme — when one is saved and either
-    ///    `settings.preferCustomTheme` is on or the selected preset itself
+    ///    `settings.effectivePreferCustomTheme` is on or the selected preset itself
     ///    is `"custom"`.
-    /// 2. Song theme — when `settings.songThemeAutoSwitch` is on and a
+    /// 2. Song theme — when `settings.effectiveSongThemeAutoSwitch` is on and a
     ///    palette is available; the artwork's primary colour becomes both
     ///    the accent and the tint, its secondary colour the secondary tint.
-    /// 3. The selected preset (`settings.themePresetID`); an unknown id, or
+    /// 3. The selected preset (`settings.effectiveThemePresetID`); an unknown id, or
     ///    `"custom"` with no saved theme, falls back to the default preset.
     ///
     /// The default preset resolves to the existing colours: `Theme.accent`
     /// with `ArtworkColors.fallback`.
     @MainActor
     static func resolvedTheme(settings: SettingsManager, palette: ArtworkColors?) -> ResolvedTheme {
-        if let custom = customTheme(from: settings),
-           settings.preferCustomTheme || settings.themePresetID == "custom" {
+        if let custom = decodeCustomTheme(from: settings.effectiveCustomThemeJSON),
+           settings.effectivePreferCustomTheme || settings.effectiveThemePresetID == "custom" {
             return ResolvedTheme(
                 accent: custom.accent.color,
                 tint: custom.tint.color,
@@ -203,7 +206,7 @@ extension ThemePreset {
             )
         }
 
-        if settings.songThemeAutoSwitch, let palette {
+        if settings.effectiveSongThemeAutoSwitch, let palette {
             return ResolvedTheme(
                 accent: palette.primary,
                 tint: palette.primary,
@@ -213,7 +216,7 @@ extension ThemePreset {
             )
         }
 
-        let preset = preset(id: settings.themePresetID)
+        let preset = preset(id: settings.effectiveThemePresetID)
         if preset.id == "default" {
             return ResolvedTheme(
                 accent: Theme.accent,

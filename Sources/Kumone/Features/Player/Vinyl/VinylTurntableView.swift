@@ -51,7 +51,7 @@ public struct VinylTurntableView: View {
                 discSize: discSize,
                 spinning: isPlaying && !isDragging && !isTransitioningTrack
                     && windowVisibility.isVisible
-                    && !settings.staticMode
+                    && !settings.effectiveStaticMode
                     && !settings.effectiveReduceMotionMicroMotion
             )
             .offset(x: dragOffset)
@@ -70,7 +70,7 @@ public struct VinylTurntableView: View {
             VinylTonearmView(
                 isPlaying: isPlaying && !isDragging && !isTransitioningTrack,
                 height: armHeight,
-                reduceMotion: settings.staticMode || settings.effectiveReduceMotionMicroMotion
+                reduceMotion: settings.effectiveStaticMode || settings.effectiveReduceMotionMicroMotion
             )
             .offset(x: discSize * 0.12, y: -armHeight * 0.08)
             .allowsHitTesting(false)

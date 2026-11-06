@@ -84,7 +84,7 @@ struct StaggeredAppearanceModifier: ViewModifier {
             .onAppear {
                 // C4/C5: static mode — or the transitions reduce-motion
                 // override — skips the entrance animation.
-                if settings.staticMode || settings.effectiveReduceMotionTransitions
+                if settings.effectiveStaticMode || settings.effectiveReduceMotionTransitions
                     || AnimationCache.hasAnimated(itemID) {
                     isVisible = true
                     return
@@ -245,7 +245,7 @@ struct MarqueeText: View {
             text: text, fontSize: fontSize, weight: fontWeight,
             // C4/C5: static mode — or the micro-motion reduce-motion
             // override — holds the title still instead of scrolling it.
-            reduceMotion: settings.staticMode || settings.effectiveReduceMotionMicroMotion
+            reduceMotion: settings.effectiveStaticMode || settings.effectiveReduceMotionMicroMotion
         )
     }
 }

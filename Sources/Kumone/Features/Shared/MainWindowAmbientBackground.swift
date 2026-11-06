@@ -54,7 +54,7 @@ struct MainWindowAmbientBackground: View {
     /// Ambient transitions still in static mode, or when the background
     /// reduce-motion override says so (C4/C5).
     private var ambientAnimation: Animation? {
-        settings.staticMode || settings.effectiveReduceMotionBackground
+        settings.effectiveStaticMode || settings.effectiveReduceMotionBackground
             ? nil : .easeInOut(duration: 0.6)
     }
 
@@ -62,7 +62,7 @@ struct MainWindowAmbientBackground: View {
         // B2: the home dynamic background has its own switch; off hides the
         // ambient tint entirely. The master switch still gates this view at
         // the call site.
-        if settings.homeDynamicBackground {
+        if settings.effectiveHomeDynamicBackground {
             ZStack {
                 LinearGradient(
                     colors: [displayColors.primary, displayColors.secondary],
@@ -285,7 +285,7 @@ final class MainWindowAmbientAppearanceController {
             // C4/C5: the titlebar tint change is a transition; static mode
             // or the transitions reduce-motion override jumps it to the
             // final colours instead of animating.
-            disableAnimations: SettingsManager.shared.staticMode
+            disableAnimations: SettingsManager.shared.effectiveStaticMode
                 || SettingsManager.shared.effectiveReduceMotionTransitions
         )
     }
