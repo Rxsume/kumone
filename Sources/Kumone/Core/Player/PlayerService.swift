@@ -1747,8 +1747,8 @@ final class PlayerService: ObservableObject {
             // leaves it at 6 s: the cap is a crossfade-mode setting, not a
             // global one.
             let fade: TimeInterval =
-                SettingsManager.shared.transitionMode == .crossfade
-                ? min(6, SettingsManager.shared.crossfadeMaxSeconds) : 6
+                SettingsManager.shared.effectiveTransitionMode == .crossfade
+                ? min(6, SettingsManager.shared.effectiveCrossfadeMaxSeconds) : 6
             return .plain(.crossfade(duration: fade,
                                      outPoint: max(duration - fade, duration * 0.6),
                                      inPoint: 0))
@@ -2470,8 +2470,8 @@ final class PlayerService: ObservableObject {
     /// opened the panel — `plannerConfig` returns exactly what it always did.
     private var plannerConfig: TransitionPlanner.Config {
         var config = Self.transitionPlannerConfig(
-            mode: SettingsManager.shared.transitionMode,
-            crossfadeMaxSeconds: SettingsManager.shared.crossfadeMaxSeconds)
+            mode: SettingsManager.shared.effectiveTransitionMode,
+            crossfadeMaxSeconds: SettingsManager.shared.effectiveCrossfadeMaxSeconds)
         config.loudnessCompensation = loudnessCompensationEnabled
         return AutoMixDebugOverrides.plannerConfig(
             config, overrides: AutoMixDebugModel.shared.overrides)
@@ -2574,7 +2574,7 @@ final class PlayerService: ObservableObject {
         return Self.effectiveLoudnessCompensation(
             master: settings.automixEnabled,
             toggle: settings.loudnessCompensationEnabled,
-            replayGainMode: settings.replayGainMode)
+            replayGainMode: settings.effectiveReplayGainMode)
     }
 
     /// The rule above as a pure function, so it can be stated once and tested
@@ -2606,7 +2606,7 @@ final class PlayerService: ObservableObject {
     /// the same two analyses. Same-album masters are close enough that the
     /// outgoing difference is sub-dB in practice.
     private func albumReferenceLoudnessForSeam(with next: PrefetchedNext) -> Double? {
-        guard SettingsManager.shared.replayGainMode == .album else { return nil }
+        guard SettingsManager.shared.effectiveReplayGainMode == .album else { return nil }
         return Self.albumGroupReferenceLoudness(
             outgoing: currentAnalysis, outgoingAlbumID: currentTrack?.album.id ?? 0,
             incoming: next.analysis, incomingAlbumID: next.track.album.id)
@@ -2658,7 +2658,7 @@ final class PlayerService: ObservableObject {
                                    loudness: Self.effectiveLoudnessCompensation(
                                     master: settings.automixEnabled,
                                     toggle: settings.loudnessCompensationEnabled,
-                                    replayGainMode: settings.replayGainMode))
+                                    replayGainMode: settings.effectiveReplayGainMode))
     }
 
     /// The rule above as a pure function, so it can be stated once and tested
