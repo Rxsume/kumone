@@ -188,10 +188,14 @@ import Testing
 
     // MARK: - Overlap room
 
-    @Test func unscaledWordNeedsNoExtraRoom() {
+    @Test func identityWordStillReservesActiveScaleRoom() {
+        // Even an identity word is scaled 1.4x while it is the active
+        // word (the view multiplies every current word's scale by
+        // `activeScale`), so the row still reserves the active pose's
+        // room: (36 x 1.4 - 36 x 1.22) / 2 = 3.24.
         let reach = LuminousLyrics.reach(width: 100, fontSize: 36, placement: .identity)
-        #expect(reach.top == 0)
-        #expect(reach.bottom == 0)
+        #expect(abs(reach.top - 3.24) < 1e-9)
+        #expect(abs(reach.bottom - 3.24) < 1e-9)
     }
 
     @Test func scaledWordNeedsRoomAboveAndBelow() {
