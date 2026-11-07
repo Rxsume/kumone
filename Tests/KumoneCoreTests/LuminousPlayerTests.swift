@@ -39,6 +39,10 @@ import Testing
         #expect(SettingsManager.defaultHideTranslationSubtitle == false)
         #expect(SettingsManager.defaultSubtitleFontFollowsLyrics == true)
         #expect(SettingsManager.defaultSubtitleHarmonyEnabled == true)
+        #expect(SettingsManager.defaultSubtitleUpcomingLineCount == 2)
+        #expect(SettingsManager.defaultSubtitleBackgroundEnabled == false)
+        #expect(SettingsManager.defaultSubtitleHarmonyBackgroundEnabled == false)
+        #expect(SettingsManager.defaultSubtitleFontStyle == .sans)
     }
 
     @Test func clampedKeepsValuesInsideTheirRange() {
@@ -263,6 +267,21 @@ import Testing
         #expect(sample.activeLineIndex(at: 14.4) == 3)
     }
 
+    @Test func previewHoldingLineNeverBlanksBetweenLines() {
+        let sample = LyricStylePreviewSamples.default
+        // Before the first line starts, the first line shows (words waiting).
+        #expect(sample.holdingLineIndex(at: 0) == 0)
+        #expect(sample.holdingLineIndex(at: 0.69) == 0)
+        // Inside a line, that line shows.
+        #expect(sample.holdingLineIndex(at: 2) == 0)
+        // In the ~0.6s gaps the previous line holds instead of blanking.
+        #expect(sample.holdingLineIndex(at: 3.9) == 0)
+        #expect(sample.holdingLineIndex(at: 7.5) == 1)
+        #expect(sample.holdingLineIndex(at: 11.2) == 2)
+        // At the loop seam the last line holds until the loop wraps.
+        #expect(sample.holdingLineIndex(at: 14.4) == 3)
+    }
+
     @Test func reservedPreviewClockWrapsAtThirteenPointSix() {
         let sample = LyricStylePreviewSamples.reserved
         #expect(sample.loopDuration == 13.6)
@@ -282,5 +301,13 @@ import Testing
         #expect(LatticeLyrics.window(activeIndex: 2, lineCount: 6, before: 0, after: 2) == [2, 3, 4])
         #expect(LatticeLyrics.window(activeIndex: 5, lineCount: 6, before: 0, after: 2) == [5])
         #expect(LatticeLyrics.window(activeIndex: 0, lineCount: 1, before: 0, after: 2) == [0])
+    }
+
+    @Test func subtitleWindowRespectsTheUpcomingLineCount() {
+        // The 下句行数 setting (0–2) is the window's `after:` count.
+        #expect(LatticeLyrics.window(activeIndex: 2, lineCount: 6, before: 0, after: 0) == [2])
+        #expect(LatticeLyrics.window(activeIndex: 2, lineCount: 6, before: 0, after: 1) == [2, 3])
+        #expect(LatticeLyrics.window(activeIndex: 5, lineCount: 6, before: 0, after: 1) == [5])
+        #expect(SettingsManager.subtitleUpcomingLineCountRange == 0...2)
     }
 }

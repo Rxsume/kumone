@@ -202,6 +202,14 @@ final class PlayerService: ObservableObject {
     private var preparedItemStatusObservation: NSKeyValueObservation?
     /// Prepare work in flight; cancelled whenever the queue or track changes.
     private var prepareTask: Task<Void, Never>?
+    /// The queue candidate an in-flight preparation is resolving, so a
+    /// manual advance onto exactly that track can wait for it instead of
+    /// discarding it and re-resolving from scratch.
+    private var preparingCandidate: PlaybackQueueCandidate?
+    /// A manual advance that is waiting on an in-flight preparation: the
+    /// track it is waiting for. Cleared when the wait resolves or a newer
+    /// advance supersedes it, so a stale retry can never stomp a newer track.
+    private var deferredAdvanceTrackID: Int?
     /// Bumped whenever a prepared item stops being valid (track change, user action), so stale async prepare work gives up instead of installing.
     private var prepareEpoch = 0
     /// The item the active deck is playing for `currentTrack`, set when it is installed and cleared when a new track starts resolving. The overlap may only start from it — never from a stale item left on the deck while the next track is still resolving.
@@ -1155,9 +1163,10 @@ final class PlayerService: ObservableObject {
     private func prepareNextTrack(_ candidate: PlaybackQueueCandidate) {
         let track = candidate.track
         let epoch = prepareEpoch
+        preparingCandidate = candidate
         prepareTask = Task { [weak self] in
             guard let self else { return }
-            defer { self.prepareTask = nil }
+            defer { self.prepareTask = nil; self.preparingCandidate = nil }
             let quality = SettingsManager.shared.audioQuality.rawValue
             let allowsUnblock = SettingsManager.shared.canResolveUnblockedTracks
             let cacheEnabled = SettingsManager.shared.enableAudioCache
@@ -1449,6 +1458,9 @@ final class PlayerService: ObservableObject {
     /// a gap.
     private func beginTransition(_ plan: ActiveTransition, prepared: PreparedNext) {
         guard currentTrack != nil else { return }
+        // Any advance waiting on a preparation is superseded by this
+        // transition; its retry must not fire afterwards.
+        deferredAdvanceTrackID = nil
         let outgoingDeck = engine
         let incomingDeck = standbyEngine
         let outgoingBaseVolume = outgoingDeck.volume
@@ -1641,6 +1653,38 @@ final class PlayerService: ObservableObject {
                 return
             }
         }
+        // One exception, checked before discarding anything: a preparation
+        // for exactly this track is already in flight (the user tapped
+        // next while the preload was still resolving). Discarding it and
+        // re-resolving from scratch is what makes rapid skipping feel laggy,
+        // so wait for it instead — the old track keeps playing meanwhile, so
+        // the wait is silent, not a gap. After ~6s the wait gives up and the
+        // normal hard cut runs, so a tap is never left unanswered.
+        if let candidate = preparingCandidate,
+           candidate.track.id == track.id,
+           prepareTask != nil,
+           stillHolds(candidate) {
+            deferredAdvanceTrackID = track.id
+            let wasPlaying = isPlaying
+            Task { @MainActor [weak self] in
+                guard let self else { return }
+                let deadline = Date().addingTimeInterval(6)
+                while Date() < deadline {
+                    if self.prepareTask == nil,
+                       self.preparedNext?.track.id != track.id || self.preparedNext?.isReady == true {
+                        break
+                    }
+                    try? await Task.sleep(for: .milliseconds(100))
+                }
+                // Only retry when nothing changed meanwhile: a pause/resume
+                // or a newer advance supersedes the wait.
+                guard self.isPlaying == wasPlaying, self.deferredAdvanceTrackID == track.id else { return }
+                self.deferredAdvanceTrackID = nil
+                self.startPlaying(track, localLease: localLease, resumeAt: resumeAt)
+            }
+            return
+        }
+        deferredAdvanceTrackID = nil
         // The prepared item (if any) is for another track now, and the item
         // on the deck belongs to the previous track: both stop being valid here.
         discardPrepared()

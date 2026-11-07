@@ -19,6 +19,11 @@ struct TransitionAnimationView: View {
 
     @EnvironmentObject private var settings: SettingsManager
     @State private var spinAngle = 0.0
+    /// The ring is only a brief hint that a handover started: the overlap
+    /// itself runs up to 8s, and a spinning ring over the new song's lyrics
+    /// for all of it reads as a loading spinner. It fades out after one
+    /// rotation (~1.5s) while the crossfade keeps running underneath.
+    @State private var visible = true
 
     /// The spin stills in static mode, or when the transitions
     /// reduce-motion override says so (C4/C5); the ring itself stays put.
@@ -27,7 +32,7 @@ struct TransitionAnimationView: View {
     }
 
     var body: some View {
-        if isTransitioning, settings.effectiveTransitionAnimationRing {
+        if isTransitioning, settings.effectiveTransitionAnimationRing, visible {
             ZStack {
                 Circle()
                     .stroke(.white.opacity(0.18), lineWidth: 3)
@@ -47,6 +52,12 @@ struct TransitionAnimationView: View {
             }
             .onDisappear {
                 spinAngle = 0
+            }
+            .task {
+                try? await Task.sleep(for: .milliseconds(1500))
+                withAnimation(.easeOut(duration: 0.3)) {
+                    visible = false
+                }
             }
         }
     }
