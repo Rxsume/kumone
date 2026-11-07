@@ -415,6 +415,12 @@ final class SettingsManager: ObservableObject {
         static let hideTranslationSubtitle = "settings.hideTranslationSubtitle"
         static let subtitleFontFollowsLyrics = "settings.subtitleFontFollowsLyrics"
         static let subtitleHarmonyEnabled = "settings.subtitleHarmonyEnabled"
+        static let subtitleUpcomingLineCount = "settings.subtitleUpcomingLineCount"
+        static let subtitleBackgroundEnabled = "settings.subtitleBackgroundEnabled"
+        static let subtitleHarmonyBackgroundEnabled = "settings.subtitleHarmonyBackgroundEnabled"
+        static let subtitleFontStyle = "settings.subtitleFontStyle"
+        static let subtitleFontWeight = "settings.subtitleFontWeight"
+        static let subtitleCustomFont = "settings.subtitleCustomFont"
     }
 
     @Published var audioQuality: AudioQuality {
@@ -652,6 +658,10 @@ final class SettingsManager: ObservableObject {
     nonisolated static let defaultHideTranslationSubtitle = false
     nonisolated static let defaultSubtitleFontFollowsLyrics = true
     nonisolated static let defaultSubtitleHarmonyEnabled = true
+    nonisolated static let defaultSubtitleUpcomingLineCount = 2
+    nonisolated static let defaultSubtitleBackgroundEnabled = false
+    nonisolated static let defaultSubtitleHarmonyBackgroundEnabled = false
+    nonisolated static let defaultSubtitleFontStyle = LyricsFontStyle.sans
 
     nonisolated static let classicBreathingFloatRange = 0.0...2.0
     nonisolated static let classicWordSpacingRange = 0.0...2.0
@@ -664,6 +674,7 @@ final class SettingsManager: ObservableObject {
     nonisolated static let visualizerOpacityRange = 0.2...1.0
     nonisolated static let subtitleFontScaleRange = 0.85...1.4
     nonisolated static let subtitleOverlayOpacityRange = 0.0...1.0
+    nonisolated static let subtitleUpcomingLineCountRange = 0...2
 
     nonisolated static func clamped(_ value: Double, to range: ClosedRange<Double>) -> Double {
         min(max(value, range.lowerBound), range.upperBound)
@@ -1301,6 +1312,73 @@ final class SettingsManager: ObservableObject {
         foliaEnabled ? subtitleHarmonyEnabled : Self.defaultSubtitleHarmonyEnabled
     }
 
+    /// How many upcoming lines the subtitle overlay shows (0–2).
+    @Published var subtitleUpcomingLineCount: Int {
+        didSet { UserDefaults.standard.set(subtitleUpcomingLineCount, forKey: Keys.subtitleUpcomingLineCount) }
+    }
+
+    /// Upcoming-line count with the master switch off: the Folia default.
+    var effectiveSubtitleUpcomingLineCount: Int {
+        foliaEnabled ? subtitleUpcomingLineCount : Self.defaultSubtitleUpcomingLineCount
+    }
+
+    /// Draw a dim rounded background behind the subtitle overlay, so the
+    /// rows read against a busy cover instead of floating on it.
+    @Published var subtitleBackgroundEnabled: Bool {
+        didSet { UserDefaults.standard.set(subtitleBackgroundEnabled, forKey: Keys.subtitleBackgroundEnabled) }
+    }
+
+    /// Subtitle background with the master switch off: the Folia default.
+    var effectiveSubtitleBackgroundEnabled: Bool {
+        foliaEnabled ? subtitleBackgroundEnabled : Self.defaultSubtitleBackgroundEnabled
+    }
+
+    /// Draw a dim rounded background behind the harmony (background-vocal)
+    /// subtitle row. The parser does not produce harmony data for real
+    /// songs, so this only takes effect in the style window's live preview.
+    @Published var subtitleHarmonyBackgroundEnabled: Bool {
+        didSet {
+            UserDefaults.standard.set(subtitleHarmonyBackgroundEnabled, forKey: Keys.subtitleHarmonyBackgroundEnabled)
+        }
+    }
+
+    /// Harmony background with the master switch off: the Folia default.
+    var effectiveSubtitleHarmonyBackgroundEnabled: Bool {
+        foliaEnabled ? subtitleHarmonyBackgroundEnabled : Self.defaultSubtitleHarmonyBackgroundEnabled
+    }
+
+    /// Subtitle typeface when it does not follow the lyric font.
+    @Published var subtitleFontStyle: LyricsFontStyle {
+        didSet { UserDefaults.standard.set(subtitleFontStyle.rawValue, forKey: Keys.subtitleFontStyle) }
+    }
+
+    /// Subtitle font style with the master switch off: the Folia default.
+    var effectiveSubtitleFontStyle: LyricsFontStyle {
+        foliaEnabled ? subtitleFontStyle : Self.defaultSubtitleFontStyle
+    }
+
+    /// Subtitle font weight (100–900) when not following the lyric font;
+    /// `nil` means automatic (regular).
+    @Published var subtitleFontWeight: Double? {
+        didSet { Self.setOptionalDouble(subtitleFontWeight, forKey: Keys.subtitleFontWeight) }
+    }
+
+    /// Subtitle font weight with the master switch off: automatic.
+    var effectiveSubtitleFontWeight: Double? {
+        foliaEnabled ? subtitleFontWeight : nil
+    }
+
+    /// Custom subtitle font (PostScript name from the system font picker);
+    /// `nil` means the selected subtitle font style.
+    @Published var subtitleCustomFont: String? {
+        didSet { Self.setOptionalString(subtitleCustomFont, forKey: Keys.subtitleCustomFont) }
+    }
+
+    /// Custom subtitle font with the master switch off: none.
+    var effectiveSubtitleCustomFont: String? {
+        foliaEnabled ? subtitleCustomFont : nil
+    }
+
     /// What the subtitle overlay shows, derived from the two pre-existing
     /// lyric settings (Folia's VisPlayground content mode maps onto the
     /// same two toggles): translation ↔ `showLyricsTranslation`, romaji ↔
@@ -1359,6 +1437,12 @@ final class SettingsManager: ObservableObject {
         hideTranslationSubtitle = Self.defaultHideTranslationSubtitle
         subtitleFontFollowsLyrics = Self.defaultSubtitleFontFollowsLyrics
         subtitleHarmonyEnabled = Self.defaultSubtitleHarmonyEnabled
+        subtitleUpcomingLineCount = Self.defaultSubtitleUpcomingLineCount
+        subtitleBackgroundEnabled = Self.defaultSubtitleBackgroundEnabled
+        subtitleHarmonyBackgroundEnabled = Self.defaultSubtitleHarmonyBackgroundEnabled
+        subtitleFontStyle = Self.defaultSubtitleFontStyle
+        subtitleFontWeight = nil
+        subtitleCustomFont = nil
         subtitleContentMode = .translation
     }
 
@@ -1555,5 +1639,22 @@ final class SettingsManager: ObservableObject {
             ?? Self.defaultSubtitleFontFollowsLyrics
         subtitleHarmonyEnabled = defaults.object(forKey: Keys.subtitleHarmonyEnabled) as? Bool
             ?? Self.defaultSubtitleHarmonyEnabled
+        subtitleUpcomingLineCount = min(max(
+            defaults.object(forKey: Keys.subtitleUpcomingLineCount) as? Int
+                ?? Self.defaultSubtitleUpcomingLineCount,
+            Self.subtitleUpcomingLineCountRange.lowerBound),
+            Self.subtitleUpcomingLineCountRange.upperBound)
+        subtitleBackgroundEnabled = defaults.object(forKey: Keys.subtitleBackgroundEnabled) as? Bool
+            ?? Self.defaultSubtitleBackgroundEnabled
+        subtitleHarmonyBackgroundEnabled = defaults.object(forKey: Keys.subtitleHarmonyBackgroundEnabled) as? Bool
+            ?? Self.defaultSubtitleHarmonyBackgroundEnabled
+        subtitleFontStyle = defaults.string(forKey: Keys.subtitleFontStyle)
+            .flatMap(LyricsFontStyle.init) ?? Self.defaultSubtitleFontStyle
+        if let storedWeight = defaults.object(forKey: Keys.subtitleFontWeight) as? Double {
+            subtitleFontWeight = Self.clamped(storedWeight, to: Self.lyricsFontWeightRange)
+        } else {
+            subtitleFontWeight = nil
+        }
+        subtitleCustomFont = defaults.string(forKey: Keys.subtitleCustomFont)
     }
 }
