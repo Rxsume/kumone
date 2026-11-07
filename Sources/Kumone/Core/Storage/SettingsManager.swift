@@ -493,6 +493,7 @@ final class SettingsManager: ObservableObject {
         static let playbackEntryView = "settings.playbackEntryView"
         static let playerPageTintIntensity = "settings.playerPageTintIntensity"
         static let hidePlayerProgressBar = "settings.hidePlayerProgressBar"
+        static let autoHidePlayerChrome = "settings.autoHidePlayerChrome"
         static let alwaysShowPlayerBackButton = "settings.alwaysShowPlayerBackButton"
         static let alwaysShowTrackSwitchButtons = "settings.alwaysShowTrackSwitchButtons"
         static let playerControlSlots = "settings.playerControlSlots"
@@ -1175,6 +1176,18 @@ final class SettingsManager: ObservableObject {
         foliaEnabled ? hidePlayerProgressBar : false
     }
 
+    /// Auto-hide the now-playing page chrome (scrubber, transport and
+    /// top buttons) after 3 seconds idle; any tap brings it back.
+    @Published var autoHidePlayerChrome: Bool {
+        didSet { UserDefaults.standard.set(autoHidePlayerChrome, forKey: Keys.autoHidePlayerChrome) }
+    }
+
+    /// Auto-hide with the master switch off: the chrome never hid
+    /// before Folia, so it stays visible.
+    var effectiveAutoHidePlayerChrome: Bool {
+        foliaEnabled ? autoHidePlayerChrome : false
+    }
+
     /// Always show the back button on the now-playing page.
     @Published var alwaysShowPlayerBackButton: Bool {
         didSet {
@@ -1695,6 +1708,12 @@ final class SettingsManager: ObservableObject {
     /// Animate the latent background only on the player page; elsewhere
     /// (the style-window preview) it stays frozen. Folia's
     /// `dynamicOnlyInPlayer`.
+    ///
+    /// D1: the settings toggle for this was removed — there is no
+    /// non-player latent surface in the app for it to gate (the only other
+    /// latent surface is the style-window preview, which has its own
+    /// pause button), so the switch could never do anything observable.
+    /// The key, default and effective property stay for compatibility.
     @Published var latentDynamicOnlyInPlayer: Bool {
         didSet { UserDefaults.standard.set(latentDynamicOnlyInPlayer, forKey: Keys.latentDynamicOnlyInPlayer) }
     }
@@ -2439,6 +2458,7 @@ final class SettingsManager: ObservableObject {
             Self.playerPageTintIntensityRange.upperBound
         )
         hidePlayerProgressBar = defaults.object(forKey: Keys.hidePlayerProgressBar) as? Bool ?? false
+        autoHidePlayerChrome = defaults.object(forKey: Keys.autoHidePlayerChrome) as? Bool ?? false
         alwaysShowPlayerBackButton =
             defaults.object(forKey: Keys.alwaysShowPlayerBackButton) as? Bool ?? false
         alwaysShowTrackSwitchButtons =
