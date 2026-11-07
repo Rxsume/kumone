@@ -16,7 +16,7 @@
 // uniform but never consumes it, so it is static in practice. The motion
 // in the video — the dot field decorrelating within a second, the smoke
 // re-forming over ~5s, and the near-freeze when playback pauses — is
-// the latent pair. The shipped Rumxs luminous page only had the static
+// the latent pair. The shipped Golia luminous page only had the static
 // nomand halftone, which is why the cover never moved.
 //
 // The port is one small Metal fragment shader, compiled at runtime from
@@ -57,7 +57,7 @@ struct LatentBackgroundView: View {
     /// the shipped behaviour (cover pair + theme accent + background
     /// blends); cover-only builds all six stops from the two extracted
     /// cover colours — Folia extracts six representative colours from
-    /// the cover, Rumxs extracts two, so the rest are blends of those.
+    /// the cover, Golia extracts two, so the rest are blends of those.
     private var palette: [Color] {
         tuning.colorSource == .coverOnly
             ? Self.coverOnlyPalette(primary: primary, secondary: secondary)
@@ -106,7 +106,7 @@ struct LatentBackgroundView: View {
         }
     }
 
-    /// Folia's latent mesh takes six cover colours; Rumxs only extracts
+    /// Folia's latent mesh takes six cover colours; Golia only extracts
     /// two (primary / secondary) plus the theme accent, so the other
     /// three are blends of those — the shader mixes them by noise, so
     /// the field stays cover-coloured and dark either way.
@@ -325,11 +325,11 @@ private struct LatentBackgroundMetalView: UIViewRepresentable {
             // jumps on a rising edge and decays; the beat amount eases
             // toward the audio target (attack 0.42, release 0.14) and
             // blends each layer's base speed toward its audio max.
-            // Rumxs has four bands (60–250 / 250–800 / 800–2500 /
+            // Golia has four bands (60–250 / 250–800 / 800–2500 /
             // 2500–8000 Hz) for Folia's five — the mid band stands in
             // for vocal as well (weights 0.22 / 0.18 / 0.50 / 0.10).
             // Speeds are scaled so the Folia defaults (mesh 0.3, dither
-            // 0.1) reproduce the shipped Rumxs flow rate.
+            // 0.1) reproduce the shipped Golia flow rate.
             let now = CACurrentMediaTime()
             if let last = lastDrawTimestamp {
                 let dt = min(max(now - last, 0), 0.1)

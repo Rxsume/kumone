@@ -209,7 +209,7 @@ struct PlayerBar: View {
         }
     }
 
-    /// The lyrics-panel slot: the second capsule slot (Rumxs has no
+    /// The lyrics-panel slot: the second capsule slot (Golia has no
     /// lyrics-timeline slot; the panel toggle is its equivalent).
     private var capsuleLyricsSlotButton: some View {
         PlayerIconButton(
