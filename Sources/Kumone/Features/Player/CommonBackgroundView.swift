@@ -250,7 +250,7 @@ public struct CommonBackgroundView: View {
     }
 
     private static func seededField(songID: String?) -> (shapes: [ShapeSpec], particles: [ParticleSpec]) {
-        var rng = SplitMix64(seed: fnv1a(songID ?? ""))
+        var rng = SplitMix64(state: fnv1a(songID ?? ""))
         var shapes: [ShapeSpec] = []
         shapes.reserveCapacity(15)
         for i in 0..<15 {
