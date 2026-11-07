@@ -133,7 +133,7 @@ struct SettingsView: View {
 
             if settings.enableUnblock {
                 Section {
-                    ForEach(AudioSourceID.allCases, id: \.self) { source in
+                    ForEach(AudioSourceID.displayOrder, id: \.self) { source in
                         Toggle(source.displayName, isOn: Binding(
                             get: { settings.enabledAudioSourceIDs.contains(source) },
                             set: { isEnabled in
@@ -441,7 +441,7 @@ struct SettingsView: View {
 
             Section {
                 VStack(spacing: 2) {
-                    Text("Rumxs")
+                    Text("Golia")
                         .font(.footnote)
                         .foregroundStyle(.secondary)
                     Text(appVersionAndBuild)
@@ -539,9 +539,9 @@ struct SettingsView: View {
 
     private var appVersionAccessibilityLabel: String {
         if let build = appBuild, !build.isEmpty {
-            return "Rumxs, version \(appVersion), build \(build)"
+            return "Golia, version \(appVersion), build \(build)"
         }
-        return "Rumxs, version \(appVersion)"
+        return "Golia, version \(appVersion)"
     }
 
 }
