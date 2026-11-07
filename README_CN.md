@@ -69,7 +69,7 @@ brew install owo-network/brew/kumone --cask
 
 ### 手动下载
 
-从 [Releases](https://github.com/missuo/kumone/releases/latest) 下载最新的
+从 [Releases](https://github.com/Rxsume/kumone/releases/latest) 下载最新的
 `Kumone-x.y.z.zip`，解压后拖入「应用程序」。
 
 应用已使用 Developer ID 签名并通过 Apple 公证，内置 Sparkle 自动更新
@@ -77,9 +77,9 @@ brew install owo-network/brew/kumone --cask
 
 ### iOS / iPadOS（侧载）
 
-每次发版都会附带**无签名**的 `Kumone-iOS-x.y.z.ipa`（iOS 16+）。Kumone 是非官方客户端，不会上架 App Store 或 TestFlight，请用侧载工具以自己的 Apple ID 签名安装 —— [AltStore](https://altstore.io)、[SideStore](https://sidestore.io)、[Sideloadly](https://sideloadly.io) 或 Xcode 均可。iOS 26+ 的 Tab Bar 使用系统原生 Liquid Glass；iOS 16–25 则回退为仿制的玻璃栏。
+每次发版都会附带**无签名**的 `Rumxs-iOS-x.y.z-custom.ipa`（iOS 16+）。Kumone 是非官方客户端，不会上架 App Store 或 TestFlight，请用侧载工具以自己的 Apple ID 签名安装 —— [AltStore](https://altstore.io)、[SideStore](https://sidestore.io)、[Sideloadly](https://sideloadly.io) 或 Xcode 均可。iOS 26+ 的 Tab Bar 使用系统原生 Liquid Glass；iOS 16–25 则回退为仿制的玻璃栏。
 
-更新：iOS 应用无法自我替换。设置 → 关于 → **检查更新** 会提示是否有新版本并给出下载链接，下载新 IPA 后用同一工具重新安装即可，登录状态与设置会保留。AltStore / SideStore 也可通过 source 自动追踪发布：添加源地址 <https://github.com/missuo/kumone/releases/latest/download/altstore.json>，之后每次发版都会自动出现在更新列表里。
+更新：iOS 应用无法自我替换。设置 → 关于 → **检查更新** 会提示是否有新版本并给出下载链接，下载新 IPA 后用同一工具重新安装即可，登录状态与设置会保留。新版本会发布在 fork 的 [Releases](https://github.com/Rxsume/kumone/releases/latest) 页，应用内更新也会追踪它们。
 
 #### 应用内自动更新（仅限 TrollStore / 巨魔）
 

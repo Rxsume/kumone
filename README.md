@@ -70,7 +70,7 @@ brew install owo-network/brew/kumone --cask
 ### Manual download
 
 Download the latest `Kumone-x.y.z.zip` from
-[Releases](https://github.com/missuo/kumone/releases/latest), unzip, and drag
+[Releases](https://github.com/Rxsume/kumone/releases/latest), unzip, and drag
 it into Applications.
 
 The app is signed with a Developer ID certificate and notarized by Apple, with
@@ -78,7 +78,7 @@ built-in Sparkle automatic updates (menu bar: Kumone → Check for Updates…).
 
 ### iOS / iPadOS (sideload)
 
-Every release ships an **unsigned** `Kumone-iOS-x.y.z.ipa` (iOS 16+). Kumone
+Every release ships an **unsigned** `Rumxs-iOS-x.y.z-custom.ipa` (iOS 16+). Kumone
 is an unofficial client and will not be on the App Store or TestFlight, so
 install it with a sideloading tool that signs the IPA with your own Apple ID —
 [AltStore](https://altstore.io), [SideStore](https://sidestore.io),
@@ -87,9 +87,8 @@ install it with a sideloading tool that signs the IPA with your own Apple ID —
 Updating: iOS apps can't replace themselves. Settings → About → **Check for
 Updates** tells you when a newer release exists and links to it; download the
 new IPA and reinstall with the same tool — sign-in state and settings are kept.
-AltStore / SideStore can also track the release automatically: add the source
-<https://github.com/missuo/kumone/releases/latest/download/altstore.json> and
-new versions show up in their update list on their own.
+New versions show up on the fork's [Releases](https://github.com/Rxsume/kumone/releases/latest) page, and the in-app updater (Settings → About → Check for
+Updates) tracks them.
 
 #### In-app auto-update (TrollStore only)
 
