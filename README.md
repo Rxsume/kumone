@@ -9,9 +9,9 @@
 
 <div align="center">
 
-<img src="docs/icon.png" width="140" alt="Rumxs" />
+<img src="docs/icon.png" width="140" alt="Golia" />
 
-# Rumxs
+# Golia
 
 **雲の音 — A native music player for macOS and iOS**
 
@@ -78,7 +78,7 @@ built-in Sparkle automatic updates (menu bar: Kumone → Check for Updates…).
 
 ### iOS / iPadOS (sideload)
 
-Every release ships an **unsigned** `Rumxs-iOS-x.y.z-custom.ipa` (iOS 16+). Kumone
+Every release ships an **unsigned** `Golia-iOS-x.y.z-custom.ipa` (iOS 16+). Kumone
 is an unofficial client and will not be on the App Store or TestFlight, so
 install it with a sideloading tool that signs the IPA with your own Apple ID —
 [AltStore](https://altstore.io), [SideStore](https://sidestore.io),

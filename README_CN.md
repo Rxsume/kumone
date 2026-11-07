@@ -9,9 +9,9 @@
 
 <div align="center">
 
-<img src="docs/icon.png" width="140" alt="Rumxs" />
+<img src="docs/icon.png" width="140" alt="Golia" />
 
-# Rumxs
+# Golia
 
 **雲の音 — 原生 macOS 与 iOS 音乐播放器**
 
@@ -77,7 +77,7 @@ brew install owo-network/brew/kumone --cask
 
 ### iOS / iPadOS（侧载）
 
-每次发版都会附带**无签名**的 `Rumxs-iOS-x.y.z-custom.ipa`（iOS 16+）。Kumone 是非官方客户端，不会上架 App Store 或 TestFlight，请用侧载工具以自己的 Apple ID 签名安装 —— [AltStore](https://altstore.io)、[SideStore](https://sidestore.io)、[Sideloadly](https://sideloadly.io) 或 Xcode 均可。iOS 26+ 的 Tab Bar 使用系统原生 Liquid Glass；iOS 16–25 则回退为仿制的玻璃栏。
+每次发版都会附带**无签名**的 `Golia-iOS-x.y.z-custom.ipa`（iOS 16+）。Kumone 是非官方客户端，不会上架 App Store 或 TestFlight，请用侧载工具以自己的 Apple ID 签名安装 —— [AltStore](https://altstore.io)、[SideStore](https://sidestore.io)、[Sideloadly](https://sideloadly.io) 或 Xcode 均可。iOS 26+ 的 Tab Bar 使用系统原生 Liquid Glass；iOS 16–25 则回退为仿制的玻璃栏。
 
 更新：iOS 应用无法自我替换。设置 → 关于 → **检查更新** 会提示是否有新版本并给出下载链接，下载新 IPA 后用同一工具重新安装即可，登录状态与设置会保留。新版本会发布在 fork 的 [Releases](https://github.com/Rxsume/kumone/releases/latest) 页，应用内更新也会追踪它们。
 
