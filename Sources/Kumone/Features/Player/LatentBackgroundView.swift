@@ -37,25 +37,6 @@ import MetalKit
 import SwiftUI
 import UIKit
 
-/// The latent tuning as one value (Folia's `latent_background_tuning`).
-/// Built by `SettingsManager.latentTuning` from the `effective*`
-/// properties; the renderer only ever sees this struct, never the store.
-struct LatentTuning: Equatable {
-    var displayMode: LatentDisplayMode = .both
-    var colorSource: LatentColorSource = .coverTheme
-    var overlayEnabled: Bool = true
-    var overlayOpacity: Double = 0.35
-    var ditheringSpeed: Double = 0.1
-    var ditheringAudioSpeed: Double = 1.2
-    var ditheringSize: Double = 2.5
-    var ditheringOpacity: Double = 0.55
-    var meshSpeed: Double = 0.3
-    var meshAudioSpeed: Double = 2.0
-    var meshDistortion: Double = 0.8
-    var meshSwirl: Double = 0.1
-    var enhancedBeatResponse: Bool = true
-}
-
 /// The latent flowing background: cover-coloured smoke + warp dither,
 /// with a theme-background veil on top (Folia's 0.35 overlay).
 struct LatentBackgroundView: View {
