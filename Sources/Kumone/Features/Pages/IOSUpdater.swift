@@ -187,7 +187,7 @@ extension IOSUpdater: URLSessionDownloadDelegate {
 
     nonisolated func urlSession(_ session: URLSession, downloadTask: URLSessionDownloadTask,
                                 didFinishDownloadingTo location: URL) {
-        // Move into Documents (findable in Files under On My iPhone ▸ Kumone via
+        // Move into Documents (findable in Files under On My iPhone ▸ Rumxs via
         // UIFileSharingEnabled) before the temp download is reaped.
         let dir = (try? FileManager.default.url(for: .documentDirectory,
                                                 in: .userDomainMask,

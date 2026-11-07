@@ -61,6 +61,10 @@ struct SettingsView: View {
                     .font(.caption)
                     .foregroundStyle(.secondary)
                 Group {
+                    // D7: these playback behaviours only exist in the iOS
+                    // player engine (PlayerServiceIOS); on macOS the rows
+                    // would be dead switches.
+                    #if os(iOS)
                     Toggle("暂停/播放淡入淡出", isOn: $settings.playbackFadeEnabled)
                     Text("暂停与恢复播放时音量短暂淡入淡出，避免声音突变")
                         .font(.caption)
@@ -74,6 +78,7 @@ struct SettingsView: View {
                     Text("无法播放的歌曲自动跳到下一首")
                         .font(.caption)
                         .foregroundStyle(.secondary)
+                    #endif
                     #if os(iOS)
                     Toggle("播放时防息屏", isOn: $settings.preventDisplaySleepDuringPlayback)
                     Text("播放期间屏幕不自动息屏，暂停或切到后台后恢复")
@@ -284,7 +289,12 @@ struct SettingsView: View {
                         .font(.caption)
                         .foregroundStyle(.secondary)
                     Toggle("首页动态背景", isOn: $settings.homeDynamicBackground)
+                    // D6: native blur only backs the iOS karaoke backdrop
+                    // and the iOS volume popover; on macOS the toggle would
+                    // be a dead switch.
+                    #if os(iOS)
                     Toggle("播放页原生模糊", isOn: $settings.playerPageNativeBlur)
+                    #endif
                     VStack(alignment: .leading, spacing: 6) {
                         HStack {
                             Text("播放页背景着色强度")
@@ -305,6 +315,9 @@ struct SettingsView: View {
                         .font(.caption)
                         .foregroundStyle(.secondary)
                     }
+                    // D7: the entry view is only honoured by the iOS
+                    // player engine (PlayerServiceIOS).
+                    #if os(iOS)
                     Picker("播放时打开", selection: $settings.playbackEntryView) {
                         ForEach(PlaybackEntryView.allCases) { entry in
                             Text(entry.displayName).tag(entry)
@@ -313,6 +326,7 @@ struct SettingsView: View {
                     Text("点播开始播放时打开播放页，还是留在当前页")
                         .font(.caption)
                         .foregroundStyle(.secondary)
+                    #endif
                 }.disabled(!settings.foliaEnabled)
             }
 
@@ -321,10 +335,18 @@ struct SettingsView: View {
                 Text("iOS 可用")
                     .font(.caption)
                     .foregroundStyle(.secondary)
+                Toggle("自动隐藏播放控件", isOn: $settings.autoHidePlayerChrome)
+                Text("3 秒无操作后隐藏进度条、播放按钮和顶部按钮，点一下屏幕即可恢复")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                // D8: the back button is only gated by this setting on
+                // iOS; the macOS page always shows its own collapse button.
+                #if os(iOS)
                 Toggle("始终显示返回按钮", isOn: $settings.alwaysShowPlayerBackButton)
                 Text("iOS 可用")
                     .font(.caption)
                     .foregroundStyle(.secondary)
+                #endif
                 Toggle("始终显示切歌按钮", isOn: $settings.alwaysShowTrackSwitchButtons)
                 Text("只在 FM 模式下显示切歌按钮")
                     .font(.caption)
