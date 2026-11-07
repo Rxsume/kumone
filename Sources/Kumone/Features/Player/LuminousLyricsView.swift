@@ -660,6 +660,29 @@ struct LuminousWordFlowLayout: Layout {
 struct LuminousLyricsView: View {
     @EnvironmentObject private var player: PlayerService
     @EnvironmentObject private var settings: SettingsManager
+    /// The playback clock, observed directly: `player.progress` is only a
+    /// computed passthrough to `clock.progress`, so reading it through
+    /// `player` never subscribes this view to its ticks — that is why the
+    /// PR #13 progress heartbeat never fired and the lyrics froze. Same
+    /// pattern as `NowPlayingScrubber`.
+    @ObservedObject private var clock = PlayerService.shared.clock
+
+    /// Per-line render cache (word splitting, placements, alignment):
+    /// they depend only on the line and the layout settings, so they are
+    /// computed once per line instead of once per 30fps tick — the split
+    /// runs an NLTokenizer over the line every time. A reference-type box
+    /// in `@State`: writing to the box publishes nothing, so the cache
+    /// fills during rendering without re-triggering it.
+    private final class LineRenderCacheBox {
+        var lineID: Int?
+        var lineTime: TimeInterval?
+        var rotationEnabled: Bool?
+        var calm: Bool?
+        var words: [LyricWord] = []
+        var placements: [LuminousLyrics.WordPlacement] = []
+        var alignment: LuminousLyrics.RowAlignment = .center
+    }
+    @State private var lineCache = LineRenderCacheBox()
 
     /// Glow colour for the active word (the theme accent, passed in by
     /// the parent like `LatticeLyricsCard`'s `accent:`).
@@ -686,15 +709,12 @@ struct LuminousLyricsView: View {
         if let previewLine, let previewTime {
             lyricsContent(line: previewLine, time: previewTime, clock: previewTime, size: size)
         } else if let lyrics = player.lyrics, !lyrics.lines.isEmpty {
-            // The coarse published progress is read here (and used as the
-            // fallback time) so this view also re-renders whenever it moves:
-            // a heartbeat that bounds lyric staleness to ~0.5s even if the
-            // timeline stalls. The luminous lyrics froze while the scrubber
-            // kept moving, which means the .periodic timeline was not
-            // delivering updates in this view — the classic lyric view's
-            // .animation schedule is used instead, matching the one proven
-            // to drive per-frame karaoke in this codebase.
-            let fallback = player.progress
+            // The clock is observed directly (see `clock` above), so this
+            // view re-renders on every clock publish (~0.5s) even if the
+            // timeline stalls: the heartbeat that bounds lyric staleness.
+            // `livePlaybackTime` is still preferred when it is finite — it
+            // is the deck's live position, not the coarse published one.
+            let fallback = clock.progress
             if player.isPlaying && !isStatic {
                 TimelineView(.animation(minimumInterval: 1.0 / 30.0, paused: false)) { context in
                     let time = currentTime(fallback: fallback)
@@ -706,6 +726,10 @@ struct LuminousLyricsView: View {
                     )
                 }
             } else {
+                // Paused or static: no timeline, but the clock subscription
+                // above still re-renders this branch on every tick, so the
+                // line follows the playhead — static mode stills the
+                // animation, it must not freeze the lyrics.
                 let time = currentTime(fallback: fallback)
                 lyricsContent(
                     line: activeLine(in: lyrics, at: time),
@@ -729,8 +753,8 @@ struct LuminousLyricsView: View {
 
     /// Live deck position; falls back to the coarse published progress
     /// when the deck reports nothing finite (no item loaded, mid-seek).
-    /// Reading `progress` as the fallback is also what subscribes this
-    /// view to its heartbeat (see `content(size:)`).
+    /// The fallback is the clock's progress (read in `content(size:)`),
+    /// which is also what subscribes this view to its heartbeat.
     private func currentTime(fallback: TimeInterval) -> TimeInterval {
         let live = player.livePlaybackTime
         return live.isFinite ? live : fallback
@@ -740,17 +764,32 @@ struct LuminousLyricsView: View {
         let scale = settings.effectiveLyricsFontScale
         let fontSize = LuminousLyrics.fontSize(for: size.width, scale: scale)
         let font = lyricFont(size: fontSize)
-        let units = LuminousLyrics.layoutUnits(for: line)
-        let words = LuminousLyrics.displayWords(from: units)
         let calm = isStatic
-        let placements = words.indices.map {
-            LuminousLyrics.placement(
-                seed: line.time, index: $0,
-                rotationEnabled: settings.effectiveClassicWordRotation,
-                calm: calm
-            )
-        }
-        let alignment = LuminousLyrics.lineAlignment(seed: line.time, calm: calm)
+        let rotationEnabled = settings.effectiveClassicWordRotation
+        // Words, placements and alignment come from the per-line cache:
+        // the split runs an NLTokenizer over the line, and re-running it
+        // on every 30fps tick was a large share of the frame cost.
+        let box = lineCache
+        let (words, placements, alignment): ([LyricWord], [LuminousLyrics.WordPlacement], LuminousLyrics.RowAlignment) = {
+            if box.lineID == line.id, box.lineTime == line.time,
+               box.rotationEnabled == rotationEnabled, box.calm == calm {
+                return (box.words, box.placements, box.alignment)
+            }
+            let units = LuminousLyrics.layoutUnits(for: line)
+            let freshWords = LuminousLyrics.displayWords(from: units)
+            let freshPlacements = freshWords.indices.map {
+                LuminousLyrics.placement(seed: line.time, index: $0, rotationEnabled: rotationEnabled, calm: calm)
+            }
+            let freshAlignment = LuminousLyrics.lineAlignment(seed: line.time, calm: calm)
+            box.lineID = line.id
+            box.lineTime = line.time
+            box.rotationEnabled = rotationEnabled
+            box.calm = calm
+            box.words = freshWords
+            box.placements = freshPlacements
+            box.alignment = freshAlignment
+            return (freshWords, freshPlacements, freshAlignment)
+        }()
         let breathingOn = settings.effectiveClassicBreathingFloat > 0 && !isStatic
         let breathing = breathingOn
             ? LuminousLyrics.breathingOffset(at: clock, multiplier: settings.effectiveClassicBreathingFloat)
@@ -784,23 +823,27 @@ struct LuminousLyricsView: View {
 
     private func wordView(word: LyricWord, placement: LuminousLyrics.WordPlacement, time: TimeInterval, font: Font) -> some View {
         let state = LuminousLyrics.state(of: word, at: time)
-        let (opacity, scale, rotate, glowRadius, glowOpacity): (Double, CGFloat, Double, CGFloat, Double) = {
+        // A shadow with radius 0 costs no offscreen blur pass, so only
+        // the active word pays for the double glow: a line of ~10 words
+        // used to cost ~20 large-radius shadow renders per frame.
+        // Waiting words never glow; passed words keep one small shadow.
+        let (opacity, scale, rotate, glowRadius, glowOpacity, secondRadius): (Double, CGFloat, Double, CGFloat, Double, CGFloat) = {
             switch state {
             case .waiting:
-                return (LuminousLyrics.waitingOpacity, 0.9, placement.rotate, 0, 0)
+                return (LuminousLyrics.waitingOpacity, 0.9, placement.rotate, 0, 0, 0)
             case .active:
-                return (1, placement.scale * LuminousLyrics.activeScale, placement.rotate, 18, 0.8)
+                return (1, placement.scale * LuminousLyrics.activeScale, placement.rotate, 18, 0.8, 9)
             case .passed:
                 let turn = min(max((time - word.end) / 5, 0), 1)
                 let fade = max(0, 1 - (time - word.end) / 0.8)
-                return (LuminousLyrics.passedOpacity, placement.scale, placement.rotate + placement.passedRotate * turn, 6, 0.35 * fade)
+                return (LuminousLyrics.passedOpacity, placement.scale, placement.rotate + placement.passedRotate * turn, 6, 0.35 * fade, 0)
             }
         }()
         return Text(word.text)
             .font(font)
             .foregroundColor(.white.opacity(opacity))
             .shadow(color: accent.opacity(glowOpacity), radius: glowRadius, x: 0, y: 0)
-            .shadow(color: .white.opacity(glowOpacity * 0.6), radius: glowRadius * 0.5, x: 0, y: 0)
+            .shadow(color: .white.opacity(glowOpacity * 0.6), radius: secondRadius, x: 0, y: 0)
             .rotationEffect(.degrees(rotate))
             .scaleEffect(scale)
             .offset(x: placement.x, y: placement.y)
@@ -816,12 +859,18 @@ struct LuminousLyricsView: View {
     }
 
     private func subtitleFont(size: CGFloat) -> Font {
-        let style = settings.effectiveSubtitleFontFollowsLyrics ? settings.effectiveLyricsFontStyle : .sans
-        if settings.effectiveSubtitleFontFollowsLyrics,
-           let custom = settings.effectiveLyricsCustomFont, !custom.isEmpty {
-            return Font.custom(custom, size: size)
+        if settings.effectiveSubtitleFontFollowsLyrics {
+            let style = settings.effectiveLyricsFontStyle
+            if let custom = settings.effectiveLyricsCustomFont, !custom.isEmpty {
+                return Font.custom(custom, size: size)
+            }
+            return .system(size: size, weight: .regular, design: style.design)
         }
-        return .system(size: size, weight: .regular, design: style.design)
+        let weight: Font.Weight = settings.effectiveSubtitleFontWeight.map(Font.Weight.fromFoliaValue) ?? .regular
+        if let custom = settings.effectiveSubtitleCustomFont, !custom.isEmpty {
+            return Font.custom(custom, size: size).weight(weight)
+        }
+        return .system(size: size, weight: weight, design: settings.effectiveSubtitleFontStyle.design)
     }
 
     @ViewBuilder
@@ -833,10 +882,10 @@ struct LuminousLyricsView: View {
         let translation = mode.showsTranslation && !hideTranslation ? line.translation : nil
         let romaji = mode.showsRomaji ? line.romaji : nil
         let upcoming: [LyricLine] = {
-            if isPreview { return previewUpcoming }
+            if isPreview { return Array(previewUpcoming.prefix(settings.effectiveSubtitleUpcomingLineCount)) }
             guard let lyrics = player.lyrics else { return [] }
             let active = lyrics.activeIndex(at: time) ?? 0
-            let window = LatticeLyrics.window(activeIndex: active, lineCount: lyrics.lines.count, before: 0, after: 2)
+            let window = LatticeLyrics.window(activeIndex: active, lineCount: lyrics.lines.count, before: 0, after: settings.effectiveSubtitleUpcomingLineCount)
             // `window` clamps its indices to the line range, so direct
             // indexing is safe.
             return window.map { lyrics.lines[$0] }.filter { $0.id != line.id }
@@ -862,6 +911,14 @@ struct LuminousLyricsView: View {
                         .foregroundColor(.white.opacity(0.35 * overlayOpacity))
                         .blur(radius: settings.effectiveSubtitleUpcomingLyricsBlur ? 1 : 0)
                         .multilineTextAlignment(.center)
+                }
+            }
+            .padding(.horizontal, settings.effectiveSubtitleBackgroundEnabled ? 12 : 0)
+            .padding(.vertical, settings.effectiveSubtitleBackgroundEnabled ? 8 : 0)
+            .background {
+                if settings.effectiveSubtitleBackgroundEnabled {
+                    RoundedRectangle(cornerRadius: 12, style: .continuous)
+                        .fill(Color.black.opacity(0.35))
                 }
             }
         }
