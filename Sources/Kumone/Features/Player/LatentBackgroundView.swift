@@ -46,25 +46,62 @@ struct LatentBackgroundView: View {
     var background: Color
     var isPlaying: Bool
     var isStatic: Bool
+    var tuning: LatentTuning = LatentTuning()
 
     /// Metal is unavailable on the simulator without a GPU device in
     /// some configurations; the plain background colour is the fallback
     /// there (and anywhere the shader fails to compile).
     private static let metalAvailable = MTLCreateSystemDefaultDevice() != nil
 
+    /// The mesh palette for the current colour source. Cover-theme is
+    /// the shipped behaviour (cover pair + theme accent + background
+    /// blends); cover-only builds all six stops from the two extracted
+    /// cover colours — Folia extracts six representative colours from
+    /// the cover, Rumxs extracts two, so the rest are blends of those.
+    private var palette: [Color] {
+        tuning.colorSource == .coverOnly
+            ? Self.coverOnlyPalette(primary: primary, secondary: secondary)
+            : Self.meshPalette(
+                primary: primary, secondary: secondary,
+                accent: accent, background: background
+            )
+    }
+
+    /// Dithering back colour: the theme background for cover-theme, the
+    /// second cover colour for cover-only (Folia takes both dither
+    /// colours from the cover then).
+    private var ditherBack: Color {
+        tuning.colorSource == .coverOnly ? secondary : background
+    }
+
     var body: some View {
         ZStack {
             background
             if Self.metalAvailable {
-                LatentBackgroundMetalView(
-                    palette: Self.meshPalette(
-                        primary: primary, secondary: secondary,
-                        accent: accent, background: background
-                    ),
-                    background: background,
-                    isPlaying: isPlaying,
-                    isStatic: isStatic
-                )
+                // Poll the live band levels ~15x/s and hand them to the
+                // renderer; the coordinator smooths them per frame (Folia
+                // reads its analyser inside its own RAF loop). The read
+                // must happen here — SwiftUI runs on the main actor and
+                // `AudioSpectrum` is @MainActor — not in the Metal
+                // coordinator. A frozen page does not poll.
+                TimelineView(
+                    .animation(minimumInterval: 1.0 / 15.0, paused: isStatic)
+                ) { _ in
+                    LatentBackgroundMetalView(
+                        palette: palette,
+                        ditherBack: ditherBack,
+                        background: background,
+                        isPlaying: isPlaying,
+                        isStatic: isStatic,
+                        tuning: tuning,
+                        audioLevels: (
+                            bass: AudioSpectrum.shared.level(at: 0),
+                            lowMid: AudioSpectrum.shared.level(at: 1),
+                            mid: AudioSpectrum.shared.level(at: 2),
+                            treble: AudioSpectrum.shared.level(at: 3)
+                        )
+                    )
+                }
             }
         }
     }
@@ -83,6 +120,19 @@ struct LatentBackgroundView: View {
             Self.mix(primary, background, 0.55),
             Self.mix(accent, secondary, 0.5),
             background,
+        ]
+    }
+
+    /// Six mesh stops from the two extracted cover colours only (see
+    /// `palette`): Folia's cover-only mode takes all six from the cover.
+    static func coverOnlyPalette(primary: Color, secondary: Color) -> [Color] {
+        [
+            primary,
+            secondary,
+            Self.mix(primary, secondary, 0.5),
+            Self.mix(primary, secondary, 0.25),
+            Self.mix(secondary, primary, 0.75),
+            Self.mix(primary, secondary, 0.65),
         ]
     }
 
@@ -110,9 +160,13 @@ struct LatentBackgroundView: View {
 /// passes colours and play state in.
 private struct LatentBackgroundMetalView: UIViewRepresentable {
     var palette: [Color]
+    var ditherBack: Color
     var background: Color
     var isPlaying: Bool
     var isStatic: Bool
+    var tuning: LatentTuning
+    /// Live band levels (0...1), polled by the SwiftUI side ~15x/s.
+    var audioLevels: (bass: Float, lowMid: Float, mid: Float, treble: Float)
 
     func makeCoordinator() -> Coordinator {
         Coordinator()
@@ -136,16 +190,18 @@ private struct LatentBackgroundMetalView: UIViewRepresentable {
         context.coordinator.view = view
         context.coordinator.compileIfNeeded()
         context.coordinator.apply(
-            palette: palette, background: background,
-            isPlaying: isPlaying, isStatic: isStatic, view: view
+            palette: palette, ditherBack: ditherBack, background: background,
+            isPlaying: isPlaying, isStatic: isStatic,
+            tuning: tuning, audioLevels: audioLevels, view: view
         )
         return view
     }
 
     func updateUIView(_ view: MTKView, context: Context) {
         context.coordinator.apply(
-            palette: palette, background: background,
-            isPlaying: isPlaying, isStatic: isStatic, view: view
+            palette: palette, ditherBack: ditherBack, background: background,
+            isPlaying: isPlaying, isStatic: isStatic,
+            tuning: tuning, audioLevels: audioLevels, view: view
         )
     }
 
@@ -158,16 +214,33 @@ private struct LatentBackgroundMetalView: UIViewRepresentable {
         private var pipelineState: MTLRenderPipelineState?
         private var compileStarted = false
 
-        /// Seconds of shader time. Advanced in `draw(in:)` so the flow
+        /// Seconds of shader time. Two clocks: the mesh (fluid) field
+        /// and the dither (pixel) layer advance at their own speeds
+        /// (Folia's `meshSpeed` / `ditheringSpeed`), so the two layers
+        /// can move independently. Advanced in `draw(in:)` so the flow
         /// follows the display link, never a SwiftUI timer.
-        private var time: Float = 0
+        private var timeMesh: Float = 0
+        private var timeDither: Float = 0
         private var lastDrawTimestamp: CFTimeInterval?
 
         private var meshColors: [SIMD4<Float>] = Array(repeating: SIMD4<Float>(0, 0, 0, 1), count: 6)
         private var ditherFront: SIMD4<Float> = SIMD4<Float>(1, 1, 1, 1)
+        private var ditherBackColor: SIMD4<Float> = SIMD4<Float>(0, 0, 0, 1)
         private var backgroundColor: SIMD4<Float> = SIMD4<Float>(0, 0, 0, 1)
         private var isPlaying = true
         private var isStatic = false
+        private var tuning = LatentTuning()
+        private var audioLevels: (bass: Float, lowMid: Float, mid: Float, treble: Float) = (0, 0, 0, 0)
+
+        /// Smoothed audio terms, eased per frame in `draw(in:)` (Folia's
+        /// RAF-loop smoothing: power 0.12, bass 0.16, mid 0.13 per frame
+        /// at 60fps, dt-scaled here).
+        private var smoothedPower: Float = 0
+        private var smoothedBass: Float = 0
+        private var smoothedMid: Float = 0
+        private var smoothedBeat: Float = 0
+        private var previousEnergy: Float = 0
+        private var onsetPulse: Float = 0
 
         /// Compile the shader once, off the main thread: a small source
         /// still takes tens of milliseconds, and the first frame must not
@@ -190,18 +263,29 @@ private struct LatentBackgroundMetalView: UIViewRepresentable {
             }
         }
 
-        func apply(palette: [Color], background: Color, isPlaying: Bool, isStatic: Bool, view: MTKView) {
+        func apply(
+            palette: [Color], ditherBack: Color, background: Color,
+            isPlaying: Bool, isStatic: Bool,
+            tuning: LatentTuning,
+            audioLevels: (bass: Float, lowMid: Float, mid: Float, treble: Float),
+            view: MTKView
+        ) {
             self.isPlaying = isPlaying
             let wasStatic = self.isStatic
             self.isStatic = isStatic
+            self.tuning = tuning
+            self.audioLevels = audioLevels
             meshColors = (0..<6).map { index in
                 let color = index < palette.count ? palette[index] : background
                 let c = LatentBackgroundView.rgba(color)
                 return SIMD4<Float>(Float(c.r), Float(c.g), Float(c.b), Float(c.a))
             }
             // Folia latent: dithering front = primary cover colour,
-            // dithering back = theme background colour.
+            // dithering back = theme background colour (cover-theme) or
+            // the second cover colour (cover-only).
             ditherFront = meshColors.first ?? SIMD4<Float>(1, 1, 1, 1)
+            let back = LatentBackgroundView.rgba(ditherBack)
+            ditherBackColor = SIMD4<Float>(Float(back.r), Float(back.g), Float(back.b), Float(back.a))
             let bg = LatentBackgroundView.rgba(background)
             backgroundColor = SIMD4<Float>(Float(bg.r), Float(bg.g), Float(bg.b), Float(bg.a))
             view.clearColor = MTLClearColor(red: Double(bg.r), green: Double(bg.g), blue: Double(bg.b), alpha: 1)
@@ -235,25 +319,86 @@ private struct LatentBackgroundMetalView: UIViewRepresentable {
             // paused (Folia `PAUSED_SPEED_SCALE`), frozen while static
             // (the view is paused then, so this never runs — the guard
             // is here so a manual `draw()` cannot lurch the field).
+            //
+            // Audio reactivity (Folia `LatentBackground.tsx`): broadband
+            // energy is the weighted band sum (^0.55); the onset pulse
+            // jumps on a rising edge and decays; the beat amount eases
+            // toward the audio target (attack 0.42, release 0.14) and
+            // blends each layer's base speed toward its audio max.
+            // Rumxs has four bands (60–250 / 250–800 / 800–2500 /
+            // 2500–8000 Hz) for Folia's five — the mid band stands in
+            // for vocal as well (weights 0.22 / 0.18 / 0.50 / 0.10).
+            // Speeds are scaled so the Folia defaults (mesh 0.3, dither
+            // 0.1) reproduce the shipped Rumxs flow rate.
             let now = CACurrentMediaTime()
             if let last = lastDrawTimestamp {
                 let dt = min(max(now - last, 0), 0.1)
                 if !isStatic {
-                    time += Float(dt) * (isPlaying ? 1.0 : 0.12)
+                    let dt60 = Float(dt * 60)
+                    func eased(_ current: Float, toward target: Float, factor: Float) -> Float {
+                        current + (target - current) * (1 - pow(1 - factor, dt60))
+                    }
+                    smoothedBass = eased(smoothedBass, toward: audioLevels.bass, factor: 0.16)
+                    smoothedMid = eased(smoothedMid, toward: audioLevels.mid, factor: 0.13)
+                    let energy = pow(
+                        audioLevels.bass * 0.22 + audioLevels.lowMid * 0.18
+                            + audioLevels.mid * 0.5 + audioLevels.treble * 0.1,
+                        0.55
+                    )
+                    smoothedPower = eased(smoothedPower, toward: energy, factor: 0.12)
+                    onsetPulse = max(
+                        onsetPulse * pow(0.84, dt60),
+                        min(max((energy - previousEnergy) * 7, 0), 1)
+                    )
+                    previousEnergy = energy
+                    let audioTarget: Float
+                    if tuning.enhancedBeatResponse {
+                        audioTarget = min(max(energy * 0.42 + onsetPulse * 0.85, 0), 1)
+                    } else {
+                        audioTarget = min(max(energy, 0), 1)
+                    }
+                    smoothedBeat = eased(
+                        smoothedBeat, toward: audioTarget,
+                        factor: audioTarget > smoothedBeat ? 0.42 : 0.14
+                    )
+                    let playRate: Float = isPlaying ? 1.0 : 0.12
+                    let meshSpeed = Float(tuning.meshSpeed)
+                        + (Float(tuning.meshAudioSpeed) - Float(tuning.meshSpeed)) * smoothedBeat
+                    let ditherSpeed = Float(tuning.ditheringSpeed)
+                        + (Float(tuning.ditheringAudioSpeed) - Float(tuning.ditheringSpeed)) * smoothedBeat
+                    timeMesh += Float(dt) * (meshSpeed / 0.3) * playRate
+                    timeDither += Float(dt) * (ditherSpeed / 0.1) * playRate
                 }
             }
             lastDrawTimestamp = now
 
+            // Per-frame audio terms (Folia's formulas): the bass shrinks
+            // the dither cells and lifts the dither opacity; broadband
+            // power widens the fluid distortion; mids widen the swirl.
+            let ditherSize = max(
+                0.5, Float(tuning.ditheringSize) - smoothedBass * Float(tuning.ditheringSize) * 0.34
+            )
+            let ditherOpacity = min(1, Float(tuning.ditheringOpacity) + smoothedBass * 0.25)
+            let distortion = Float(tuning.meshDistortion) + smoothedPower * 0.62
+            let swirl = Float(tuning.meshSwirl) + smoothedMid * 0.38
+            let layerMode: Float
+            switch tuning.displayMode {
+            case .both: layerMode = 0
+            case .dithering: layerMode = 1
+            case .mesh: layerMode = 2
+            }
+
             var uniforms = LatentUniforms(
                 mesh0: meshColors[0], mesh1: meshColors[1], mesh2: meshColors[2],
                 mesh3: meshColors[3], mesh4: meshColors[4], mesh5: meshColors[5],
-                ditherBack: backgroundColor, ditherFront: ditherFront,
+                ditherBack: ditherBackColor, ditherFront: ditherFront,
                 background: backgroundColor,
                 resolution: SIMD2<Float>(Float(drawable.texture.width), Float(drawable.texture.height)),
-                time: time,
-                ditherSize: 2.5, ditherOpacity: 0.55, overlayOpacity: 0.35,
-                distortion: 0.8, swirl: 0.1,
-                pad: SIMD4<Float>(0, 0, 0, 0)
+                timeMesh: timeMesh, timeDither: timeDither,
+                ditherSize: ditherSize, ditherOpacity: ditherOpacity,
+                overlayOpacity: tuning.overlayEnabled ? Float(tuning.overlayOpacity) : 0,
+                distortion: distortion, swirl: swirl, layerMode: layerMode,
+                pad: SIMD2<Float>(0, 0)
             )
             encoder.setRenderPipelineState(pipelineState)
             encoder.setFragmentBytes(&uniforms, length: MemoryLayout<LatentUniforms>.stride, index: 0)
@@ -288,7 +433,7 @@ private struct LatentBackgroundMetalView: UIViewRepresentable {
 // MARK: - Uniforms
 
 /// Must match the `LatentUniforms` struct in the shader below, field for
-/// field and in order: nine float4s, one float2, six floats, one float4
+/// field and in order: nine float4s, one float2, eight floats, one float2
 /// pad — 192 bytes, 16-byte aligned throughout.
 private struct LatentUniforms {
     var mesh0: SIMD4<Float>
@@ -301,13 +446,15 @@ private struct LatentUniforms {
     var ditherFront: SIMD4<Float>
     var background: SIMD4<Float>
     var resolution: SIMD2<Float>
-    var time: Float
+    var timeMesh: Float
+    var timeDither: Float
     var ditherSize: Float
     var ditherOpacity: Float
     var overlayOpacity: Float
     var distortion: Float
     var swirl: Float
-    var pad: SIMD4<Float>
+    var layerMode: Float
+    var pad: SIMD2<Float>
 }
 
 // MARK: - Shader
@@ -337,13 +484,15 @@ struct LatentUniforms {
     float4 ditherFront;
     float4 background;
     float2 resolution;
-    float time;
+    float timeMesh;
+    float timeDither;
     float ditherSize;
     float ditherOpacity;
     float overlayOpacity;
     float distortion;
     float swirl;
-    float4 pad;
+    float layerMode;
+    float2 pad;
 };
 
 struct VSOut {
@@ -407,7 +556,7 @@ fragment float4 latentFragment(VSOut in [[stage_in]], constant LatentUniforms &u
     float aspect = u.resolution.x / u.resolution.y;
     // Feature scale: ~1-2 smoke blobs across the screen.
     float2 p = (uv - 0.5) * float2(aspect, 1.0) * 1.6;
-    float t = u.time;
+    float t = u.timeMesh;
     // Slow swirl: the whole field turns almost imperceptibly, the way
     // Folia's mesh swirl does (0.1 here, so one turn takes minutes).
     float ang = u.swirl * 0.15 * t;
@@ -443,8 +592,10 @@ fragment float4 latentFragment(VSOut in [[stage_in]], constant LatentUniforms &u
     // Warp dither: the same field offsets the dot grid, so the dots
     // morph with the smoke (Folia's Dithering "warp" shape). Cell size
     // is in 720p-reference pixels, so the dot pitch does not depend on
-    // the render resolution.
-    float2 ditherPx = uv * u.resolution + (q - 0.5) * 24.0;
+    // the render resolution. The dither layer also drifts on its own
+    // clock, so the pixel layer can move at its own speed.
+    float2 ditherPx = uv * u.resolution + (q - 0.5) * 24.0
+        + float2(sin(u.timeDither * 0.13), cos(u.timeDither * 0.11)) * 6.0;
     float cell = u.ditherSize * u.resolution.y / 720.0;
     float2 cellPos = ditherPx / cell;
     int bx = int(mod(floor(cellPos.x), 4.0));
@@ -458,6 +609,21 @@ fragment float4 latentFragment(VSOut in [[stage_in]], constant LatentUniforms &u
     float threshold = (bayer[by * 4 + bx] + 0.5) / 16.0;
     float lum = dot(col, float3(0.2126, 0.7152, 0.0722));
     float3 ditherCol = mix(u.ditherBack.rgb, u.ditherFront.rgb, step(threshold, lum));
+
+    // Display layers (Folia `displayMode`): mesh only skips the dither
+    // composite; dither only draws the warp-dithered pattern over the
+    // warped field's luminance, at opacity 1 (Folia forces the dither
+    // opacity to 1 when the mesh is hidden).
+    if (u.layerMode > 1.5) {
+        col = mix(col, u.background.rgb, u.overlayOpacity);
+        return float4(col, 1.0);
+    }
+    if (u.layerMode > 0.5) {
+        float lumOnly = clamp(r.x, 0.0, 1.0);
+        float3 ditherOnly = mix(u.ditherBack.rgb, u.ditherFront.rgb, step(threshold, lumOnly));
+        col = mix(ditherOnly, u.background.rgb, u.overlayOpacity);
+        return float4(col, 1.0);
+    }
 
     // Folia blends the dither layer over the mesh in soft-light at
     // 0.55, then veils everything with the background at 0.35.

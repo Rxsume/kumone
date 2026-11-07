@@ -18,6 +18,7 @@
 // an extra subtitle row, only while the harmony is active and the
 // harmony switch is on.
 
+import PhotosUI
 import SwiftUI
 
 #if os(iOS)
@@ -287,10 +288,14 @@ struct LyricStylePreviewCard: View {
                 // player lyrics in build 556) — this card still used it,
                 // so its clock froze at ~0s and the preview showed "…"
                 // forever.
-                TimelineView(.animation(minimumInterval: 1.0 / 30.0, paused: false)) { context in
-                    previewContent(time: previewTime(at: context.date))
+                ZStack {
+                    previewBackground
+                    TimelineView(.animation(minimumInterval: 1.0 / 30.0, paused: false)) { context in
+                        previewContent(time: previewTime(at: context.date))
+                    }
                 }
                 .frame(height: 300)
+                .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
 
                 HStack {
                     Picker("预览文本", selection: $sampleID) {
@@ -332,6 +337,81 @@ struct LyricStylePreviewCard: View {
                 .padding(.vertical, 4)
                 .background(Theme.accent, in: Capsule())
                 .padding(12)
+        }
+    }
+
+    /// The selected background behind the preview lyrics, drawn with the
+    /// theme colours. The preview has no cover — Folia's preview shows
+    /// the live background, so the mode's character should read here too,
+    /// even though nomand (which needs a cover) falls back to the plain
+    /// colour. Latent honours `dynamicOnlyInPlayer`: the preview is not
+    /// the player page, so it stays frozen while that is on.
+    @ViewBuilder
+    private var previewBackground: some View {
+        switch settings.effectiveVisualizerBackgroundMode {
+        case .latent:
+            #if os(iOS)
+            LatentBackgroundView(
+                primary: Theme.accent,
+                secondary: ArtworkColors.fallback.secondary,
+                accent: Theme.accent,
+                background: ArtworkColors.fallback.secondary,
+                isPlaying: false,
+                isStatic: settings.effectiveLatentDynamicOnlyInPlayer,
+                tuning: settings.latentTuning
+            )
+            #else
+            ArtworkColors.fallback.secondary
+            #endif
+        case .nomand:
+            ArtworkColors.fallback.secondary
+        case .common:
+            CommonBackgroundView(
+                cover: nil,
+                background: ArtworkColors.fallback.secondary,
+                primary: Theme.accent,
+                secondary: ArtworkColors.fallback.secondary,
+                accent: Theme.accent,
+                opacity: settings.effectiveCommonOpacity,
+                useCoverColorBg: false,
+                disableVignette: settings.effectiveCommonDisableVignette,
+                disableGeometric: settings.effectiveCommonDisableGeometric,
+                isStatic: true
+            )
+        case .monet:
+            MonetBackgroundView(
+                cover: nil,
+                background: ArtworkColors.fallback.secondary,
+                primary: Theme.accent,
+                accent: Theme.accent,
+                secondary: ArtworkColors.fallback.secondary,
+                tuning: settings.monetTuning,
+                isStatic: true
+            )
+        case .url:
+            if let url = settings.selectedUrlBackground.flatMap({ URL(string: $0.url) }) {
+                #if os(iOS)
+                UrlBackgroundView(url: url)
+                #else
+                ArtworkColors.fallback.secondary
+                #endif
+            } else {
+                ArtworkColors.fallback.secondary
+            }
+        case .sora:
+            #if os(iOS)
+            SoraBackgroundView(
+                primary: Theme.accent,
+                accent: Theme.accent,
+                background: ArtworkColors.fallback.secondary,
+                isStatic: true,
+                blank: settings.effectiveSoraBlank
+            )
+            #else
+            ArtworkColors.fallback.secondary
+            #endif
+        case .none:
+            ArtworkColors.fallback.secondary
         }
     }
 
@@ -438,6 +518,8 @@ struct LyricStyleSettingsView: View {
     @State private var sampleID = LyricStylePreviewSamples.default.id
     @State private var showsFontPicker = false
     @State private var showsSubtitleFontPicker = false
+    @State private var newUrlText = ""
+    @State private var backgroundImagePickerItem: PhotosPickerItem?
 
     private enum LyricStyleTab: String, CaseIterable {
         case general
@@ -639,15 +721,191 @@ struct LyricStyleSettingsView: View {
                 }
             } header: {
                 Text("背景模式")
+            } footer: {
+                Text(backgroundModeFooter)
             }
 
-            if settings.visualizerBackgroundMode == .nomand {
+            switch settings.visualizerBackgroundMode {
+            case .latent:
+                latentSection
+            case .nomand:
+                nomandSection
+            case .common:
+                commonSection
+            case .monet:
+                monetSection
+            case .sora:
+                soraSection
+            case .url:
+                urlSection
+            case .none:
                 Section {
-                    Picker("效果", selection: $settings.nomandEffect) {
-                        ForEach(NomandEffect.allCases) { effect in
-                            Text(effect.displayName).tag(effect)
-                        }
+                    Text("播放页使用纯色背景，不渲染任何效果。")
+                        .foregroundColor(.secondary)
+                }
+            }
+
+            if settings.visualizerBackgroundMode == .monet
+                || settings.visualizerBackgroundMode == .nomand {
+                uploadedImageSection
+            }
+        }
+    }
+
+    private var backgroundModeFooter: String {
+        switch settings.visualizerBackgroundMode {
+        case .latent:
+            return "隐现：封面取色的流动烟雾与半调像素层，默认背景。"
+        case .nomand:
+            return "漫游：封面经选中的图片效果渲染的静态背景。"
+        case .common:
+            return "通用：主题纯色，可叠加模糊封面与漂移的几何图形。"
+        case .monet:
+            return "莫奈：封面烘焙成的静态海报，可加灰度、染色与漂移。"
+        case .url:
+            return "嵌入：在播放页内嵌一个网页，仅支持 https 网址。"
+        case .sora:
+            return "空：漂移闪烁的星空。"
+        case .none:
+            return "无背景：纯色播放页。"
+        }
+    }
+
+    // MARK: 隐现
+
+    private var latentSection: some View {
+        Group {
+            Section {
+                Picker("显示图层", selection: $settings.latentDisplayMode) {
+                    ForEach(LatentDisplayMode.allCases) { mode in
+                        Text(mode.displayName).tag(mode)
                     }
+                }
+                Picker("颜色来源", selection: $settings.latentColorSource) {
+                    ForEach(LatentColorSource.allCases) { source in
+                        Text(source.displayName).tag(source)
+                    }
+                }
+                Toggle("仅在播放页启用动态效果", isOn: $settings.latentDynamicOnlyInPlayer)
+                Toggle("增强节拍响应", isOn: $settings.latentEnhancedBeatResponse)
+                Toggle("可读性叠色", isOn: $settings.latentOverlayEnabled)
+                if settings.latentOverlayEnabled {
+                    Slider(value: $settings.latentOverlayOpacity, in: SettingsManager.latentOpacityRange, step: 0.05) {
+                        Text("叠色透明度 \(Int(settings.latentOverlayOpacity * 100))%")
+                    } minimumValueLabel: {
+                        Text("0%")
+                    } maximumValueLabel: {
+                        Text("100%")
+                    }
+                }
+            } header: {
+                Text("隐现背景")
+            } footer: {
+                Text("叠加封面取色的像素与流体着色器，并使用大范围音频速度响应。仅在播放页启用动态效果时，在其他页面保持隐现背景静止，以降低 GPU 资源占用。")
+            }
+
+            Section {
+                Slider(value: $settings.latentDitheringSpeed, in: SettingsManager.latentSpeedRange, step: 0.1) {
+                    Text("基础速度 \(settings.latentDitheringSpeed, specifier: "%.1f")")
+                } minimumValueLabel: {
+                    Text("0")
+                } maximumValueLabel: {
+                    Text("2")
+                }
+                Slider(value: $settings.latentDitheringAudioSpeed, in: SettingsManager.latentSpeedRange, step: 0.1) {
+                    Text("音频响应最大速度 \(settings.latentDitheringAudioSpeed, specifier: "%.1f")")
+                } minimumValueLabel: {
+                    Text("0")
+                } maximumValueLabel: {
+                    Text("2")
+                }
+                Slider(value: $settings.latentDitheringSize, in: SettingsManager.latentDitheringSizeRange, step: 0.25) {
+                    Text("像素尺寸 \(settings.latentDitheringSize, specifier: "%.2f")")
+                } minimumValueLabel: {
+                    Text("0.5")
+                } maximumValueLabel: {
+                    Text("8")
+                }
+                Slider(value: $settings.latentDitheringOpacity, in: SettingsManager.latentOpacityRange, step: 0.05) {
+                    Text("像素层透明度 \(Int(settings.latentDitheringOpacity * 100))%")
+                } minimumValueLabel: {
+                    Text("0%")
+                } maximumValueLabel: {
+                    Text("100%")
+                }
+            } header: {
+                Text("像素背景")
+            }
+
+            Section {
+                Slider(value: $settings.latentMeshSpeed, in: SettingsManager.latentSpeedRange, step: 0.1) {
+                    Text("基础速度 \(settings.latentMeshSpeed, specifier: "%.1f")")
+                } minimumValueLabel: {
+                    Text("0")
+                } maximumValueLabel: {
+                    Text("2")
+                }
+                Slider(value: $settings.latentMeshAudioSpeed, in: SettingsManager.latentSpeedRange, step: 0.1) {
+                    Text("音频响应最大速度 \(settings.latentMeshAudioSpeed, specifier: "%.1f")")
+                } minimumValueLabel: {
+                    Text("0")
+                } maximumValueLabel: {
+                    Text("2")
+                }
+                Slider(value: $settings.latentMeshDistortion, in: SettingsManager.latentMeshDistortionRange, step: 0.05) {
+                    Text("流体扭曲 \(settings.latentMeshDistortion, specifier: "%.2f")")
+                } minimumValueLabel: {
+                    Text("0")
+                } maximumValueLabel: {
+                    Text("2")
+                }
+                Slider(value: $settings.latentMeshSwirl, in: SettingsManager.latentMeshSwirlRange, step: 0.05) {
+                    Text("流体旋涡 \(settings.latentMeshSwirl, specifier: "%.2f")")
+                } minimumValueLabel: {
+                    Text("0")
+                } maximumValueLabel: {
+                    Text("1")
+                }
+            } header: {
+                Text("流体背景")
+            }
+        }
+    }
+
+    // MARK: 漫游
+
+    private var nomandSection: some View {
+        Group {
+            Section {
+                Picker("效果", selection: $settings.nomandEffect) {
+                    ForEach(NomandEffect.allCases) { effect in
+                        Text(effect.displayName).tag(effect)
+                    }
+                }
+                Picker("图片来源", selection: $settings.nomandImageSource) {
+                    ForEach(BackgroundImageSource.allCases) { source in
+                        Text(source.displayName).tag(source)
+                    }
+                }
+                Toggle("可读性叠色", isOn: $settings.nomandOverlayEnabled)
+                if settings.nomandOverlayEnabled {
+                    Slider(value: $settings.nomandOverlayOpacity, in: SettingsManager.nomandOverlayOpacityRange, step: 0.05) {
+                        Text("叠色透明度 \(Int(settings.nomandOverlayOpacity * 100))%")
+                    } minimumValueLabel: {
+                        Text("0%")
+                    } maximumValueLabel: {
+                        Text("100%")
+                    }
+                }
+            } header: {
+                Text("漫游")
+            } footer: {
+                Text("封面经选中的图片效果渲染；未上传图片时，已上传图片会回退为封面。")
+            }
+
+            switch settings.nomandEffect {
+            case .halftoneDots:
+                Section {
                     Slider(value: $settings.nomandHalftoneSize, in: SettingsManager.nomandHalftoneSizeRange, step: 0.05) {
                         Text("圆点大小")
                     } minimumValueLabel: {
@@ -670,19 +928,367 @@ struct LyricStyleSettingsView: View {
                         Text("1")
                     }
                     Toggle("保留封面原色", isOn: $settings.nomandOriginalColors)
-                    Slider(value: $settings.nomandOverlayOpacity, in: SettingsManager.nomandOverlayOpacityRange, step: 0.05) {
-                        Text("遮罩透明度")
-                    } minimumValueLabel: {
-                        Text("0%")
-                    } maximumValueLabel: {
-                        Text("100%")
-                    }
+                    Toggle("反色", isOn: $settings.nomandHalftoneDotsInverted)
                 } header: {
-                    Text("漫游（半调圆点）")
+                    Text("半调网点")
                 } footer: {
                     Text("半调圆点由封面实时生成；圆点取主题强调色，空隙取背景色。保留原色时圆点按封面颜色着色。")
                 }
+            case .dithering:
+                Section {
+                    Picker("矩阵", selection: $settings.nomandDitheringType) {
+                        ForEach(NomandDitheringType.allCases) { type in
+                            Text(type.rawValue).tag(type)
+                        }
+                    }
+                    Slider(value: $settings.nomandDitheringSize, in: SettingsManager.nomandDitheringSizeRange, step: 0.5) {
+                        Text("像素尺寸 \(settings.nomandDitheringSize, specifier: "%.1f")")
+                    } minimumValueLabel: {
+                        Text("0.5")
+                    } maximumValueLabel: {
+                        Text("20")
+                    }
+                    Slider(value: Binding(
+                        get: { Double(settings.nomandDitheringColorSteps) },
+                        set: { settings.nomandDitheringColorSteps = Int($0.rounded()) }
+                    ), in: 1.0...7.0, step: 1) {
+                        Text("色彩阶数 \(settings.nomandDitheringColorSteps)")
+                    } minimumValueLabel: {
+                        Text("1")
+                    } maximumValueLabel: {
+                        Text("7")
+                    }
+                    Toggle("保留原色", isOn: $settings.nomandDitheringOriginalColors)
+                    Toggle("反色", isOn: $settings.nomandDitheringInverted)
+                } header: {
+                    Text("像素画")
+                } footer: {
+                    Text("封面化作 Bayer 抖动的像素图案，按主题色量化；保留原色时按封面颜色着色。")
+                }
+            case .flutedGlass:
+                Section {
+                    Slider(value: $settings.nomandFlutedGlassSize, in: SettingsManager.nomandFlutedGlassSizeRange, step: 0.05) {
+                        Text("纹理尺寸 \(settings.nomandFlutedGlassSize, specifier: "%.2f")")
+                    } minimumValueLabel: {
+                        Text("0.1")
+                    } maximumValueLabel: {
+                        Text("1")
+                    }
+                    Slider(value: $settings.nomandFlutedGlassDistortion, in: SettingsManager.nomandFlutedGlassDistortionRange, step: 0.05) {
+                        Text("折射强度 \(settings.nomandFlutedGlassDistortion, specifier: "%.2f")")
+                    } minimumValueLabel: {
+                        Text("0")
+                    } maximumValueLabel: {
+                        Text("1")
+                    }
+                    Slider(value: $settings.nomandFlutedGlassBlur, in: SettingsManager.nomandFlutedGlassBlurRange, step: 0.01) {
+                        Text("模糊 \(settings.nomandFlutedGlassBlur, specifier: "%.2f")")
+                    } minimumValueLabel: {
+                        Text("0")
+                    } maximumValueLabel: {
+                        Text("1")
+                    }
+                } header: {
+                    Text("纹理玻璃")
+                } footer: {
+                    Text("封面透过竖纹玻璃呈现，棱镜边缘带柔和的高光。")
+                }
+            case .paperTexture:
+                Section {
+                    Slider(value: $settings.nomandPaperTextureContrast, in: SettingsManager.nomandPaperTextureContrastRange, step: 0.05) {
+                        Text("对比度 \(settings.nomandPaperTextureContrast, specifier: "%.2f")")
+                    } minimumValueLabel: {
+                        Text("0")
+                    } maximumValueLabel: {
+                        Text("1")
+                    }
+                    Slider(value: $settings.nomandPaperTextureRoughness, in: SettingsManager.nomandPaperTextureRoughnessRange, step: 0.05) {
+                        Text("粗糙度 \(settings.nomandPaperTextureRoughness, specifier: "%.2f")")
+                    } minimumValueLabel: {
+                        Text("0")
+                    } maximumValueLabel: {
+                        Text("1")
+                    }
+                    Slider(value: $settings.nomandPaperTextureFiber, in: SettingsManager.nomandPaperTextureFiberRange, step: 0.05) {
+                        Text("纤维量 \(settings.nomandPaperTextureFiber, specifier: "%.2f")")
+                    } minimumValueLabel: {
+                        Text("0")
+                    } maximumValueLabel: {
+                        Text("1")
+                    }
+                } header: {
+                    Text("纸张纹理")
+                } footer: {
+                    Text("封面印在带纤维纹理的纸面上，纸纹会轻微扭曲画面。")
+                }
+            case .lensDistortion:
+                Section {
+                    Slider(value: $settings.nomandLensDistortionSpread, in: SettingsManager.nomandLensDistortionSpreadRange, step: 0.05) {
+                        Text("扩散范围 \(settings.nomandLensDistortionSpread, specifier: "%.2f")")
+                    } minimumValueLabel: {
+                        Text("0")
+                    } maximumValueLabel: {
+                        Text("1")
+                    }
+                    Slider(value: $settings.nomandLensDistortionBulge, in: SettingsManager.nomandLensDistortionBulgeRange, step: 0.05) {
+                        Text("中心凸起 \(settings.nomandLensDistortionBulge, specifier: "%.2f")")
+                    } minimumValueLabel: {
+                        Text("-1")
+                    } maximumValueLabel: {
+                        Text("1")
+                    }
+                    Slider(value: $settings.nomandLensDistortionDispersion, in: SettingsManager.nomandLensDistortionDispersionRange, step: 0.05) {
+                        Text("色散 \(settings.nomandLensDistortionDispersion, specifier: "%.2f")")
+                    } minimumValueLabel: {
+                        Text("0")
+                    } maximumValueLabel: {
+                        Text("1")
+                    }
+                } header: {
+                    Text("镜头畸变")
+                } footer: {
+                    Text("封面经镜头弯曲，中心鼓起、边缘带色散。")
+                }
             }
+        }
+    }
+
+    // MARK: 通用
+
+    private var commonSection: some View {
+        Section {
+            Toggle("使用封面颜色背景", isOn: $settings.commonUseCoverColorBg)
+            if settings.commonUseCoverColorBg {
+                Slider(value: $settings.commonOpacity, in: SettingsManager.commonOpacityRange, step: 0.05) {
+                    Text("主题色透明度 \(Int(settings.commonOpacity * 100))%")
+                } minimumValueLabel: {
+                    Text("0%")
+                } maximumValueLabel: {
+                    Text("100%")
+                }
+            }
+            Toggle("显示暗角", isOn: Binding(
+                get: { !settings.commonDisableVignette },
+                set: { settings.commonDisableVignette = !$0 }
+            ))
+            Toggle("显示几何图形", isOn: Binding(
+                get: { !settings.commonDisableGeometric },
+                set: { settings.commonDisableGeometric = !$0 }
+            ))
+        } header: {
+            Text("通用背景")
+        } footer: {
+            Text("主题纯色背景，可选叠加模糊封面与随音频起伏的几何图形和粒子。")
+        }
+    }
+
+    // MARK: 莫奈
+
+    private var monetSection: some View {
+        Group {
+            Section {
+                Picker("背景来源", selection: $settings.monetBackgroundSource) {
+                    ForEach(BackgroundImageSource.allCases) { source in
+                        Text(source.displayName).tag(source)
+                    }
+                }
+                Picker("布局", selection: $settings.monetBackgroundLayout) {
+                    Text("完整覆盖").tag(MonetLayout.fullOverlay)
+                    Text("半幅渐变").tag(MonetLayout.halfPaneGradient)
+                }
+                Slider(value: $settings.monetBackgroundBlurPx, in: SettingsManager.monetBackgroundBlurPxRange, step: 2) {
+                    Text("模糊 \(settings.monetBackgroundBlurPx, specifier: "%.0f")")
+                } minimumValueLabel: {
+                    Text("0")
+                } maximumValueLabel: {
+                    Text("60")
+                }
+                Slider(value: $settings.monetBackgroundOverlayOpacity, in: SettingsManager.monetBackgroundOverlayOpacityRange, step: 0.02) {
+                    Text("叠加透明度 \(Int(settings.monetBackgroundOverlayOpacity * 100))%")
+                } minimumValueLabel: {
+                    Text("0%")
+                } maximumValueLabel: {
+                    Text("100%")
+                }
+                Slider(value: $settings.monetBackgroundGrayscale, in: SettingsManager.monetBackgroundGrayscaleRange, step: 0.02) {
+                    Text("灰度 \(settings.monetBackgroundGrayscale, specifier: "%.2f")")
+                } minimumValueLabel: {
+                    Text("0")
+                } maximumValueLabel: {
+                    Text("1")
+                }
+                Slider(value: $settings.monetBackgroundSaturation, in: SettingsManager.monetBackgroundSaturationRange, step: 0.05) {
+                    Text("饱和度 \(settings.monetBackgroundSaturation, specifier: "%.2f")")
+                } minimumValueLabel: {
+                    Text("0")
+                } maximumValueLabel: {
+                    Text("2")
+                }
+                Slider(value: $settings.monetBackgroundWash, in: SettingsManager.monetBackgroundWashRange, step: 0.02) {
+                    Text("染色 \(settings.monetBackgroundWash, specifier: "%.2f")")
+                } minimumValueLabel: {
+                    Text("0")
+                } maximumValueLabel: {
+                    Text("1")
+                }
+                if settings.monetBackgroundLayout == .halfPaneGradient {
+                    Slider(value: $settings.monetBackgroundHalfPaneOffsetX, in: SettingsManager.monetBackgroundHalfPaneOffsetXRange, step: 2) {
+                        Text("半幅横向偏移 \(settings.monetBackgroundHalfPaneOffsetX, specifier: "%.0f")")
+                    } minimumValueLabel: {
+                        Text("-40")
+                    } maximumValueLabel: {
+                        Text("40")
+                    }
+                }
+            } header: {
+                Text("莫奈背景")
+            } footer: {
+                Text("封面烘焙成的静态海报；未上传图片时，已上传图片会回退为封面。")
+            }
+
+            Section {
+                Picker("染色颜色", selection: $settings.monetBackgroundWashColorMode) {
+                    Text("主题").tag(MonetWashColorMode.theme)
+                    Text("自定义").tag(MonetWashColorMode.custom)
+                }
+                if settings.monetBackgroundWashColorMode == .custom {
+                    TextField("#rrggbb", text: $settings.monetBackgroundWashCustomColor)
+                        .disableAutocorrection(true)
+                        #if os(iOS)
+                        .textInputAutocapitalization(.never)
+                        #endif
+                }
+                Toggle("漂移", isOn: $settings.monetBackgroundDriftEnabled)
+                if settings.monetBackgroundDriftEnabled {
+                    Slider(value: $settings.monetBackgroundDriftStrength, in: SettingsManager.monetBackgroundDriftStrengthRange, step: 0.05) {
+                        Text("漂移幅度 \(settings.monetBackgroundDriftStrength, specifier: "%.2f")")
+                    } minimumValueLabel: {
+                        Text("0")
+                    } maximumValueLabel: {
+                        Text("1")
+                    }
+                }
+                Toggle("竖纹", isOn: $settings.monetBackgroundStreaksEnabled)
+            } header: {
+                Text("莫奈效果")
+            } footer: {
+                Text("自定义染色颜色须为 #rrggbb 格式；格式不对时用主题强调色代替。")
+            }
+        }
+    }
+
+    // MARK: 空
+
+    private var soraSection: some View {
+        Section {
+            Toggle("仅显示纯色", isOn: $settings.soraBlank)
+        } header: {
+            Text("空背景")
+        } footer: {
+            Text("不再渲染星空，只显示静态纯色画面：夜间纯黑，日间纯白。")
+        }
+    }
+
+    // MARK: 嵌入
+
+    private var urlSection: some View {
+        Section {
+            HStack {
+                TextField("https://…", text: $newUrlText)
+                    .disableAutocorrection(true)
+                    #if os(iOS)
+                    .textInputAutocapitalization(.never)
+                    #endif
+                Button("添加") { addUrlBackground() }
+                    .disabled(newUrlText.trimmingCharacters(in: .whitespaces).isEmpty)
+            }
+            if settings.urlBackgroundList.isEmpty {
+                Text("还没有保存的网页。添加一个 https 网址，在播放页内嵌显示。")
+                    .foregroundColor(.secondary)
+            }
+            ForEach(settings.urlBackgroundList) { item in
+                Button {
+                    settings.urlBackgroundSelectedID = item.id
+                } label: {
+                    HStack {
+                        Text(item.note)
+                            .lineLimit(1)
+                        Spacer()
+                        if settings.urlBackgroundSelectedID == item.id {
+                            Text("已选").foregroundColor(.secondary)
+                        }
+                    }
+                }
+            }
+            .onDelete(perform: deleteUrlBackgrounds)
+        } header: {
+            Text("嵌入背景")
+        } footer: {
+            Text("仅支持 https 网址（系统传输安全限制）；点按一行可切换选中，左滑可删除。")
+        }
+    }
+
+    /// Adds the typed URL to the saved list and selects it. Folia
+    /// prepends `https://` when no scheme is given and accepts only
+    /// http(s); here only https is accepted — cleartext http is blocked
+    /// by App Transport Security without an entitlement exception.
+    private func addUrlBackground() {
+        var text = newUrlText.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !text.isEmpty else { return }
+        if !text.contains("://") { text = "https://" + text }
+        guard let url = URL(string: text), url.scheme == "https", url.host != nil else { return }
+        let item = UrlBackgroundItem(url: url.absoluteString, note: url.absoluteString)
+        settings.urlBackgroundList.append(item)
+        settings.urlBackgroundSelectedID = item.id
+        newUrlText = ""
+    }
+
+    private func deleteUrlBackgrounds(at offsets: IndexSet) {
+        var list = settings.urlBackgroundList
+        let deletedIDs = offsets.map { list[$0].id }
+        list.remove(atOffsets: offsets)
+        settings.urlBackgroundList = list
+        if let selected = settings.urlBackgroundSelectedID, deletedIDs.contains(selected) {
+            settings.urlBackgroundSelectedID = list.first?.id
+        }
+    }
+
+    // MARK: 上传图片
+
+    private var uploadedImageSection: some View {
+        Section {
+            PhotosPicker(selection: $backgroundImagePickerItem, matching: .images) {
+                Text(settings.uploadedBackgroundImageName == nil ? "上传图片" : "更换图片")
+            }
+            .onChange(of: backgroundImagePickerItem?.itemIdentifier) { _ in
+                guard let item = backgroundImagePickerItem else { return }
+                Task {
+                    guard let data = try? await item.loadTransferable(type: Data.self),
+                          let name = VisualizerBackgroundImageStore.save(data: data)
+                    else {
+                        backgroundImagePickerItem = nil
+                        return
+                    }
+                    settings.uploadedBackgroundImageName = name
+                    backgroundImagePickerItem = nil
+                }
+            }
+            if settings.uploadedBackgroundImageName != nil {
+                Button("清除已上传图片", role: .destructive) {
+                    VisualizerBackgroundImageStore.delete(named: settings.uploadedBackgroundImageName)
+                    settings.uploadedBackgroundImageName = nil
+                    if settings.monetBackgroundSource == .uploadedGlobal {
+                        settings.monetBackgroundSource = .coverDerived
+                    }
+                    if settings.nomandImageSource == .uploadedGlobal {
+                        settings.nomandImageSource = .coverDerived
+                    }
+                }
+            }
+        } header: {
+            Text("背景图片")
+        } footer: {
+            Text("一张全局图片，供莫奈与漫游共用：选“已上传图片”时替代封面作为来源；未上传时回退为封面。PNG、JPEG 与 GIF 可用；WebP 与 SVG 系统无法解码。")
         }
     }
 

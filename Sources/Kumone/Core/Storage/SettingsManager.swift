@@ -267,38 +267,151 @@ enum LyricsFontStyle: String, CaseIterable, Identifiable {
 }
 
 /// Which background the luminous (流光) now-playing page uses.
+/// Folia's six modes (`BuiltinVisualizerBackgroundMode`), in Folia's
+/// registry order, plus the Rumxs-only `none` (plain dark page) kept
+/// for users who chose it before the other modes were ported.
 /// `latent` is Folia's default background mode (`DEFAULT_VISUALIZER_
 /// BACKGROUND_MODE = 'latent'`): the flowing smoke + warp-dither field
-/// from the reference video. `nomand` is the static halftone-dot cover;
-/// `none` is the plain dark page. Sora / monet are not ported.
+/// from the reference video. `nomand` is the cover through one of five
+/// Paper shaders; `common` is the theme colour + blurred cover +
+/// drifting shapes; `monet` is a baked cover poster; `url` embeds a
+/// webpage; `sora` is a drifting starfield.
 enum VisualizerBackgroundMode: String, CaseIterable, Identifiable {
-    case latent
+    case common
+    case monet
     case nomand
+    case latent
+    case url
+    case sora
     case none
 
     var id: String { rawValue }
 
     var displayName: String {
         switch self {
+        case .common: return String(localized: "通用")
+        case .monet: return String(localized: "莫奈")
+        case .nomand: return String(localized: "漫游")
         case .latent: return String(localized: "潜流（流动烟雾）")
-        case .nomand: return String(localized: "漫游（半调圆点）")
+        case .url: return String(localized: "嵌入（网页）")
+        case .sora: return String(localized: "空（星空）")
         case .none: return String(localized: "无背景")
         }
     }
 }
 
-/// Nomand background effect. Only halftone-dots is ported for now; the enum
-/// stays so dithering / fluted-glass / paper-texture / lens-distortion can
-/// slot in without a settings migration.
+/// Nomand background effect. Folia's five Paper shaders
+/// (`NomandBackgroundEffectSettings.tsx`: dithering / fluted-glass /
+/// paper-texture / halftone-dots / lens-distortion), re-implemented
+/// natively with Core Image (see `NomandDitherer`); the GLSL itself is
+/// closed-source, so each effect is a native re-derivation, not a copy.
 enum NomandEffect: String, CaseIterable, Identifiable {
+    case dithering
+    case flutedGlass
+    case paperTexture
     case halftoneDots
+    case lensDistortion
 
     var id: String { rawValue }
 
     var displayName: String {
         switch self {
-        case .halftoneDots: return String(localized: "半调圆点")
+        case .dithering: return String(localized: "像素画")
+        case .flutedGlass: return String(localized: "纹理玻璃")
+        case .paperTexture: return String(localized: "纸张纹理")
+        case .halftoneDots: return String(localized: "半调网点")
+        case .lensDistortion: return String(localized: "镜头畸变")
         }
+    }
+}
+
+/// Latent (隐现) display layers: Folia's `displayMode`
+/// ('dithering' | 'mesh' | 'both'). `dithering` is the pixel layer
+/// alone, `mesh` the fluid layer alone, `both` the two stacked.
+enum LatentDisplayMode: String, CaseIterable, Identifiable {
+    case dithering
+    case mesh
+    case both
+
+    var id: String { rawValue }
+
+    var displayName: String {
+        switch self {
+        case .dithering: return String(localized: "像素")
+        case .mesh: return String(localized: "流体")
+        case .both: return String(localized: "混合")
+        }
+    }
+}
+
+/// Latent (隐现) colour source: Folia's `colorSource`
+/// ('cover-theme' | 'cover-only').
+enum LatentColorSource: String, CaseIterable, Identifiable {
+    case coverTheme
+    case coverOnly
+
+    var id: String { rawValue }
+
+    var displayName: String {
+        switch self {
+        case .coverTheme: return String(localized: "封面与主题")
+        case .coverOnly: return String(localized: "仅封面取色")
+        }
+    }
+}
+
+/// The latent tuning as one value (Folia's `latent_background_tuning`).
+/// Built by `SettingsManager.latentTuning` from the `effective*`
+/// properties; the renderer only ever sees this struct, never the store.
+///
+/// Lives here, not in LatentBackgroundView.swift: that file is
+/// `#if os(iOS)`, and the shared SettingsManager is compiled for macOS
+/// too — a type it uses must not be defined inside an iOS-only file
+/// (macOS build fails with "cannot find type in scope", PR #18 run #53).
+struct LatentTuning: Equatable {
+    var displayMode: LatentDisplayMode = .both
+    var colorSource: LatentColorSource = .coverTheme
+    var overlayEnabled: Bool = true
+    var overlayOpacity: Double = 0.35
+    var ditheringSpeed: Double = 0.1
+    var ditheringAudioSpeed: Double = 1.2
+    var ditheringSize: Double = 2.5
+    var ditheringOpacity: Double = 0.55
+    var meshSpeed: Double = 0.3
+    var meshAudioSpeed: Double = 2.0
+    var meshDistortion: Double = 0.8
+    var meshSwirl: Double = 0.1
+    var enhancedBeatResponse: Bool = true
+}
+
+/// Source image for the monet / nomand backgrounds: the current song's
+/// cover, or the single user-uploaded global image (shared by both
+/// modes, like Folia's `monet_background_image`).
+enum BackgroundImageSource: String, CaseIterable, Identifiable {
+    case coverDerived
+    case uploadedGlobal
+
+    var id: String { rawValue }
+
+    var displayName: String {
+        switch self {
+        case .coverDerived: return String(localized: "封面")
+        case .uploadedGlobal: return String(localized: "已上传图片")
+        }
+    }
+}
+
+/// One saved webpage for the `url` (嵌入) background: Folia's
+/// `UrlBackgroundItem { id, url, note }`, stored as JSON in UserDefaults.
+struct UrlBackgroundItem: Codable, Equatable, Identifiable {
+    var id: String
+    var url: String
+    var note: String
+
+    init(id: String = UUID().uuidString, url: String, note: String) {
+        self.id = id
+        self.url = url
+        self.note = note
     }
 }
 
@@ -407,6 +520,68 @@ final class SettingsManager: ObservableObject {
         static let nomandHalftoneContrast = "settings.nomandHalftoneContrast"
         static let nomandOriginalColors = "settings.nomandOriginalColors"
         static let nomandOverlayOpacity = "settings.nomandOverlayOpacity"
+        static let nomandOverlayEnabled = "settings.nomandOverlayEnabled"
+        static let nomandImageSource = "settings.nomandImageSource"
+        static let nomandDitheringType = "settings.nomandDitheringType"
+        static let nomandDitheringSize = "settings.nomandDitheringSize"
+        static let nomandDitheringColorSteps = "settings.nomandDitheringColorSteps"
+        static let nomandDitheringOriginalColors = "settings.nomandDitheringOriginalColors"
+        static let nomandDitheringInverted = "settings.nomandDitheringInverted"
+        static let nomandFlutedGlassSize = "settings.nomandFlutedGlassSize"
+        static let nomandFlutedGlassDistortion = "settings.nomandFlutedGlassDistortion"
+        static let nomandFlutedGlassBlur = "settings.nomandFlutedGlassBlur"
+        static let nomandPaperTextureContrast = "settings.nomandPaperTextureContrast"
+        static let nomandPaperTextureRoughness = "settings.nomandPaperTextureRoughness"
+        static let nomandPaperTextureFiber = "settings.nomandPaperTextureFiber"
+        static let nomandHalftoneDotsInverted = "settings.nomandHalftoneDotsInverted"
+        static let nomandLensDistortionSpread = "settings.nomandLensDistortionSpread"
+        static let nomandLensDistortionBulge = "settings.nomandLensDistortionBulge"
+        static let nomandLensDistortionDispersion = "settings.nomandLensDistortionDispersion"
+        // Folia latent (隐现) background tuning.
+        static let latentDisplayMode = "settings.latentDisplayMode"
+        static let latentColorSource = "settings.latentColorSource"
+        static let latentDynamicOnlyInPlayer = "settings.latentDynamicOnlyInPlayer"
+        static let latentEnhancedBeatResponse = "settings.latentEnhancedBeatResponse"
+        static let latentDitheringSpeed = "settings.latentDitheringSpeed"
+        static let latentDitheringAudioSpeed = "settings.latentDitheringAudioSpeed"
+        static let latentDitheringSize = "settings.latentDitheringSize"
+        static let latentDitheringOpacity = "settings.latentDitheringOpacity"
+        static let latentMeshSpeed = "settings.latentMeshSpeed"
+        static let latentMeshAudioSpeed = "settings.latentMeshAudioSpeed"
+        static let latentMeshDistortion = "settings.latentMeshDistortion"
+        static let latentMeshSwirl = "settings.latentMeshSwirl"
+        static let latentOverlayEnabled = "settings.latentOverlayEnabled"
+        static let latentOverlayOpacity = "settings.latentOverlayOpacity"
+        // Folia common (通用) background.
+        static let commonOpacity = "settings.commonOpacity"
+        static let commonUseCoverColorBg = "settings.commonUseCoverColorBg"
+        static let commonDisableVignette = "settings.commonDisableVignette"
+        static let commonDisableGeometric = "settings.commonDisableGeometric"
+        // Folia monet (莫奈) background.
+        static let monetBackgroundSource = "settings.monetBackgroundSource"
+        static let monetBackgroundLayout = "settings.monetBackgroundLayout"
+        static let monetBackgroundBlurPx = "settings.monetBackgroundBlurPx"
+        static let monetBackgroundOverlayOpacity = "settings.monetBackgroundOverlayOpacity"
+        static let monetBackgroundGrayscale = "settings.monetBackgroundGrayscale"
+        static let monetBackgroundSaturation = "settings.monetBackgroundSaturation"
+        static let monetBackgroundWash = "settings.monetBackgroundWash"
+        static let monetBackgroundHalfPaneOffsetX = "settings.monetBackgroundHalfPaneOffsetX"
+        static let monetBackgroundWashColorMode = "settings.monetBackgroundWashColorMode"
+        static let monetBackgroundWashCustomColor = "settings.monetBackgroundWashCustomColor"
+        static let monetBackgroundDriftEnabled = "settings.monetBackgroundDriftEnabled"
+        static let monetBackgroundDriftStrength = "settings.monetBackgroundDriftStrength"
+        static let monetBackgroundStreaksEnabled = "settings.monetBackgroundStreaksEnabled"
+        // Folia sora (空) background.
+        static let soraBlank = "settings.soraBlank"
+        // Folia url (嵌入) background: a list of saved webpages + the
+        // selected one, stored as JSON.
+        static let urlBackgroundList = "settings.urlBackgroundList"
+        static let urlBackgroundSelectedID = "settings.urlBackgroundSelectedID"
+        // The single user-uploaded background image (monet + nomand share
+        // it, like Folia's `monet_background_image`): the file name under
+        // Application Support; the bytes live in
+        // `VisualizerBackgroundImageStore`, not in UserDefaults.
+        static let uploadedBackgroundImageName = "settings.uploadedBackgroundImageName"
         // Folia lyric-style window (VisPlayground).
         static let lyricsFontStyle = "settings.lyricsFontStyle"
         static let lyricsFontScale = "settings.lyricsFontScale"
@@ -653,6 +828,59 @@ final class SettingsManager: ObservableObject {
     nonisolated static let defaultNomandHalftoneContrast = 0.4
     nonisolated static let defaultNomandOriginalColors = false
     nonisolated static let defaultNomandOverlayOpacity = 0.35
+    nonisolated static let defaultNomandOverlayEnabled = true
+    nonisolated static let defaultNomandImageSource = BackgroundImageSource.coverDerived
+    nonisolated static let defaultNomandDitheringType = NomandDitheringType.eightByEight
+    nonisolated static let defaultNomandDitheringSize = 3.0
+    nonisolated static let defaultNomandDitheringColorSteps = 4
+    nonisolated static let defaultNomandDitheringOriginalColors = false
+    nonisolated static let defaultNomandDitheringInverted = false
+    nonisolated static let defaultNomandFlutedGlassSize = 0.5
+    nonisolated static let defaultNomandFlutedGlassDistortion = 0.5
+    nonisolated static let defaultNomandFlutedGlassBlur = 0.08
+    nonisolated static let defaultNomandPaperTextureContrast = 0.32
+    nonisolated static let defaultNomandPaperTextureRoughness = 0.42
+    nonisolated static let defaultNomandPaperTextureFiber = 0.3
+    nonisolated static let defaultNomandHalftoneDotsInverted = false
+    nonisolated static let defaultNomandLensDistortionSpread = 0.45
+    nonisolated static let defaultNomandLensDistortionBulge = 0.3
+    nonisolated static let defaultNomandLensDistortionDispersion = 0.65
+    // Folia latent (隐现) defaults (`DEFAULT_LATENT_BACKGROUND_TUNING`).
+    nonisolated static let defaultLatentDisplayMode = LatentDisplayMode.both
+    nonisolated static let defaultLatentColorSource = LatentColorSource.coverTheme
+    nonisolated static let defaultLatentDynamicOnlyInPlayer = true
+    nonisolated static let defaultLatentEnhancedBeatResponse = true
+    nonisolated static let defaultLatentDitheringSpeed = 0.1
+    nonisolated static let defaultLatentDitheringAudioSpeed = 1.2
+    nonisolated static let defaultLatentDitheringSize = 2.5
+    nonisolated static let defaultLatentDitheringOpacity = 0.55
+    nonisolated static let defaultLatentMeshSpeed = 0.3
+    nonisolated static let defaultLatentMeshAudioSpeed = 2.0
+    nonisolated static let defaultLatentMeshDistortion = 0.8
+    nonisolated static let defaultLatentMeshSwirl = 0.1
+    nonisolated static let defaultLatentOverlayEnabled = true
+    nonisolated static let defaultLatentOverlayOpacity = 0.35
+    // Folia common (通用) defaults.
+    nonisolated static let defaultCommonOpacity = 0.75
+    nonisolated static let defaultCommonUseCoverColorBg = false
+    nonisolated static let defaultCommonDisableVignette = false
+    nonisolated static let defaultCommonDisableGeometric = false
+    // Folia monet (莫奈) defaults (`DEFAULT_MONET_BACKGROUND_TUNING`).
+    nonisolated static let defaultMonetBackgroundSource = BackgroundImageSource.coverDerived
+    nonisolated static let defaultMonetBackgroundLayout = MonetLayout.fullOverlay
+    nonisolated static let defaultMonetBackgroundBlurPx = 6.0
+    nonisolated static let defaultMonetBackgroundOverlayOpacity = 0.74
+    nonisolated static let defaultMonetBackgroundGrayscale = 0.0
+    nonisolated static let defaultMonetBackgroundSaturation = 1.05
+    nonisolated static let defaultMonetBackgroundWash = 0.34
+    nonisolated static let defaultMonetBackgroundHalfPaneOffsetX = 0.0
+    nonisolated static let defaultMonetBackgroundWashColorMode = MonetWashColorMode.theme
+    nonisolated static let defaultMonetBackgroundWashCustomColor = "#8fb7ff"
+    nonisolated static let defaultMonetBackgroundDriftEnabled = true
+    nonisolated static let defaultMonetBackgroundDriftStrength = 0.5
+    nonisolated static let defaultMonetBackgroundStreaksEnabled = true
+    // Folia sora (空) default.
+    nonisolated static let defaultSoraBlank = false
     nonisolated static let defaultLyricsFontStyle = LyricsFontStyle.sans
     nonisolated static let defaultLyricsFontScale = 1.0
     nonisolated static let defaultVisualizerOpacity = 1.0
@@ -673,6 +901,30 @@ final class SettingsManager: ObservableObject {
     nonisolated static let nomandHalftoneRadiusRange = 0.1...2.0
     nonisolated static let nomandHalftoneContrastRange = 0.0...1.0
     nonisolated static let nomandOverlayOpacityRange = 0.0...1.0
+    nonisolated static let nomandDitheringSizeRange = 0.5...20.0
+    nonisolated static let nomandDitheringColorStepsRange = 1...7
+    nonisolated static let nomandFlutedGlassSizeRange = 0.1...1.0
+    nonisolated static let nomandFlutedGlassDistortionRange = 0.0...1.0
+    nonisolated static let nomandFlutedGlassBlurRange = 0.0...1.0
+    nonisolated static let nomandPaperTextureContrastRange = 0.0...1.0
+    nonisolated static let nomandPaperTextureRoughnessRange = 0.0...1.0
+    nonisolated static let nomandPaperTextureFiberRange = 0.0...1.0
+    nonisolated static let nomandLensDistortionSpreadRange = 0.0...1.0
+    nonisolated static let nomandLensDistortionBulgeRange = -1.0...1.0
+    nonisolated static let nomandLensDistortionDispersionRange = 0.0...1.0
+    nonisolated static let latentSpeedRange = 0.0...2.0
+    nonisolated static let latentDitheringSizeRange = 0.5...8.0
+    nonisolated static let latentOpacityRange = 0.0...1.0
+    nonisolated static let latentMeshDistortionRange = 0.0...2.0
+    nonisolated static let latentMeshSwirlRange = 0.0...1.0
+    nonisolated static let commonOpacityRange = 0.0...1.0
+    nonisolated static let monetBackgroundBlurPxRange = 0.0...60.0
+    nonisolated static let monetBackgroundOverlayOpacityRange = 0.0...1.0
+    nonisolated static let monetBackgroundGrayscaleRange = 0.0...1.0
+    nonisolated static let monetBackgroundSaturationRange = 0.0...2.0
+    nonisolated static let monetBackgroundWashRange = 0.0...1.0
+    nonisolated static let monetBackgroundHalfPaneOffsetXRange = -40.0...40.0
+    nonisolated static let monetBackgroundDriftStrengthRange = 0.0...1.0
     nonisolated static let lyricsFontScaleRange = 0.85...1.4
     nonisolated static let lyricsFontWeightRange = 100.0...900.0
     nonisolated static let visualizerOpacityRange = 0.2...1.0
@@ -682,6 +934,15 @@ final class SettingsManager: ObservableObject {
 
     nonisolated static func clamped(_ value: Double, to range: ClosedRange<Double>) -> Double {
         min(max(value, range.lowerBound), range.upperBound)
+    }
+
+    /// A `#rrggbb` colour string, or `defaultValue` when the stored value
+    /// is not one (a hand-edited default, or a colour from an older build).
+    nonisolated static func normalizedHexColor(_ value: String?, default defaultValue: String) -> String {
+        guard let value, value.count == 7, value.hasPrefix("#"),
+              value.dropFirst().allSatisfy({ $0.isHexDigit })
+        else { return defaultValue }
+        return value
     }
 
     /// Master switch for all Folia visual / playback settings in this
@@ -1193,6 +1454,597 @@ final class SettingsManager: ObservableObject {
         foliaEnabled ? nomandOverlayOpacity : Self.defaultNomandOverlayOpacity
     }
 
+    /// Readability tint on/off for the nomand layer (Folia
+    /// `overlayEnabled`); the opacity above is only used when this is on.
+    @Published var nomandOverlayEnabled: Bool {
+        didSet { UserDefaults.standard.set(nomandOverlayEnabled, forKey: Keys.nomandOverlayEnabled) }
+    }
+
+    /// Nomand overlay on/off with the master switch off: the Folia default.
+    var effectiveNomandOverlayEnabled: Bool {
+        foliaEnabled ? nomandOverlayEnabled : Self.defaultNomandOverlayEnabled
+    }
+
+    /// Source image for the nomand shaders: the current cover, or the
+    /// uploaded global image.
+    @Published var nomandImageSource: BackgroundImageSource {
+        didSet { UserDefaults.standard.set(nomandImageSource.rawValue, forKey: Keys.nomandImageSource) }
+    }
+
+    /// Nomand image source with the master switch off: the Folia default.
+    var effectiveNomandImageSource: BackgroundImageSource {
+        foliaEnabled ? nomandImageSource : Self.defaultNomandImageSource
+    }
+
+    /// Dithering (像素画) Bayer matrix size.
+    @Published var nomandDitheringType: NomandDitheringType {
+        didSet { UserDefaults.standard.set(nomandDitheringType.rawValue, forKey: Keys.nomandDitheringType) }
+    }
+
+    /// Dithering type with the master switch off: the Folia default.
+    var effectiveNomandDitheringType: NomandDitheringType {
+        foliaEnabled ? nomandDitheringType : Self.defaultNomandDitheringType
+    }
+
+    /// Dithering cell size (0.5–20).
+    @Published var nomandDitheringSize: Double {
+        didSet { UserDefaults.standard.set(nomandDitheringSize, forKey: Keys.nomandDitheringSize) }
+    }
+
+    /// Dithering cell size with the master switch off: the Folia default.
+    var effectiveNomandDitheringSize: Double {
+        foliaEnabled ? nomandDitheringSize : Self.defaultNomandDitheringSize
+    }
+
+    /// Dithering palette steps (1–7).
+    @Published var nomandDitheringColorSteps: Int {
+        didSet { UserDefaults.standard.set(nomandDitheringColorSteps, forKey: Keys.nomandDitheringColorSteps) }
+    }
+
+    /// Dithering palette steps with the master switch off: the Folia default.
+    var effectiveNomandDitheringColorSteps: Int {
+        foliaEnabled ? nomandDitheringColorSteps : Self.defaultNomandDitheringColorSteps
+    }
+
+    /// Dithering: keep the image's own colours instead of the theme palette.
+    @Published var nomandDitheringOriginalColors: Bool {
+        didSet { UserDefaults.standard.set(nomandDitheringOriginalColors, forKey: Keys.nomandDitheringOriginalColors) }
+    }
+
+    /// Dithering original colours with the master switch off: the Folia default.
+    var effectiveNomandDitheringOriginalColors: Bool {
+        foliaEnabled ? nomandDitheringOriginalColors : Self.defaultNomandDitheringOriginalColors
+    }
+
+    /// Dithering: invert the luminance before dithering.
+    @Published var nomandDitheringInverted: Bool {
+        didSet { UserDefaults.standard.set(nomandDitheringInverted, forKey: Keys.nomandDitheringInverted) }
+    }
+
+    /// Dithering inversion with the master switch off: the Folia default.
+    var effectiveNomandDitheringInverted: Bool {
+        foliaEnabled ? nomandDitheringInverted : Self.defaultNomandDitheringInverted
+    }
+
+    /// Fluted-glass (纹理玻璃) rib spacing (0.1–1).
+    @Published var nomandFlutedGlassSize: Double {
+        didSet { UserDefaults.standard.set(nomandFlutedGlassSize, forKey: Keys.nomandFlutedGlassSize) }
+    }
+
+    /// Fluted-glass rib spacing with the master switch off: the Folia default.
+    var effectiveNomandFlutedGlassSize: Double {
+        foliaEnabled ? nomandFlutedGlassSize : Self.defaultNomandFlutedGlassSize
+    }
+
+    /// Fluted-glass refraction strength (0–1).
+    @Published var nomandFlutedGlassDistortion: Double {
+        didSet { UserDefaults.standard.set(nomandFlutedGlassDistortion, forKey: Keys.nomandFlutedGlassDistortion) }
+    }
+
+    /// Fluted-glass refraction with the master switch off: the Folia default.
+    var effectiveNomandFlutedGlassDistortion: Double {
+        foliaEnabled ? nomandFlutedGlassDistortion : Self.defaultNomandFlutedGlassDistortion
+    }
+
+    /// Fluted-glass blur (0–1).
+    @Published var nomandFlutedGlassBlur: Double {
+        didSet { UserDefaults.standard.set(nomandFlutedGlassBlur, forKey: Keys.nomandFlutedGlassBlur) }
+    }
+
+    /// Fluted-glass blur with the master switch off: the Folia default.
+    var effectiveNomandFlutedGlassBlur: Double {
+        foliaEnabled ? nomandFlutedGlassBlur : Self.defaultNomandFlutedGlassBlur
+    }
+
+    /// Paper-texture (纸张纹理) contrast (0–1).
+    @Published var nomandPaperTextureContrast: Double {
+        didSet { UserDefaults.standard.set(nomandPaperTextureContrast, forKey: Keys.nomandPaperTextureContrast) }
+    }
+
+    /// Paper-texture contrast with the master switch off: the Folia default.
+    var effectiveNomandPaperTextureContrast: Double {
+        foliaEnabled ? nomandPaperTextureContrast : Self.defaultNomandPaperTextureContrast
+    }
+
+    /// Paper-texture grain (0–1).
+    @Published var nomandPaperTextureRoughness: Double {
+        didSet { UserDefaults.standard.set(nomandPaperTextureRoughness, forKey: Keys.nomandPaperTextureRoughness) }
+    }
+
+    /// Paper-texture grain with the master switch off: the Folia default.
+    var effectiveNomandPaperTextureRoughness: Double {
+        foliaEnabled ? nomandPaperTextureRoughness : Self.defaultNomandPaperTextureRoughness
+    }
+
+    /// Paper-texture fibre amount (0–1).
+    @Published var nomandPaperTextureFiber: Double {
+        didSet { UserDefaults.standard.set(nomandPaperTextureFiber, forKey: Keys.nomandPaperTextureFiber) }
+    }
+
+    /// Paper-texture fibre with the master switch off: the Folia default.
+    var effectiveNomandPaperTextureFiber: Double {
+        foliaEnabled ? nomandPaperTextureFiber : Self.defaultNomandPaperTextureFiber
+    }
+
+    /// Halftone-dots: invert the luminance before the dot screen.
+    @Published var nomandHalftoneDotsInverted: Bool {
+        didSet { UserDefaults.standard.set(nomandHalftoneDotsInverted, forKey: Keys.nomandHalftoneDotsInverted) }
+    }
+
+    /// Halftone-dots inversion with the master switch off: the Folia default.
+    var effectiveNomandHalftoneDotsInverted: Bool {
+        foliaEnabled ? nomandHalftoneDotsInverted : Self.defaultNomandHalftoneDotsInverted
+    }
+
+    /// Lens-distortion (镜头畸变) dispersion reach (0–1).
+    @Published var nomandLensDistortionSpread: Double {
+        didSet { UserDefaults.standard.set(nomandLensDistortionSpread, forKey: Keys.nomandLensDistortionSpread) }
+    }
+
+    /// Lens-distortion reach with the master switch off: the Folia default.
+    var effectiveNomandLensDistortionSpread: Double {
+        foliaEnabled ? nomandLensDistortionSpread : Self.defaultNomandLensDistortionSpread
+    }
+
+    /// Lens-distortion centre bulge (+) / pinch (−), −1–1.
+    @Published var nomandLensDistortionBulge: Double {
+        didSet { UserDefaults.standard.set(nomandLensDistortionBulge, forKey: Keys.nomandLensDistortionBulge) }
+    }
+
+    /// Lens-distortion bulge with the master switch off: the Folia default.
+    var effectiveNomandLensDistortionBulge: Double {
+        foliaEnabled ? nomandLensDistortionBulge : Self.defaultNomandLensDistortionBulge
+    }
+
+    /// Lens-distortion chromatic dispersion (0–1).
+    @Published var nomandLensDistortionDispersion: Double {
+        didSet { UserDefaults.standard.set(nomandLensDistortionDispersion, forKey: Keys.nomandLensDistortionDispersion) }
+    }
+
+    /// Lens-distortion dispersion with the master switch off: the Folia default.
+    var effectiveNomandLensDistortionDispersion: Double {
+        foliaEnabled ? nomandLensDistortionDispersion : Self.defaultNomandLensDistortionDispersion
+    }
+
+    // MARK: - Folia common (通用) background
+
+    /// Theme-colour layer opacity (0–1) when the blurred-cover layer is on.
+    @Published var commonOpacity: Double {
+        didSet { UserDefaults.standard.set(commonOpacity, forKey: Keys.commonOpacity) }
+    }
+
+    /// Common opacity with the master switch off: the Folia default.
+    var effectiveCommonOpacity: Double {
+        foliaEnabled ? commonOpacity : Self.defaultCommonOpacity
+    }
+
+    /// Show the blurred-cover fluid layer under the theme colour.
+    @Published var commonUseCoverColorBg: Bool {
+        didSet { UserDefaults.standard.set(commonUseCoverColorBg, forKey: Keys.commonUseCoverColorBg) }
+    }
+
+    /// Cover-colour layer with the master switch off: the Folia default.
+    var effectiveCommonUseCoverColorBg: Bool {
+        foliaEnabled ? commonUseCoverColorBg : Self.defaultCommonUseCoverColorBg
+    }
+
+    /// Hide the radial vignette (stored as its opposite, like Folia's
+    /// `disable_visualizer_vignette`).
+    @Published var commonDisableVignette: Bool {
+        didSet { UserDefaults.standard.set(commonDisableVignette, forKey: Keys.commonDisableVignette) }
+    }
+
+    /// Vignette off with the master switch off: the Folia default.
+    var effectiveCommonDisableVignette: Bool {
+        foliaEnabled ? commonDisableVignette : Self.defaultCommonDisableVignette
+    }
+
+    /// Hide the geometric shapes and particles (stored as its opposite,
+    /// like Folia's `disable_visualizer_geometric_background`).
+    @Published var commonDisableGeometric: Bool {
+        didSet { UserDefaults.standard.set(commonDisableGeometric, forKey: Keys.commonDisableGeometric) }
+    }
+
+    /// Geometric shapes off with the master switch off: the Folia default.
+    var effectiveCommonDisableGeometric: Bool {
+        foliaEnabled ? commonDisableGeometric : Self.defaultCommonDisableGeometric
+    }
+
+    // MARK: - Folia latent (隐现) background tuning
+
+    /// Latent display layers: pixel / fluid / both (Folia `displayMode`).
+    @Published var latentDisplayMode: LatentDisplayMode {
+        didSet { UserDefaults.standard.set(latentDisplayMode.rawValue, forKey: Keys.latentDisplayMode) }
+    }
+
+    /// Latent display layers with the master switch off: the Folia default.
+    var effectiveLatentDisplayMode: LatentDisplayMode {
+        foliaEnabled ? latentDisplayMode : Self.defaultLatentDisplayMode
+    }
+
+    /// Latent colour source: cover + theme, or cover only.
+    @Published var latentColorSource: LatentColorSource {
+        didSet { UserDefaults.standard.set(latentColorSource.rawValue, forKey: Keys.latentColorSource) }
+    }
+
+    /// Latent colour source with the master switch off: the Folia default.
+    var effectiveLatentColorSource: LatentColorSource {
+        foliaEnabled ? latentColorSource : Self.defaultLatentColorSource
+    }
+
+    /// Animate the latent background only on the player page; elsewhere
+    /// (the style-window preview) it stays frozen. Folia's
+    /// `dynamicOnlyInPlayer`.
+    @Published var latentDynamicOnlyInPlayer: Bool {
+        didSet { UserDefaults.standard.set(latentDynamicOnlyInPlayer, forKey: Keys.latentDynamicOnlyInPlayer) }
+    }
+
+    /// Dynamic-only-in-player with the master switch off: the Folia default.
+    var effectiveLatentDynamicOnlyInPlayer: Bool {
+        foliaEnabled ? latentDynamicOnlyInPlayer : Self.defaultLatentDynamicOnlyInPlayer
+    }
+
+    /// Boost the latent speeds on beat onsets (Folia
+    /// `enhancedBeatResponse`).
+    @Published var latentEnhancedBeatResponse: Bool {
+        didSet { UserDefaults.standard.set(latentEnhancedBeatResponse, forKey: Keys.latentEnhancedBeatResponse) }
+    }
+
+    /// Enhanced beat response with the master switch off: the Folia default.
+    var effectiveLatentEnhancedBeatResponse: Bool {
+        foliaEnabled ? latentEnhancedBeatResponse : Self.defaultLatentEnhancedBeatResponse
+    }
+
+    /// Pixel (dithering) base speed (0–2).
+    @Published var latentDitheringSpeed: Double {
+        didSet { UserDefaults.standard.set(latentDitheringSpeed, forKey: Keys.latentDitheringSpeed) }
+    }
+
+    /// Pixel base speed with the master switch off: the Folia default.
+    var effectiveLatentDitheringSpeed: Double {
+        foliaEnabled ? latentDitheringSpeed : Self.defaultLatentDitheringSpeed
+    }
+
+    /// Pixel audio max speed (0–2): the speed the audio amount eases toward.
+    @Published var latentDitheringAudioSpeed: Double {
+        didSet { UserDefaults.standard.set(latentDitheringAudioSpeed, forKey: Keys.latentDitheringAudioSpeed) }
+    }
+
+    /// Pixel audio max speed with the master switch off: the Folia default.
+    var effectiveLatentDitheringAudioSpeed: Double {
+        foliaEnabled ? latentDitheringAudioSpeed : Self.defaultLatentDitheringAudioSpeed
+    }
+
+    /// Pixel (dithering) size (0.5–8).
+    @Published var latentDitheringSize: Double {
+        didSet { UserDefaults.standard.set(latentDitheringSize, forKey: Keys.latentDitheringSize) }
+    }
+
+    /// Pixel size with the master switch off: the Folia default.
+    var effectiveLatentDitheringSize: Double {
+        foliaEnabled ? latentDitheringSize : Self.defaultLatentDitheringSize
+    }
+
+    /// Pixel layer opacity (0–1) when the fluid layer is also shown.
+    @Published var latentDitheringOpacity: Double {
+        didSet { UserDefaults.standard.set(latentDitheringOpacity, forKey: Keys.latentDitheringOpacity) }
+    }
+
+    /// Pixel layer opacity with the master switch off: the Folia default.
+    var effectiveLatentDitheringOpacity: Double {
+        foliaEnabled ? latentDitheringOpacity : Self.defaultLatentDitheringOpacity
+    }
+
+    /// Fluid (mesh) base speed (0–2).
+    @Published var latentMeshSpeed: Double {
+        didSet { UserDefaults.standard.set(latentMeshSpeed, forKey: Keys.latentMeshSpeed) }
+    }
+
+    /// Fluid base speed with the master switch off: the Folia default.
+    var effectiveLatentMeshSpeed: Double {
+        foliaEnabled ? latentMeshSpeed : Self.defaultLatentMeshSpeed
+    }
+
+    /// Fluid audio max speed (0–2).
+    @Published var latentMeshAudioSpeed: Double {
+        didSet { UserDefaults.standard.set(latentMeshAudioSpeed, forKey: Keys.latentMeshAudioSpeed) }
+    }
+
+    /// Fluid audio max speed with the master switch off: the Folia default.
+    var effectiveLatentMeshAudioSpeed: Double {
+        foliaEnabled ? latentMeshAudioSpeed : Self.defaultLatentMeshAudioSpeed
+    }
+
+    /// Fluid distortion (0–2).
+    @Published var latentMeshDistortion: Double {
+        didSet { UserDefaults.standard.set(latentMeshDistortion, forKey: Keys.latentMeshDistortion) }
+    }
+
+    /// Fluid distortion with the master switch off: the Folia default.
+    var effectiveLatentMeshDistortion: Double {
+        foliaEnabled ? latentMeshDistortion : Self.defaultLatentMeshDistortion
+    }
+
+    /// Fluid swirl (0–1).
+    @Published var latentMeshSwirl: Double {
+        didSet { UserDefaults.standard.set(latentMeshSwirl, forKey: Keys.latentMeshSwirl) }
+    }
+
+    /// Fluid swirl with the master switch off: the Folia default.
+    var effectiveLatentMeshSwirl: Double {
+        foliaEnabled ? latentMeshSwirl : Self.defaultLatentMeshSwirl
+    }
+
+    /// Readability tint over the latent layers (Folia `overlayEnabled`).
+    @Published var latentOverlayEnabled: Bool {
+        didSet { UserDefaults.standard.set(latentOverlayEnabled, forKey: Keys.latentOverlayEnabled) }
+    }
+
+    /// Readability tint with the master switch off: the Folia default.
+    var effectiveLatentOverlayEnabled: Bool {
+        foliaEnabled ? latentOverlayEnabled : Self.defaultLatentOverlayEnabled
+    }
+
+    /// Readability tint opacity (0–1).
+    @Published var latentOverlayOpacity: Double {
+        didSet { UserDefaults.standard.set(latentOverlayOpacity, forKey: Keys.latentOverlayOpacity) }
+    }
+
+    /// Readability tint opacity with the master switch off: the Folia default.
+    var effectiveLatentOverlayOpacity: Double {
+        foliaEnabled ? latentOverlayOpacity : Self.defaultLatentOverlayOpacity
+    }
+
+    /// The latent tuning as one value, for the renderer. Read from the
+    /// `effective*` properties so the master switch and the stored
+    /// values stay in one place.
+    var latentTuning: LatentTuning {
+        LatentTuning(
+            displayMode: effectiveLatentDisplayMode,
+            colorSource: effectiveLatentColorSource,
+            overlayEnabled: effectiveLatentOverlayEnabled,
+            overlayOpacity: effectiveLatentOverlayOpacity,
+            ditheringSpeed: effectiveLatentDitheringSpeed,
+            ditheringAudioSpeed: effectiveLatentDitheringAudioSpeed,
+            ditheringSize: effectiveLatentDitheringSize,
+            ditheringOpacity: effectiveLatentDitheringOpacity,
+            meshSpeed: effectiveLatentMeshSpeed,
+            meshAudioSpeed: effectiveLatentMeshAudioSpeed,
+            meshDistortion: effectiveLatentMeshDistortion,
+            meshSwirl: effectiveLatentMeshSwirl,
+            enhancedBeatResponse: effectiveLatentEnhancedBeatResponse
+        )
+    }
+
+    // MARK: - Folia monet (莫奈) background
+
+    /// Source image for the monet poster: the current cover, or the
+    /// uploaded global image.
+    @Published var monetBackgroundSource: BackgroundImageSource {
+        didSet { UserDefaults.standard.set(monetBackgroundSource.rawValue, forKey: Keys.monetBackgroundSource) }
+    }
+
+    /// Monet image source with the master switch off: the Folia default.
+    var effectiveMonetBackgroundSource: BackgroundImageSource {
+        foliaEnabled ? monetBackgroundSource : Self.defaultMonetBackgroundSource
+    }
+
+    /// Monet layout: full-bleed poster, or the picture in a left pane.
+    @Published var monetBackgroundLayout: MonetLayout {
+        didSet { UserDefaults.standard.set(monetBackgroundLayout.rawValue, forKey: Keys.monetBackgroundLayout) }
+    }
+
+    /// Monet layout with the master switch off: the Folia default.
+    var effectiveMonetBackgroundLayout: MonetLayout {
+        foliaEnabled ? monetBackgroundLayout : Self.defaultMonetBackgroundLayout
+    }
+
+    /// Monet bake blur in px (0–60).
+    @Published var monetBackgroundBlurPx: Double {
+        didSet { UserDefaults.standard.set(monetBackgroundBlurPx, forKey: Keys.monetBackgroundBlurPx) }
+    }
+
+    /// Monet blur with the master switch off: the Folia default.
+    var effectiveMonetBackgroundBlurPx: Double {
+        foliaEnabled ? monetBackgroundBlurPx : Self.defaultMonetBackgroundBlurPx
+    }
+
+    /// Monet overlay gradient strength (0–1).
+    @Published var monetBackgroundOverlayOpacity: Double {
+        didSet { UserDefaults.standard.set(monetBackgroundOverlayOpacity, forKey: Keys.monetBackgroundOverlayOpacity) }
+    }
+
+    /// Monet overlay strength with the master switch off: the Folia default.
+    var effectiveMonetBackgroundOverlayOpacity: Double {
+        foliaEnabled ? monetBackgroundOverlayOpacity : Self.defaultMonetBackgroundOverlayOpacity
+    }
+
+    /// Monet desaturation (0–1).
+    @Published var monetBackgroundGrayscale: Double {
+        didSet { UserDefaults.standard.set(monetBackgroundGrayscale, forKey: Keys.monetBackgroundGrayscale) }
+    }
+
+    /// Monet desaturation with the master switch off: the Folia default.
+    var effectiveMonetBackgroundGrayscale: Double {
+        foliaEnabled ? monetBackgroundGrayscale : Self.defaultMonetBackgroundGrayscale
+    }
+
+    /// Monet saturation multiplier (0–2).
+    @Published var monetBackgroundSaturation: Double {
+        didSet { UserDefaults.standard.set(monetBackgroundSaturation, forKey: Keys.monetBackgroundSaturation) }
+    }
+
+    /// Monet saturation with the master switch off: the Folia default.
+    var effectiveMonetBackgroundSaturation: Double {
+        foliaEnabled ? monetBackgroundSaturation : Self.defaultMonetBackgroundSaturation
+    }
+
+    /// Monet duotone wash mix (0–1).
+    @Published var monetBackgroundWash: Double {
+        didSet { UserDefaults.standard.set(monetBackgroundWash, forKey: Keys.monetBackgroundWash) }
+    }
+
+    /// Monet wash mix with the master switch off: the Folia default.
+    var effectiveMonetBackgroundWash: Double {
+        foliaEnabled ? monetBackgroundWash : Self.defaultMonetBackgroundWash
+    }
+
+    /// Monet half-pane image X offset (−40–40).
+    @Published var monetBackgroundHalfPaneOffsetX: Double {
+        didSet { UserDefaults.standard.set(monetBackgroundHalfPaneOffsetX, forKey: Keys.monetBackgroundHalfPaneOffsetX) }
+    }
+
+    /// Monet half-pane offset with the master switch off: the Folia default.
+    var effectiveMonetBackgroundHalfPaneOffsetX: Double {
+        foliaEnabled ? monetBackgroundHalfPaneOffsetX : Self.defaultMonetBackgroundHalfPaneOffsetX
+    }
+
+    /// Monet wash accent source: theme accent, or a custom colour.
+    @Published var monetBackgroundWashColorMode: MonetWashColorMode {
+        didSet { UserDefaults.standard.set(monetBackgroundWashColorMode.rawValue, forKey: Keys.monetBackgroundWashColorMode) }
+    }
+
+    /// Monet wash accent source with the master switch off: the Folia default.
+    var effectiveMonetBackgroundWashColorMode: MonetWashColorMode {
+        foliaEnabled ? monetBackgroundWashColorMode : Self.defaultMonetBackgroundWashColorMode
+    }
+
+    /// Monet custom wash accent, `#rrggbb`.
+    @Published var monetBackgroundWashCustomColor: String {
+        didSet { UserDefaults.standard.set(monetBackgroundWashCustomColor, forKey: Keys.monetBackgroundWashCustomColor) }
+    }
+
+    /// Monet custom wash accent with the master switch off: the Folia default.
+    var effectiveMonetBackgroundWashCustomColor: String {
+        foliaEnabled ? monetBackgroundWashCustomColor : Self.defaultMonetBackgroundWashCustomColor
+    }
+
+    /// Monet slow pan/zoom drift on/off.
+    @Published var monetBackgroundDriftEnabled: Bool {
+        didSet { UserDefaults.standard.set(monetBackgroundDriftEnabled, forKey: Keys.monetBackgroundDriftEnabled) }
+    }
+
+    /// Monet drift on/off with the master switch off: the Folia default.
+    var effectiveMonetBackgroundDriftEnabled: Bool {
+        foliaEnabled ? monetBackgroundDriftEnabled : Self.defaultMonetBackgroundDriftEnabled
+    }
+
+    /// Monet drift amplitude (0–1).
+    @Published var monetBackgroundDriftStrength: Double {
+        didSet { UserDefaults.standard.set(monetBackgroundDriftStrength, forKey: Keys.monetBackgroundDriftStrength) }
+    }
+
+    /// Monet drift amplitude with the master switch off: the Folia default.
+    var effectiveMonetBackgroundDriftStrength: Double {
+        foliaEnabled ? monetBackgroundDriftStrength : Self.defaultMonetBackgroundDriftStrength
+    }
+
+    /// Monet vertical streaks on/off.
+    @Published var monetBackgroundStreaksEnabled: Bool {
+        didSet { UserDefaults.standard.set(monetBackgroundStreaksEnabled, forKey: Keys.monetBackgroundStreaksEnabled) }
+    }
+
+    /// Monet streaks on/off with the master switch off: the Folia default.
+    var effectiveMonetBackgroundStreaksEnabled: Bool {
+        foliaEnabled ? monetBackgroundStreaksEnabled : Self.defaultMonetBackgroundStreaksEnabled
+    }
+
+    /// The monet tuning as one value, for the renderer.
+    var monetTuning: MonetTuning {
+        MonetTuning(
+            layout: effectiveMonetBackgroundLayout,
+            blurPx: effectiveMonetBackgroundBlurPx,
+            overlayOpacity: effectiveMonetBackgroundOverlayOpacity,
+            grayscale: effectiveMonetBackgroundGrayscale,
+            saturation: effectiveMonetBackgroundSaturation,
+            wash: effectiveMonetBackgroundWash,
+            halfPaneOffsetX: effectiveMonetBackgroundHalfPaneOffsetX,
+            washColorMode: effectiveMonetBackgroundWashColorMode,
+            washCustomColorHex: effectiveMonetBackgroundWashCustomColor,
+            driftEnabled: effectiveMonetBackgroundDriftEnabled,
+            driftStrength: effectiveMonetBackgroundDriftStrength,
+            streaksEnabled: effectiveMonetBackgroundStreaksEnabled
+        )
+    }
+
+    // MARK: - Folia sora (空) background
+
+    /// Sora: skip the starfield and show only the solid colour.
+    @Published var soraBlank: Bool {
+        didSet { UserDefaults.standard.set(soraBlank, forKey: Keys.soraBlank) }
+    }
+
+    /// Sora blank with the master switch off: the Folia default.
+    var effectiveSoraBlank: Bool {
+        foliaEnabled ? soraBlank : Self.defaultSoraBlank
+    }
+
+    // MARK: - Folia url (嵌入) background
+
+    /// Saved webpages for the url background (Folia's
+    /// `url_background_list`), stored as JSON.
+    @Published var urlBackgroundList: [UrlBackgroundItem] {
+        didSet {
+            UserDefaults.standard.set(try? JSONEncoder().encode(urlBackgroundList), forKey: Keys.urlBackgroundList)
+        }
+    }
+
+    /// Saved webpages with the master switch off: none (the url
+    /// background falls back to the plain page).
+    var effectiveUrlBackgroundList: [UrlBackgroundItem] {
+        foliaEnabled ? urlBackgroundList : []
+    }
+
+    /// The selected saved webpage id, or nil for none.
+    @Published var urlBackgroundSelectedID: String? {
+        didSet { Self.setOptionalString(urlBackgroundSelectedID, forKey: Keys.urlBackgroundSelectedID) }
+    }
+
+    /// The selected webpage with the master switch off: none.
+    var effectiveUrlBackgroundSelectedID: String? {
+        foliaEnabled ? urlBackgroundSelectedID : nil
+    }
+
+    /// The selected saved webpage, or nil when there is none.
+    var selectedUrlBackground: UrlBackgroundItem? {
+        effectiveUrlBackgroundList.first(where: { $0.id == effectiveUrlBackgroundSelectedID })
+    }
+
+    // MARK: - Uploaded background image (monet + nomand)
+
+    /// File name of the user-uploaded background image under
+    /// Application Support, or nil when none is stored. The bytes live in
+    /// `VisualizerBackgroundImageStore`, not in UserDefaults.
+    @Published var uploadedBackgroundImageName: String? {
+        didSet { Self.setOptionalString(uploadedBackgroundImageName, forKey: Keys.uploadedBackgroundImageName) }
+    }
+
+    /// The uploaded image with the master switch off: none (the
+    /// backgrounds fall back to the cover).
+    var effectiveUploadedBackgroundImageName: String? {
+        foliaEnabled ? uploadedBackgroundImageName : nil
+    }
+
     // MARK: - Folia lyric-style window (VisPlayground)
 
     /// Lyric typeface family for the luminous lyrics and the Lattice card.
@@ -1430,6 +2282,60 @@ final class SettingsManager: ObservableObject {
         nomandHalftoneContrast = Self.defaultNomandHalftoneContrast
         nomandOriginalColors = Self.defaultNomandOriginalColors
         nomandOverlayOpacity = Self.defaultNomandOverlayOpacity
+        nomandOverlayEnabled = Self.defaultNomandOverlayEnabled
+        nomandImageSource = Self.defaultNomandImageSource
+        nomandDitheringType = Self.defaultNomandDitheringType
+        nomandDitheringSize = Self.defaultNomandDitheringSize
+        nomandDitheringColorSteps = Self.defaultNomandDitheringColorSteps
+        nomandDitheringOriginalColors = Self.defaultNomandDitheringOriginalColors
+        nomandDitheringInverted = Self.defaultNomandDitheringInverted
+        nomandFlutedGlassSize = Self.defaultNomandFlutedGlassSize
+        nomandFlutedGlassDistortion = Self.defaultNomandFlutedGlassDistortion
+        nomandFlutedGlassBlur = Self.defaultNomandFlutedGlassBlur
+        nomandPaperTextureContrast = Self.defaultNomandPaperTextureContrast
+        nomandPaperTextureRoughness = Self.defaultNomandPaperTextureRoughness
+        nomandPaperTextureFiber = Self.defaultNomandPaperTextureFiber
+        nomandHalftoneDotsInverted = Self.defaultNomandHalftoneDotsInverted
+        nomandLensDistortionSpread = Self.defaultNomandLensDistortionSpread
+        nomandLensDistortionBulge = Self.defaultNomandLensDistortionBulge
+        nomandLensDistortionDispersion = Self.defaultNomandLensDistortionDispersion
+        latentDisplayMode = Self.defaultLatentDisplayMode
+        latentColorSource = Self.defaultLatentColorSource
+        latentDynamicOnlyInPlayer = Self.defaultLatentDynamicOnlyInPlayer
+        latentEnhancedBeatResponse = Self.defaultLatentEnhancedBeatResponse
+        latentDitheringSpeed = Self.defaultLatentDitheringSpeed
+        latentDitheringAudioSpeed = Self.defaultLatentDitheringAudioSpeed
+        latentDitheringSize = Self.defaultLatentDitheringSize
+        latentDitheringOpacity = Self.defaultLatentDitheringOpacity
+        latentMeshSpeed = Self.defaultLatentMeshSpeed
+        latentMeshAudioSpeed = Self.defaultLatentMeshAudioSpeed
+        latentMeshDistortion = Self.defaultLatentMeshDistortion
+        latentMeshSwirl = Self.defaultLatentMeshSwirl
+        latentOverlayEnabled = Self.defaultLatentOverlayEnabled
+        latentOverlayOpacity = Self.defaultLatentOverlayOpacity
+        commonOpacity = Self.defaultCommonOpacity
+        commonUseCoverColorBg = Self.defaultCommonUseCoverColorBg
+        commonDisableVignette = Self.defaultCommonDisableVignette
+        commonDisableGeometric = Self.defaultCommonDisableGeometric
+        monetBackgroundSource = Self.defaultMonetBackgroundSource
+        monetBackgroundLayout = Self.defaultMonetBackgroundLayout
+        monetBackgroundBlurPx = Self.defaultMonetBackgroundBlurPx
+        monetBackgroundOverlayOpacity = Self.defaultMonetBackgroundOverlayOpacity
+        monetBackgroundGrayscale = Self.defaultMonetBackgroundGrayscale
+        monetBackgroundSaturation = Self.defaultMonetBackgroundSaturation
+        monetBackgroundWash = Self.defaultMonetBackgroundWash
+        monetBackgroundHalfPaneOffsetX = Self.defaultMonetBackgroundHalfPaneOffsetX
+        monetBackgroundWashColorMode = Self.defaultMonetBackgroundWashColorMode
+        monetBackgroundWashCustomColor = Self.defaultMonetBackgroundWashCustomColor
+        monetBackgroundDriftEnabled = Self.defaultMonetBackgroundDriftEnabled
+        monetBackgroundDriftStrength = Self.defaultMonetBackgroundDriftStrength
+        monetBackgroundStreaksEnabled = Self.defaultMonetBackgroundStreaksEnabled
+        soraBlank = Self.defaultSoraBlank
+        urlBackgroundList = []
+        urlBackgroundSelectedID = nil
+        // The uploaded image is deliberately NOT cleared by a reset:
+        // Folia's per-mode resets leave `monet_background_image` alone,
+        // and re-uploading is the only way to get it back.
         lyricsFontStyle = Self.defaultLyricsFontStyle
         lyricsFontScale = Self.defaultLyricsFontScale
         lyricsFontWeight = nil
@@ -1606,6 +2512,203 @@ final class SettingsManager: ObservableObject {
                 ?? Self.defaultNomandOverlayOpacity,
             to: Self.nomandOverlayOpacityRange
         )
+        nomandOverlayEnabled = defaults.object(forKey: Keys.nomandOverlayEnabled) as? Bool
+            ?? Self.defaultNomandOverlayEnabled
+        nomandImageSource = defaults.string(forKey: Keys.nomandImageSource)
+            .flatMap(BackgroundImageSource.init) ?? Self.defaultNomandImageSource
+        nomandDitheringType = defaults.string(forKey: Keys.nomandDitheringType)
+            .flatMap(NomandDitheringType.init) ?? Self.defaultNomandDitheringType
+        nomandDitheringSize = Self.clamped(
+            defaults.object(forKey: Keys.nomandDitheringSize) as? Double
+                ?? Self.defaultNomandDitheringSize,
+            to: Self.nomandDitheringSizeRange
+        )
+        nomandDitheringColorSteps = min(
+            max(
+                defaults.object(forKey: Keys.nomandDitheringColorSteps) as? Int
+                    ?? Self.defaultNomandDitheringColorSteps,
+                Self.nomandDitheringColorStepsRange.lowerBound
+            ),
+            Self.nomandDitheringColorStepsRange.upperBound
+        )
+        nomandDitheringOriginalColors = defaults.object(forKey: Keys.nomandDitheringOriginalColors) as? Bool
+            ?? Self.defaultNomandDitheringOriginalColors
+        nomandDitheringInverted = defaults.object(forKey: Keys.nomandDitheringInverted) as? Bool
+            ?? Self.defaultNomandDitheringInverted
+        nomandFlutedGlassSize = Self.clamped(
+            defaults.object(forKey: Keys.nomandFlutedGlassSize) as? Double
+                ?? Self.defaultNomandFlutedGlassSize,
+            to: Self.nomandFlutedGlassSizeRange
+        )
+        nomandFlutedGlassDistortion = Self.clamped(
+            defaults.object(forKey: Keys.nomandFlutedGlassDistortion) as? Double
+                ?? Self.defaultNomandFlutedGlassDistortion,
+            to: Self.nomandFlutedGlassDistortionRange
+        )
+        nomandFlutedGlassBlur = Self.clamped(
+            defaults.object(forKey: Keys.nomandFlutedGlassBlur) as? Double
+                ?? Self.defaultNomandFlutedGlassBlur,
+            to: Self.nomandFlutedGlassBlurRange
+        )
+        nomandPaperTextureContrast = Self.clamped(
+            defaults.object(forKey: Keys.nomandPaperTextureContrast) as? Double
+                ?? Self.defaultNomandPaperTextureContrast,
+            to: Self.nomandPaperTextureContrastRange
+        )
+        nomandPaperTextureRoughness = Self.clamped(
+            defaults.object(forKey: Keys.nomandPaperTextureRoughness) as? Double
+                ?? Self.defaultNomandPaperTextureRoughness,
+            to: Self.nomandPaperTextureRoughnessRange
+        )
+        nomandPaperTextureFiber = Self.clamped(
+            defaults.object(forKey: Keys.nomandPaperTextureFiber) as? Double
+                ?? Self.defaultNomandPaperTextureFiber,
+            to: Self.nomandPaperTextureFiberRange
+        )
+        nomandHalftoneDotsInverted = defaults.object(forKey: Keys.nomandHalftoneDotsInverted) as? Bool
+            ?? Self.defaultNomandHalftoneDotsInverted
+        nomandLensDistortionSpread = Self.clamped(
+            defaults.object(forKey: Keys.nomandLensDistortionSpread) as? Double
+                ?? Self.defaultNomandLensDistortionSpread,
+            to: Self.nomandLensDistortionSpreadRange
+        )
+        nomandLensDistortionBulge = Self.clamped(
+            defaults.object(forKey: Keys.nomandLensDistortionBulge) as? Double
+                ?? Self.defaultNomandLensDistortionBulge,
+            to: Self.nomandLensDistortionBulgeRange
+        )
+        nomandLensDistortionDispersion = Self.clamped(
+            defaults.object(forKey: Keys.nomandLensDistortionDispersion) as? Double
+                ?? Self.defaultNomandLensDistortionDispersion,
+            to: Self.nomandLensDistortionDispersionRange
+        )
+        // Folia latent (隐现) background tuning.
+        latentDisplayMode = defaults.string(forKey: Keys.latentDisplayMode)
+            .flatMap(LatentDisplayMode.init) ?? Self.defaultLatentDisplayMode
+        latentColorSource = defaults.string(forKey: Keys.latentColorSource)
+            .flatMap(LatentColorSource.init) ?? Self.defaultLatentColorSource
+        latentDynamicOnlyInPlayer = defaults.object(forKey: Keys.latentDynamicOnlyInPlayer) as? Bool
+            ?? Self.defaultLatentDynamicOnlyInPlayer
+        latentEnhancedBeatResponse = defaults.object(forKey: Keys.latentEnhancedBeatResponse) as? Bool
+            ?? Self.defaultLatentEnhancedBeatResponse
+        latentDitheringSpeed = Self.clamped(
+            defaults.object(forKey: Keys.latentDitheringSpeed) as? Double
+                ?? Self.defaultLatentDitheringSpeed,
+            to: Self.latentSpeedRange
+        )
+        latentDitheringAudioSpeed = Self.clamped(
+            defaults.object(forKey: Keys.latentDitheringAudioSpeed) as? Double
+                ?? Self.defaultLatentDitheringAudioSpeed,
+            to: Self.latentSpeedRange
+        )
+        latentDitheringSize = Self.clamped(
+            defaults.object(forKey: Keys.latentDitheringSize) as? Double
+                ?? Self.defaultLatentDitheringSize,
+            to: Self.latentDitheringSizeRange
+        )
+        latentDitheringOpacity = Self.clamped(
+            defaults.object(forKey: Keys.latentDitheringOpacity) as? Double
+                ?? Self.defaultLatentDitheringOpacity,
+            to: Self.latentOpacityRange
+        )
+        latentMeshSpeed = Self.clamped(
+            defaults.object(forKey: Keys.latentMeshSpeed) as? Double
+                ?? Self.defaultLatentMeshSpeed,
+            to: Self.latentSpeedRange
+        )
+        latentMeshAudioSpeed = Self.clamped(
+            defaults.object(forKey: Keys.latentMeshAudioSpeed) as? Double
+                ?? Self.defaultLatentMeshAudioSpeed,
+            to: Self.latentSpeedRange
+        )
+        latentMeshDistortion = Self.clamped(
+            defaults.object(forKey: Keys.latentMeshDistortion) as? Double
+                ?? Self.defaultLatentMeshDistortion,
+            to: Self.latentMeshDistortionRange
+        )
+        latentMeshSwirl = Self.clamped(
+            defaults.object(forKey: Keys.latentMeshSwirl) as? Double
+                ?? Self.defaultLatentMeshSwirl,
+            to: Self.latentMeshSwirlRange
+        )
+        latentOverlayEnabled = defaults.object(forKey: Keys.latentOverlayEnabled) as? Bool
+            ?? Self.defaultLatentOverlayEnabled
+        latentOverlayOpacity = Self.clamped(
+            defaults.object(forKey: Keys.latentOverlayOpacity) as? Double
+                ?? Self.defaultLatentOverlayOpacity,
+            to: Self.latentOpacityRange
+        )
+        // Folia common (通用) background.
+        commonOpacity = Self.clamped(
+            defaults.object(forKey: Keys.commonOpacity) as? Double
+                ?? Self.defaultCommonOpacity,
+            to: Self.commonOpacityRange
+        )
+        commonUseCoverColorBg = defaults.object(forKey: Keys.commonUseCoverColorBg) as? Bool
+            ?? Self.defaultCommonUseCoverColorBg
+        commonDisableVignette = defaults.object(forKey: Keys.commonDisableVignette) as? Bool
+            ?? Self.defaultCommonDisableVignette
+        commonDisableGeometric = defaults.object(forKey: Keys.commonDisableGeometric) as? Bool
+            ?? Self.defaultCommonDisableGeometric
+        // Folia monet (莫奈) background.
+        monetBackgroundSource = defaults.string(forKey: Keys.monetBackgroundSource)
+            .flatMap(BackgroundImageSource.init) ?? Self.defaultMonetBackgroundSource
+        monetBackgroundLayout = defaults.string(forKey: Keys.monetBackgroundLayout)
+            .flatMap(MonetLayout.init) ?? Self.defaultMonetBackgroundLayout
+        monetBackgroundBlurPx = Self.clamped(
+            defaults.object(forKey: Keys.monetBackgroundBlurPx) as? Double
+                ?? Self.defaultMonetBackgroundBlurPx,
+            to: Self.monetBackgroundBlurPxRange
+        )
+        monetBackgroundOverlayOpacity = Self.clamped(
+            defaults.object(forKey: Keys.monetBackgroundOverlayOpacity) as? Double
+                ?? Self.defaultMonetBackgroundOverlayOpacity,
+            to: Self.monetBackgroundOverlayOpacityRange
+        )
+        monetBackgroundGrayscale = Self.clamped(
+            defaults.object(forKey: Keys.monetBackgroundGrayscale) as? Double
+                ?? Self.defaultMonetBackgroundGrayscale,
+            to: Self.monetBackgroundGrayscaleRange
+        )
+        monetBackgroundSaturation = Self.clamped(
+            defaults.object(forKey: Keys.monetBackgroundSaturation) as? Double
+                ?? Self.defaultMonetBackgroundSaturation,
+            to: Self.monetBackgroundSaturationRange
+        )
+        monetBackgroundWash = Self.clamped(
+            defaults.object(forKey: Keys.monetBackgroundWash) as? Double
+                ?? Self.defaultMonetBackgroundWash,
+            to: Self.monetBackgroundWashRange
+        )
+        monetBackgroundHalfPaneOffsetX = Self.clamped(
+            defaults.object(forKey: Keys.monetBackgroundHalfPaneOffsetX) as? Double
+                ?? Self.defaultMonetBackgroundHalfPaneOffsetX,
+            to: Self.monetBackgroundHalfPaneOffsetXRange
+        )
+        monetBackgroundWashColorMode = defaults.string(forKey: Keys.monetBackgroundWashColorMode)
+            .flatMap(MonetWashColorMode.init) ?? Self.defaultMonetBackgroundWashColorMode
+        monetBackgroundWashCustomColor = Self.normalizedHexColor(
+            defaults.string(forKey: Keys.monetBackgroundWashCustomColor),
+            default: Self.defaultMonetBackgroundWashCustomColor
+        )
+        monetBackgroundDriftEnabled = defaults.object(forKey: Keys.monetBackgroundDriftEnabled) as? Bool
+            ?? Self.defaultMonetBackgroundDriftEnabled
+        monetBackgroundDriftStrength = Self.clamped(
+            defaults.object(forKey: Keys.monetBackgroundDriftStrength) as? Double
+                ?? Self.defaultMonetBackgroundDriftStrength,
+            to: Self.monetBackgroundDriftStrengthRange
+        )
+        monetBackgroundStreaksEnabled = defaults.object(forKey: Keys.monetBackgroundStreaksEnabled) as? Bool
+            ?? Self.defaultMonetBackgroundStreaksEnabled
+        // Folia sora (空) background.
+        soraBlank = defaults.object(forKey: Keys.soraBlank) as? Bool
+            ?? Self.defaultSoraBlank
+        // Folia url (嵌入) background.
+        urlBackgroundList = defaults.data(forKey: Keys.urlBackgroundList)
+            .flatMap { try? JSONDecoder().decode([UrlBackgroundItem].self, from: $0) } ?? []
+        urlBackgroundSelectedID = defaults.string(forKey: Keys.urlBackgroundSelectedID)
+        // Uploaded background image (monet + nomand share it).
+        uploadedBackgroundImageName = defaults.string(forKey: Keys.uploadedBackgroundImageName)
         // Folia lyric-style window (VisPlayground).
         lyricsFontStyle = defaults.string(forKey: Keys.lyricsFontStyle)
             .flatMap(LyricsFontStyle.init) ?? Self.defaultLyricsFontStyle

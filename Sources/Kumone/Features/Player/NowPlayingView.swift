@@ -20,6 +20,9 @@ struct NowPlayingView: View {
     #if os(iOS)
     @State private var loadedArtwork = CachedImageState()
     @State private var loadedArtworkColors: ArtworkColors = .fallback
+    /// The user-uploaded background image (monet + nomand share it),
+    /// loaded once per stored file name — never per body evaluation.
+    @State private var uploadedBackgroundImage: PlatformImage?
     #endif
     @State private var activeIndex: Int?
     @State private var isUserScrolling = false
@@ -145,6 +148,16 @@ struct NowPlayingView: View {
         #if os(iOS)
         .task(id: currentArtworkURL) {
             await loadArtwork()
+        }
+        .task(id: settings.effectiveUploadedBackgroundImageName) {
+            // Load once per stored file name, off the main actor: the
+            // file read + image decode must not hitch the player page.
+            // A missing file (reinstall keeps the name, not the file)
+            // loads as nil and the backgrounds fall back to the cover.
+            let name = settings.effectiveUploadedBackgroundImageName
+            uploadedBackgroundImage = await Task.detached(priority: .userInitiated) {
+                VisualizerBackgroundImageStore.loadImage(named: name)
+            }.value
         }
         #endif
         #if os(iOS)
@@ -330,16 +343,40 @@ struct NowPlayingView: View {
         lyricAnimationsEnabled ? animation : nil
     }
 
-    /// The page backdrop. In luminous mode (compact, iOS) the flowing
-    /// latent field (the default) or the nomand halftone cover replaces
-    /// the artwork gradient — two ambient layers stacked would wash the
-    /// page out grey — or a plain dark colour when the background mode
-    /// is none. Every other mode keeps the gradient.
+    /// Source image for a background that takes cover-or-uploaded: the
+    /// uploaded image when the mode's source says so and one is stored,
+    /// else the current cover (Folia's uploaded-first-with-cover-fallback).
+    #if os(iOS)
+    private func backgroundSourceImage(for source: BackgroundImageSource) -> PlatformImage? {
+        if source == .uploadedGlobal, let uploadedBackgroundImage {
+            return uploadedBackgroundImage
+        }
+        return artworkImage
+    }
+    #endif
+
+    /// The selected saved webpage as a URL, or nil when there is none.
+    private var selectedUrlBackgroundURL: URL? {
+        settings.selectedUrlBackground.flatMap { URL(string: $0.url) }
+    }
+
+    /// Backgrounds freeze in static mode, or when the background
+    /// reduce-motion override says so (C4/C5).
+    private var backgroundIsStatic: Bool {
+        settings.effectiveStaticMode || settings.effectiveReduceMotionMicroMotion
+    }
+
+    /// The page backdrop. In luminous mode (compact, iOS) the selected
+    /// Folia background replaces the artwork gradient — two ambient
+    /// layers stacked would wash the page out grey — or a plain dark
+    /// colour when the background mode is none. Every other mode keeps
+    /// the gradient.
     @ViewBuilder
     private func backdrop(isCompact: Bool) -> some View {
         #if os(iOS)
         if isCompact, settings.effectiveNowPlayingMode == .luminous {
-            if settings.effectiveVisualizerBackgroundMode == .latent {
+            switch settings.effectiveVisualizerBackgroundMode {
+            case .latent:
                 // Folia's default background: the flowing latent field.
                 // The palette is the cover-extracted tint pair plus the
                 // theme accent; the view blends the remaining mesh stops.
@@ -349,12 +386,13 @@ struct NowPlayingView: View {
                     accent: theme.accent,
                     background: colors.secondary,
                     isPlaying: player.isPlaying,
-                    isStatic: settings.effectiveStaticMode || settings.effectiveReduceMotionMicroMotion
+                    isStatic: backgroundIsStatic,
+                    tuning: settings.latentTuning
                 )
                 .ignoresSafeArea()
-            } else if settings.effectiveVisualizerBackgroundMode == .nomand {
+            case .nomand:
                 NomandBackgroundView(
-                    cover: artworkImage,
+                    cover: backgroundSourceImage(for: settings.effectiveNomandImageSource),
                     songID: player.currentTrack.map { String($0.id) },
                     tuning: NomandDitherer.Tuning(
                         size: settings.effectiveNomandHalftoneSize,
@@ -362,13 +400,85 @@ struct NowPlayingView: View {
                         contrast: settings.effectiveNomandHalftoneContrast,
                         originalColors: settings.effectiveNomandOriginalColors,
                         accent: PlatformColor(theme.accent),
-                        background: PlatformColor(colors.secondary)
+                        background: PlatformColor(colors.secondary),
+                        effect: settings.effectiveNomandEffect,
+                        highlight: PlatformColor(colors.primary),
+                        secondary: PlatformColor(theme.secondaryTint),
+                        ditheringType: settings.effectiveNomandDitheringType,
+                        ditheringSize: settings.effectiveNomandDitheringSize,
+                        ditheringColorSteps: settings.effectiveNomandDitheringColorSteps,
+                        ditheringOriginalColors: settings.effectiveNomandDitheringOriginalColors,
+                        ditheringInverted: settings.effectiveNomandDitheringInverted,
+                        flutedGlassSize: settings.effectiveNomandFlutedGlassSize,
+                        flutedGlassDistortion: settings.effectiveNomandFlutedGlassDistortion,
+                        flutedGlassBlur: settings.effectiveNomandFlutedGlassBlur,
+                        paperTextureContrast: settings.effectiveNomandPaperTextureContrast,
+                        paperTextureRoughness: settings.effectiveNomandPaperTextureRoughness,
+                        paperTextureFiber: settings.effectiveNomandPaperTextureFiber,
+                        halftoneDotsInverted: settings.effectiveNomandHalftoneDotsInverted,
+                        lensDistortionSpread: settings.effectiveNomandLensDistortionSpread,
+                        lensDistortionBulge: settings.effectiveNomandLensDistortionBulge,
+                        lensDistortionDispersion: settings.effectiveNomandLensDistortionDispersion
                     ),
-                    overlayOpacity: settings.effectiveNomandOverlayOpacity,
+                    overlayOpacity: settings.effectiveNomandOverlayEnabled
+                        ? settings.effectiveNomandOverlayOpacity : 0,
                     background: colors.secondary
                 )
                 .ignoresSafeArea()
-            } else {
+            case .common:
+                // The live band levels are polled here (main actor) and
+                // handed down; the view itself only drifts its shapes.
+                TimelineView(.animation(minimumInterval: 1.0 / 15.0, paused: backgroundIsStatic)) { _ in
+                    CommonBackgroundView(
+                        cover: artworkImage,
+                        background: colors.secondary,
+                        primary: colors.primary,
+                        secondary: colors.secondary,
+                        accent: theme.accent,
+                        songID: player.currentTrack.map { String($0.id) },
+                        opacity: settings.effectiveCommonOpacity,
+                        useCoverColorBg: settings.effectiveCommonUseCoverColorBg,
+                        disableVignette: settings.effectiveCommonDisableVignette,
+                        disableGeometric: settings.effectiveCommonDisableGeometric,
+                        isStatic: backgroundIsStatic,
+                        audioLevels: (
+                            bass: AudioSpectrum.shared.level(at: 0),
+                            lowMid: AudioSpectrum.shared.level(at: 1),
+                            mid: AudioSpectrum.shared.level(at: 2),
+                            treble: AudioSpectrum.shared.level(at: 3)
+                        )
+                    )
+                }
+                .ignoresSafeArea()
+            case .monet:
+                MonetBackgroundView(
+                    cover: backgroundSourceImage(for: settings.effectiveMonetBackgroundSource),
+                    background: colors.secondary,
+                    primary: colors.primary,
+                    accent: theme.accent,
+                    secondary: colors.secondary,
+                    tuning: settings.monetTuning,
+                    isStatic: backgroundIsStatic
+                )
+                .ignoresSafeArea()
+            case .url:
+                if let url = selectedUrlBackgroundURL {
+                    UrlBackgroundView(url: url)
+                        .ignoresSafeArea()
+                } else {
+                    colors.secondary
+                        .ignoresSafeArea()
+                }
+            case .sora:
+                SoraBackgroundView(
+                    primary: colors.primary,
+                    accent: theme.accent,
+                    background: colors.secondary,
+                    isStatic: backgroundIsStatic,
+                    blank: settings.effectiveSoraBlank
+                )
+                .ignoresSafeArea()
+            case .none:
                 colors.secondary
                     .ignoresSafeArea()
             }
