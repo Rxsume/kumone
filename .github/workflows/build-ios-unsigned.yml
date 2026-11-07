@@ -17,15 +17,21 @@ permissions:
 jobs:
   build-ipa:
     runs-on: macos-26
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+      build_number: ${{ steps.version.outputs.build_number }}
     steps:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
 
       - name: Derive version
+        id: version
         run: |
           echo "VERSION=0.3.29" >> "$GITHUB_ENV"
           echo "BUILD_NUMBER=$(git rev-list --count HEAD)" >> "$GITHUB_ENV"
+          echo "version=0.3.29" >> "$GITHUB_OUTPUT"
+          echo "build_number=$(git rev-list --count HEAD)" >> "$GITHUB_OUTPUT"
 
       - name: Build unsigned iOS IPA
         run: |
@@ -38,12 +44,54 @@ jobs:
           APP="$RUNNER_TEMP/ios-dd/Build/Products/Release-iphoneos/KumoneIOS.app"
           mkdir -p "$RUNNER_TEMP/payload/Payload"
           cp -R "$APP" "$RUNNER_TEMP/payload/Payload/"
-          (cd "$RUNNER_TEMP/payload" && zip -qry "$GITHUB_WORKSPACE/Rumxs-iOS-0.3.29-custom.ipa" Payload)
+          (cd "$RUNNER_TEMP/payload" && zip -qry "$GITHUB_WORKSPACE/Rumxs-iOS-$VERSION-custom.ipa" Payload)
           ls -la "$GITHUB_WORKSPACE"/*.ipa
 
       - name: Upload unsigned IPA
         uses: actions/upload-artifact@v4
         with:
           name: Rumxs-iOS-unsigned-ipa
-          path: Rumxs-iOS-0.3.29-custom.ipa
+          # NOTE: `with:` is not a shell, so this must use the ${{ env.* }}
+          # expression — a bare $VERSION would be taken literally.
+          path: Rumxs-iOS-${{ env.VERSION }}-custom.ipa
           if-no-files-found: error
+
+  # Publish the same IPA as a GitHub Release so the in-app updater
+  # (ReleaseChecker, fork repo Rxsume/kumone) has something to find.
+  # The tag carries version AND build — `Rumxs-0.3.29-build-565` — because
+  # every fork build shares one dotted version and differs only in build
+  # number. Created with the repo's own GITHUB_TOKEN (no new secrets);
+  # a re-run of the same commit re-uploads to the existing release instead
+  # of failing on a duplicate tag. NOT upstream release.yml: that flow
+  # needs macOS signing secrets and only runs on tag pushes.
+  publish-release:
+    needs: build-ipa
+    runs-on: macos-26
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download unsigned IPA
+        uses: actions/download-artifact@v4
+        with:
+          name: Rumxs-iOS-unsigned-ipa
+          path: dist
+
+      - name: Publish GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ needs.build-ipa.outputs.version }}
+          BUILD_NUMBER: ${{ needs.build-ipa.outputs.build_number }}
+        run: |
+          TAG="Rumxs-$VERSION-build-$BUILD_NUMBER"
+          IPA="dist/Rumxs-iOS-$VERSION-custom.ipa"
+          ls -la "$IPA"
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            gh release upload "$TAG" "$IPA" --clobber
+          else
+            gh release create "$TAG" \
+              --title "Rumxs $VERSION (build $BUILD_NUMBER)" \
+              --notes "Unsigned iOS IPA built from main ($GITHUB_SHA). Sideload with your own certificate (LCSign / ESign / AltStore); TrollStore users can install it from the in-app updater." \
+              "$IPA"
+          fi

@@ -28,6 +28,23 @@ final class IOSUpdater: NSObject, ObservableObject {
     @Published var phase: Phase = .idle
     @Published var showSheet = false
 
+    /// UserDefaults key remembering the release the user dismissed with
+    /// "稍后", as its `Release.identifier` ("0.3.28-565"). The launch check
+    /// stays silent for that exact build; a newer build re-prompts.
+    /// A manual check ignores this and always shows the sheet.
+    private static let dismissedReleaseKey = "settings.dismissedUpdateRelease"
+
+    private var dismissedRelease: String? {
+        get { UserDefaults.standard.string(forKey: Self.dismissedReleaseKey) }
+        set { UserDefaults.standard.set(newValue, forKey: Self.dismissedReleaseKey) }
+    }
+
+    /// Record "稍后" for `release` and hide the sheet.
+    func dismiss(_ release: ReleaseChecker.Release) {
+        dismissedRelease = release.identifier
+        showSheet = false
+    }
+
     private var downloadTask: URLSessionDownloadTask?
     private var progressContinuation: CheckedContinuation<URL, Error>?
     /// Destination filename for the current download. Set on the main actor in
@@ -41,14 +58,22 @@ final class IOSUpdater: NSObject, ObservableObject {
         Task {
             do {
                 let latest = try await ReleaseChecker.latest()
-                if ReleaseChecker.isNewer(latest.version, than: ReleaseChecker.currentVersion) {
-                    phase = .available(latest)
-                    showSheet = true
+                if ReleaseChecker.isNewerRelease(latest) {
+                    if !interactive, dismissedRelease == latest.identifier {
+                        // Already dismissed this exact build: stay silent.
+                        phase = .upToDate
+                    } else {
+                        phase = .available(latest)
+                        showSheet = true
+                    }
                 } else {
                     phase = .upToDate
                     if !interactive { showSheet = false }
                 }
             } catch {
+                // Non-interactive (launch) failures stay silent: the sheet
+                // was never shown, so there is nothing to dismiss. This
+                // covers the fork having no releases yet (404) and offline.
                 phase = .failed(error.localizedDescription)
             }
         }
@@ -94,7 +119,8 @@ final class IOSUpdater: NSObject, ObservableObject {
             openReleasePage(release)
             return
         }
-        pendingDownloadFilename = "Rumxs-\(release.version).ipa"
+        pendingDownloadFilename = release.build.map { "Rumxs-\(release.version)-build-\($0).ipa" }
+            ?? "Rumxs-\(release.version).ipa"
         phase = .downloading(0)
         Task {
             do {
@@ -211,8 +237,8 @@ struct IOSUpdaterSheet: View {
                 Image(systemName: "arrow.down.circle.fill")
                     .font(.system(size: 44)).foregroundStyle(Theme.accent)
                 VStack(spacing: 4) {
-                    Text("发现新版本 \(release.version)").font(.headline)
-                    Text("当前版本 \(ReleaseChecker.currentVersion)")
+                    Text("发现新版本 \(release.displayVersion)").font(.headline)
+                    Text("当前版本 \(ReleaseChecker.currentDisplayVersion)")
                         .font(.caption).foregroundStyle(.secondary)
                 }
                 Text("已装 TrollStore（巨魔）将自动安装；否则用「下载 IPA」手动侧载")
@@ -223,7 +249,7 @@ struct IOSUpdaterSheet: View {
                     .buttonStyle(.plain)
                     .font(.system(size: 13, weight: .medium))
                     .foregroundStyle(Theme.accent)
-                laterButton
+                laterButton(release)
 
             case .downloading(let progress):
                 ProgressRing(progress: progress)
@@ -273,9 +299,11 @@ struct IOSUpdaterSheet: View {
         .buttonStyle(.pressable)
     }
 
-    private var laterButton: some View {
+    /// "稍后" remembers this exact release so the launch check does not
+    /// nag again for the same build; a manual check still shows it.
+    private func laterButton(_ release: ReleaseChecker.Release) -> some View {
         Button("稍后") {
-            IOSUpdater.shared.showSheet = false
+            IOSUpdater.shared.dismiss(release)
             dismiss()
         }
         .buttonStyle(.plain).font(.system(size: 13)).foregroundStyle(.secondary)
