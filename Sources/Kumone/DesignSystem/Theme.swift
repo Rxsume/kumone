@@ -53,6 +53,15 @@ enum Theme {
         /// Gap between the floating player bar and the window's bottom edge.
         /// Must match the bar's own `.padding(.bottom,)` in PlayerBar.
         static let playerBarBottomMargin: CGFloat = 16
+        /// Folia floating capsule: max width (Folia caps at 512px).
+        static let floatingCapsuleMaxWidth: CGFloat = 512
+        /// Collapsed capsule width as a fraction of the available width.
+        static let floatingCapsuleCollapsedWidthFractionRegular: CGFloat = 0.6
+        static let floatingCapsuleCollapsedWidthFractionCompact: CGFloat = 0.8
+        /// Gap between the floating capsule and the window's bottom edge.
+        static let floatingCapsuleBottomMargin: CGFloat = 32
+        /// Reserved height of the expanded capsule.
+        static let floatingCapsuleExpandedHeight: CGFloat = 132
         /// Bottom inset pages need so scrolled content clears the floating bar.
         static var playerChromeClearance: CGFloat { playerBarHeight + playerBarBottomMargin }
         /// Extra breathing margin for scrollable content clearing chrome.
