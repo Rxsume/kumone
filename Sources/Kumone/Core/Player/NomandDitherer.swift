@@ -98,13 +98,15 @@ import AppKit
 #endif
 
 /// Bayer dither matrix size for the dithering effect.
-enum NomandDitheringType: String, CaseIterable {
+enum NomandDitheringType: String, CaseIterable, Identifiable {
     /// 2×2 Bayer matrix.
     case twoByTwo = "2x2"
     /// 4×4 Bayer matrix.
     case fourByFour = "4x4"
     /// 8×8 Bayer matrix (Folia default).
     case eightByEight = "8x8"
+
+    var id: String { rawValue }
 }
 
 /// Nomand background rendering of a cover image, per Folia's nomand
