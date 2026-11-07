@@ -31,6 +31,85 @@ import Testing
         #expect(SettingsManager.defaultNomandOverlayOpacity == 0.35)
     }
 
+    @Test func backgroundModesCoverAllSixFoliaModes() {
+        #expect(VisualizerBackgroundMode.allCases.map(\.rawValue) == ["common", "monet", "nomand", "latent", "url", "sora", "none"])
+        #expect(SettingsManager.defaultVisualizerBackgroundMode == .latent)
+    }
+
+    @Test func nomandEffectDefaultsMatchFolia() {
+        #expect(NomandEffect.allCases.map(\.rawValue) == ["dithering", "flutedGlass", "paperTexture", "halftoneDots", "lensDistortion"])
+        #expect(SettingsManager.defaultNomandEffect == .halftoneDots)
+        #expect(SettingsManager.defaultNomandOverlayEnabled == true)
+        #expect(SettingsManager.defaultNomandImageSource == .coverDerived)
+        #expect(SettingsManager.defaultNomandDitheringType == .eightByEight)
+        #expect(SettingsManager.defaultNomandDitheringSize == 3)
+        #expect(SettingsManager.defaultNomandDitheringColorSteps == 4)
+        #expect(SettingsManager.defaultNomandDitheringOriginalColors == false)
+        #expect(SettingsManager.defaultNomandDitheringInverted == false)
+        #expect(SettingsManager.defaultNomandFlutedGlassSize == 0.5)
+        #expect(SettingsManager.defaultNomandFlutedGlassDistortion == 0.5)
+        #expect(SettingsManager.defaultNomandFlutedGlassBlur == 0.08)
+        #expect(SettingsManager.defaultNomandPaperTextureContrast == 0.32)
+        #expect(SettingsManager.defaultNomandPaperTextureRoughness == 0.42)
+        #expect(SettingsManager.defaultNomandPaperTextureFiber == 0.3)
+        #expect(SettingsManager.defaultNomandHalftoneDotsInverted == false)
+        #expect(SettingsManager.defaultNomandLensDistortionSpread == 0.45)
+        #expect(SettingsManager.defaultNomandLensDistortionBulge == 0.3)
+        #expect(SettingsManager.defaultNomandLensDistortionDispersion == 0.65)
+    }
+
+    @Test func latentDefaultsMatchFolia() {
+        #expect(SettingsManager.defaultLatentDisplayMode == .both)
+        #expect(SettingsManager.defaultLatentColorSource == .coverTheme)
+        #expect(SettingsManager.defaultLatentDynamicOnlyInPlayer == true)
+        #expect(SettingsManager.defaultLatentEnhancedBeatResponse == true)
+        #expect(SettingsManager.defaultLatentDitheringSpeed == 0.1)
+        #expect(SettingsManager.defaultLatentDitheringAudioSpeed == 1.2)
+        #expect(SettingsManager.defaultLatentDitheringSize == 2.5)
+        #expect(SettingsManager.defaultLatentDitheringOpacity == 0.55)
+        #expect(SettingsManager.defaultLatentMeshSpeed == 0.3)
+        #expect(SettingsManager.defaultLatentMeshAudioSpeed == 2.0)
+        #expect(SettingsManager.defaultLatentMeshDistortion == 0.8)
+        #expect(SettingsManager.defaultLatentMeshSwirl == 0.1)
+        #expect(SettingsManager.defaultLatentOverlayEnabled == true)
+        #expect(SettingsManager.defaultLatentOverlayOpacity == 0.35)
+    }
+
+    @Test func commonDefaultsMatchFolia() {
+        #expect(SettingsManager.defaultCommonOpacity == 0.75)
+        #expect(SettingsManager.defaultCommonUseCoverColorBg == false)
+        #expect(SettingsManager.defaultCommonDisableVignette == false)
+        #expect(SettingsManager.defaultCommonDisableGeometric == false)
+    }
+
+    @Test func monetDefaultsMatchFolia() {
+        #expect(SettingsManager.defaultMonetBackgroundSource == .coverDerived)
+        #expect(SettingsManager.defaultMonetBackgroundLayout == .fullOverlay)
+        #expect(SettingsManager.defaultMonetBackgroundBlurPx == 6)
+        #expect(SettingsManager.defaultMonetBackgroundOverlayOpacity == 0.74)
+        #expect(SettingsManager.defaultMonetBackgroundGrayscale == 0)
+        #expect(SettingsManager.defaultMonetBackgroundSaturation == 1.05)
+        #expect(SettingsManager.defaultMonetBackgroundWash == 0.34)
+        #expect(SettingsManager.defaultMonetBackgroundHalfPaneOffsetX == 0)
+        #expect(SettingsManager.defaultMonetBackgroundWashColorMode == .theme)
+        #expect(SettingsManager.defaultMonetBackgroundWashCustomColor == "#8fb7ff")
+        #expect(SettingsManager.defaultMonetBackgroundDriftEnabled == true)
+        #expect(SettingsManager.defaultMonetBackgroundDriftStrength == 0.5)
+        #expect(SettingsManager.defaultMonetBackgroundStreaksEnabled == true)
+    }
+
+    @Test func soraDefaultIsNotBlank() {
+        #expect(SettingsManager.defaultSoraBlank == false)
+    }
+
+    @Test func hexColorValidationFallsBackToDefault() {
+        #expect(SettingsManager.normalizedHexColor("#8fb7ff", default: "#000000") == "#8fb7ff")
+        #expect(SettingsManager.normalizedHexColor("red", default: "#8fb7ff") == "#8fb7ff")
+        #expect(SettingsManager.normalizedHexColor(nil, default: "#8fb7ff") == "#8fb7ff")
+        #expect(SettingsManager.normalizedHexColor("#12", default: "#8fb7ff") == "#8fb7ff")
+        #expect(SettingsManager.normalizedHexColor("#gggggg", default: "#8fb7ff") == "#8fb7ff")
+    }
+
     @Test func lyricStyleDefaultsMatchFolia() {
         #expect(SettingsManager.defaultLyricsFontStyle == .sans)
         #expect(SettingsManager.defaultLyricsFontScale == 1)
