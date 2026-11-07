@@ -20,6 +20,16 @@ struct PlayerBar: View {
         .frame(height: Theme.Layout.playerBarHeight)
         .compatGlass(interactive: true, in: Capsule())
         .overlay(Capsule().strokeBorder(.primary.opacity(0.06), lineWidth: 0.5))
+        // Folia's capsule onClick: tapping anywhere on the bar that is
+        // not a control opens the full now-playing page. The buttons
+        // inside the bar (like / transport / panels / volume) and the
+        // scrubber's drag gesture claim their own touches, so this
+        // gesture only fires for the title, artwork, gaps and empty
+        // space — the SwiftUI equivalent of Folia's `stopPropagation()`
+        // on its capsule controls. `.contentShape` makes the gaps
+        // between sections tappable too, not just the visible content.
+        .contentShape(Capsule())
+        .onTapGesture { openNowPlaying() }
         // Keep the capsule clear of the window's rounded corners so the inner
         // and outer radii don't visually merge (#88).
         .padding(.horizontal, 20)
@@ -58,12 +68,18 @@ struct PlayerBar: View {
         }
     }
 
+    /// Opens the full now-playing page, the way the artwork button
+    /// always has; the bar-wide tap gesture shares this one path.
+    private func openNowPlaying() {
+        guard player.hasCurrentTrack else { return }
+        withAnimation(AppAnimation.smooth) {
+            player.showNowPlaying = true
+        }
+    }
+
     private var artworkButton: some View {
         Button {
-            guard player.hasCurrentTrack else { return }
-            withAnimation(AppAnimation.smooth) {
-                player.showNowPlaying = true
-            }
+            openNowPlaying()
         } label: {
             CachedAsyncImage(url: player.currentTrack?.album.picUrl?.resizedImageURL(128))
                 .frame(width: 38, height: 38)
