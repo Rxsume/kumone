@@ -20,7 +20,9 @@ import Testing
     }
 
     @Test func nomandDefaultsMatchFolia() {
-        #expect(SettingsManager.defaultVisualizerBackgroundMode == .nomand)
+        // Folia's default background mode is latent, not nomand; nomand
+        // is still the second mode and keeps its own tuning.
+        #expect(SettingsManager.defaultVisualizerBackgroundMode == .latent)
         #expect(SettingsManager.defaultNomandEffect == .halftoneDots)
         #expect(SettingsManager.defaultNomandHalftoneSize == 0.5)
         #expect(SettingsManager.defaultNomandHalftoneRadius == 1.25)
@@ -150,18 +152,20 @@ import Testing
     @Test func calmPlacementIsCentredAndStill() {
         let placement = LuminousLyrics.placement(seed: 0.7, index: 3, rotationEnabled: true, calm: true)
         #expect(placement == .identity)
-        #expect(LuminousLyrics.lineAlignment(seed: 0.7, calm: true) == .center)
+        #expect(LuminousLyrics.lineJustify(seed: 0.7, calm: true) == .center)
     }
 
-    @Test func lineAlignmentRotatesWithTheSeed() {
-        // The alignment is a pure function of the seed: the same seed
-        // always picks the same side.
-        let first = LuminousLyrics.lineAlignment(seed: 0.7)
-        #expect(LuminousLyrics.lineAlignment(seed: 0.7) == first)
-        let alignments = (0..<30).map { LuminousLyrics.lineAlignment(seed: Double($0) * 0.7) }
-        #expect(alignments.contains(.leading))
-        #expect(alignments.contains(.center))
-        #expect(alignments.contains(.trailing))
+    @Test func lineJustifyRotatesWithTheSeed() {
+        // The justification is a pure function of the seed: the same
+        // seed always picks the same layout.
+        let first = LuminousLyrics.lineJustify(seed: 0.7)
+        #expect(LuminousLyrics.lineJustify(seed: 0.7) == first)
+        let justifies = (0..<30).map { LuminousLyrics.lineJustify(seed: Double($0) * 0.7) }
+        #expect(justifies.contains(.leading))
+        #expect(justifies.contains(.center))
+        #expect(justifies.contains(.trailing))
+        #expect(justifies.contains(.spaceAround))
+        #expect(justifies.contains(.spaceBetween))
     }
 
     // MARK: - Font sizes and breathing
