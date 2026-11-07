@@ -74,6 +74,19 @@ struct LyricStylePreviewSample: Hashable {
         return nil
     }
 
+    /// The line to show at `time`, holding the last line that started
+    /// when the clock is between lines (the sample sets leave ~0.6s gaps
+    /// between lines), and the first line before it starts — so the
+    /// preview never blanks out mid-loop.
+    func holdingLineIndex(at time: TimeInterval) -> Int {
+        let epsilon: TimeInterval = 1e-9
+        var held = 0
+        for index in lines.indices {
+            if time >= lines[index].line.time - epsilon { held = index } else { break }
+        }
+        return held
+    }
+
     /// The two lines after `index`, for the subtitle overlay's upcoming
     /// rows.
     func upcomingLines(after index: Int) -> [LyricLine] {
@@ -269,7 +282,12 @@ struct LyricStylePreviewCard: View {
                 .fill(Color(white: 0.08))
 
             VStack(spacing: 0) {
-                TimelineView(.periodic(from: .now, by: 1.0 / 30.0)) { context in
+                // `.animation`, not `.periodic`: the periodic schedule is
+                // the one PR #13 proved stalls in this app (it froze the
+                // player lyrics in build 556) — this card still used it,
+                // so its clock froze at ~0s and the preview showed "…"
+                // forever.
+                TimelineView(.animation(minimumInterval: 1.0 / 30.0, paused: false)) { context in
                     previewContent(time: previewTime(at: context.date))
                 }
                 .frame(height: 300)
@@ -319,32 +337,37 @@ struct LyricStylePreviewCard: View {
 
     @ViewBuilder
     private func previewContent(time: TimeInterval) -> some View {
-        if let activeIndex = sample.activeLineIndex(at: time) {
-            let line = sample.lines[activeIndex].line
-            let harmony = sample.lines[activeIndex].harmony
-            VStack(spacing: 6) {
-                LuminousLyricsView(
-                    accent: Theme.accent,
-                    previewLine: line,
-                    previewTime: time,
-                    previewUpcoming: sample.upcomingLines(after: activeIndex)
-                )
-                if let harmony,
-                   settings.effectiveSubtitleHarmonyEnabled,
-                   time >= harmony.start, time <= harmony.end {
-                    Text(harmony.text)
-                        .font(.system(size: 15, weight: .medium))
-                        .italic()
-                        .foregroundColor(.white.opacity(0.55 * settings.effectiveSubtitleOverlayOpacity))
-                        .multilineTextAlignment(.center)
-                        .padding(.bottom, 8)
-                }
+        // The holding line, not the active one: between lines the clock
+        // is in a ~0.6s gap, and the old code drew "…" there — with the
+        // clock frozen at ~0s that was the preview's permanent state.
+        let activeIndex = sample.holdingLineIndex(at: time)
+        let line = sample.lines[activeIndex].line
+        let harmony = sample.lines[activeIndex].harmony
+        VStack(spacing: 6) {
+            LuminousLyricsView(
+                accent: Theme.accent,
+                previewLine: line,
+                previewTime: time,
+                previewUpcoming: sample.upcomingLines(after: activeIndex)
+            )
+            if let harmony,
+               settings.effectiveSubtitleHarmonyEnabled,
+               time >= harmony.start, time <= harmony.end {
+                Text(harmony.text)
+                    .font(.system(size: 15, weight: .medium))
+                    .italic()
+                    .foregroundColor(.white.opacity(0.55 * settings.effectiveSubtitleOverlayOpacity))
+                    .multilineTextAlignment(.center)
+                    .padding(.horizontal, settings.effectiveSubtitleHarmonyBackgroundEnabled ? 10 : 0)
+                    .padding(.vertical, settings.effectiveSubtitleHarmonyBackgroundEnabled ? 4 : 0)
+                    .background {
+                        if settings.effectiveSubtitleHarmonyBackgroundEnabled {
+                            RoundedRectangle(cornerRadius: 8, style: .continuous)
+                                .fill(Color.black.opacity(0.35))
+                        }
+                    }
+                    .padding(.bottom, 8)
             }
-        } else {
-            Text("…")
-                .font(.system(size: 20, weight: .medium))
-                .foregroundColor(.white.opacity(0.6))
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
     }
 }
@@ -414,6 +437,7 @@ struct LyricStyleSettingsView: View {
     @State private var tab: LyricStyleTab = .general
     @State private var sampleID = LyricStylePreviewSamples.default.id
     @State private var showsFontPicker = false
+    @State private var showsSubtitleFontPicker = false
 
     private enum LyricStyleTab: String, CaseIterable {
         case general
@@ -484,6 +508,15 @@ struct LyricStyleSettingsView: View {
                     showsFontPicker = false
                 },
                 onCancel: { showsFontPicker = false }
+            )
+        }
+        .sheet(isPresented: $showsSubtitleFontPicker) {
+            LyricFontPicker(
+                onPick: { name in
+                    settings.subtitleCustomFont = name
+                    showsSubtitleFontPicker = false
+                },
+                onCancel: { showsSubtitleFontPicker = false }
             )
         }
         #endif
@@ -707,6 +740,11 @@ struct LyricStyleSettingsView: View {
                 }
                 Toggle("隐藏译文字幕", isOn: $settings.hideTranslationSubtitle)
                 Toggle("和声字幕", isOn: $settings.subtitleHarmonyEnabled)
+                Stepper("下句行数：\(settings.subtitleUpcomingLineCount)", value: $settings.subtitleUpcomingLineCount, in: SettingsManager.subtitleUpcomingLineCountRange)
+                Toggle("字幕背景", isOn: $settings.subtitleBackgroundEnabled)
+                if settings.subtitleHarmonyEnabled {
+                    Toggle("和声字幕背景", isOn: $settings.subtitleHarmonyBackgroundEnabled)
+                }
             } header: {
                 Text("内容")
             } footer: {
@@ -730,6 +768,46 @@ struct LyricStyleSettingsView: View {
                 }
                 Toggle("字幕字体跟随歌词", isOn: $settings.subtitleFontFollowsLyrics)
                 Toggle("下一句模糊", isOn: $settings.subtitleUpcomingLyricsBlur)
+                if !settings.subtitleFontFollowsLyrics {
+                    Picker("字幕字体", selection: $settings.subtitleFontStyle) {
+                        ForEach(LyricsFontStyle.allCases) { style in
+                            Text(style.displayName).tag(style)
+                        }
+                    }
+                    Toggle("字幕自动字重", isOn: Binding(
+                        get: { settings.subtitleFontWeight == nil },
+                        set: { auto in settings.subtitleFontWeight = auto ? nil : 400 }
+                    ))
+                    if settings.subtitleFontWeight != nil {
+                        Slider(value: Binding(
+                            get: { settings.subtitleFontWeight ?? 400 },
+                            set: { settings.subtitleFontWeight = $0 }
+                        ), in: SettingsManager.lyricsFontWeightRange, step: 50) {
+                            Text("字幕字重")
+                        } minimumValueLabel: {
+                            Text("100")
+                        } maximumValueLabel: {
+                            Text("900")
+                        }
+                    }
+                    #if os(iOS)
+                    Button {
+                        showsSubtitleFontPicker = true
+                    } label: {
+                        LabeledContent("字幕自定义字体", value: settings.subtitleCustomFont ?? "未选择")
+                    }
+                    if settings.subtitleCustomFont != nil {
+                        Button("清除字幕自定义字体", role: .destructive) {
+                            settings.subtitleCustomFont = nil
+                        }
+                    }
+                    #else
+                    TextField("字幕自定义字体（PostScript 名称）", text: Binding(
+                        get: { settings.subtitleCustomFont ?? "" },
+                        set: { settings.subtitleCustomFont = $0.isEmpty ? nil : $0 }
+                    ))
+                    #endif
+                }
             }
         }
     }
