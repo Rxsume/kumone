@@ -245,10 +245,11 @@ struct MarqueeText: View {
 
     var body: some View {
         MarqueeTextView.Representable(
-            text: text, fontSize: fontSize, weight: fontWeight, hugsText: hugsText,
+            text: text, fontSize: fontSize, weight: fontWeight,
             // C4/C5: static mode — or the micro-motion reduce-motion
             // override — holds the title still instead of scrolling it.
-            reduceMotion: settings.effectiveStaticMode || settings.effectiveReduceMotionMicroMotion
+            reduceMotion: settings.effectiveStaticMode || settings.effectiveReduceMotionMicroMotion,
+            hugsText: hugsText
         )
     }
 }
