@@ -327,15 +327,29 @@ struct NowPlayingView: View {
         lyricAnimationsEnabled ? animation : nil
     }
 
-    /// The page backdrop. In luminous mode (compact, iOS) the nomand
-    /// halftone cover replaces the artwork gradient — two ambient layers
-    /// stacked would wash the page out grey — or a plain dark colour when
-    /// the background mode is none. Every other mode keeps the gradient.
+    /// The page backdrop. In luminous mode (compact, iOS) the flowing
+    /// latent field (the default) or the nomand halftone cover replaces
+    /// the artwork gradient — two ambient layers stacked would wash the
+    /// page out grey — or a plain dark colour when the background mode
+    /// is none. Every other mode keeps the gradient.
     @ViewBuilder
     private func backdrop(isCompact: Bool) -> some View {
         #if os(iOS)
         if isCompact, settings.effectiveNowPlayingMode == .luminous {
-            if settings.effectiveVisualizerBackgroundMode == .nomand {
+            if settings.effectiveVisualizerBackgroundMode == .latent {
+                // Folia's default background: the flowing latent field.
+                // The palette is the cover-extracted tint pair plus the
+                // theme accent; the view blends the remaining mesh stops.
+                LatentBackgroundView(
+                    primary: colors.primary,
+                    secondary: colors.secondary,
+                    accent: theme.accent,
+                    background: colors.secondary,
+                    isPlaying: player.isPlaying,
+                    isStatic: settings.effectiveStaticMode || settings.effectiveReduceMotionMicroMotion
+                )
+                .ignoresSafeArea()
+            } else if settings.effectiveVisualizerBackgroundMode == .nomand {
                 NomandBackgroundView(
                     cover: artworkImage,
                     songID: player.currentTrack.map { String($0.id) },

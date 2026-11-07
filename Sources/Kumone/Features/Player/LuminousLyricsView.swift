@@ -40,10 +40,6 @@ enum LuminousLyrics {
     /// Line height in em (Folia `glowWordOverlap.ts`).
     static let lineHeight: CGFloat = 1.22
 
-    /// Waiting (unsung) words render dimmer, like `LyricMainText.alphas`
-    /// renders unsung text at 0.28.
-    static let waitingOpacity: Double = 0.35
-
     /// Passed words keep this much of their glow before fading out.
     static let passedOpacity: Double = 0.82
 
@@ -116,24 +112,31 @@ enum LuminousLyrics {
         let y = (random(seed: seed, index: index, offset: 1) - 0.5) * 40
         let rotate = rotationEnabled ? (random(seed: seed, index: index, offset: 2) - 0.5) * 10 : 0
         let scale = 1.1 + random(seed: seed, index: index, offset: 4) * 0.2
-        let passedRotate = (random(seed: seed, index: index, offset: 3) - 0.5) * 45
+        let passedRotate = (random(seed: seed, index: index, offset: 8) - 0.5) * 45
         return WordPlacement(x: x, y: y, rotate: rotate, scale: scale, passedRotate: passedRotate)
     }
 
-    /// Row alignment of a line: left / center / right, rotating by seed.
-    /// Calm lines are always centred.
-    enum RowAlignment: Equatable {
+    /// Row justification of a line: Folia's `justifyContent`, one of
+    /// five options rotating by seed — start / center / end / around /
+    /// between (`classic/Visualizer.tsx`, `justifyOptions`). Calm lines
+    /// are always centred. Note the seed here is the line's start time,
+    /// so `floor(seed % 5)` picks the option.
+    enum LineJustify: Equatable {
         case leading
         case center
         case trailing
+        case spaceAround
+        case spaceBetween
     }
 
-    static func lineAlignment(seed: TimeInterval, calm: Bool = false) -> RowAlignment {
+    static func lineJustify(seed: TimeInterval, calm: Bool = false) -> LineJustify {
         guard !calm else { return .center }
-        switch Int(floor((seed * 2).truncatingRemainder(dividingBy: 3))) {
+        switch Int(floor(seed.truncatingRemainder(dividingBy: 5))) {
         case 0: return .leading
+        case 1: return .center
         case 2: return .trailing
-        default: return .center
+        case 3: return .spaceAround
+        default: return .spaceBetween
         }
     }
 
@@ -519,7 +522,7 @@ struct LuminousWordFlowLayout: Layout {
     var wordSpacing: Double
     var avoidOverlap: Bool
     var placements: [LuminousLyrics.WordPlacement]
-    var rowAlignment: LuminousLyrics.RowAlignment
+    var justify: LuminousLyrics.LineJustify
 
     private struct Plan {
         var rows: [[Int]]
@@ -612,10 +615,28 @@ struct LuminousWordFlowLayout: Layout {
     }
 
     private func rowXOffset(rowWidth: CGFloat, maxWidth: CGFloat) -> CGFloat {
-        switch rowAlignment {
-        case .leading: return 0
+        switch justify {
+        case .leading, .spaceBetween: return 0
         case .center: return max(0, (maxWidth - rowWidth) / 2)
         case .trailing: return max(0, maxWidth - rowWidth)
+        case .spaceAround: return 0
+        }
+    }
+
+    /// Extra gap handed out between words when the line spreads across
+    /// the row (Folia's justify-between / justify-around). Returns the
+    /// per-gap extra and the leading inset for the row.
+    private func spread(rowWidth: CGFloat, maxWidth: CGFloat, wordCount: Int) -> (gap: CGFloat, leading: CGFloat) {
+        let extra = max(0, maxWidth - rowWidth)
+        switch justify {
+        case .spaceBetween where wordCount > 1:
+            return (extra / CGFloat(wordCount - 1), 0)
+        case .spaceAround where wordCount > 0:
+            // Half a gap at each edge, a full gap between words.
+            let gap = extra / CGFloat(wordCount)
+            return (gap, gap / 2)
+        default:
+            return (0, 0)
         }
     }
 
@@ -632,14 +653,24 @@ struct LuminousWordFlowLayout: Layout {
         let lineHeight = fontSize * LuminousLyrics.lineHeight
         var y = bounds.minY + plan.reachTop
         for (rowIndex, row) in plan.rows.enumerated() {
-            var x = bounds.minX + rowXOffset(rowWidth: plan.rowWidths[rowIndex], maxWidth: bounds.width)
-            for index in row {
+            let (gapExtra, leadingInset) = spread(
+                rowWidth: plan.rowWidths[rowIndex], maxWidth: bounds.width, wordCount: row.count
+            )
+            var x = bounds.minX + rowXOffset(rowWidth: plan.rowWidths[rowIndex], maxWidth: bounds.width) + leadingInset
+            for (position, index) in row.enumerated() {
                 subviews[index].place(
                     at: CGPoint(x: x, y: y),
                     anchor: .topLeading,
                     proposal: ProposedViewSize(sizes[index])
                 )
                 x += sizes[index].width + margin(after: index, sizes: sizes)
+                if position < row.count - 1 {
+                    x += gapExtra
+                } else if justify == .spaceAround {
+                    // The trailing half-gap belongs after the last word;
+                    // it is whitespace, so it needs no placement.
+                    x += gapExtra / 2
+                }
             }
             y += lineHeight + plan.rowGap
         }
@@ -680,7 +711,7 @@ struct LuminousLyricsView: View {
         var calm: Bool?
         var words: [LyricWord] = []
         var placements: [LuminousLyrics.WordPlacement] = []
-        var alignment: LuminousLyrics.RowAlignment = .center
+        var justify: LuminousLyrics.LineJustify = .center
     }
     @State private var lineCache = LineRenderCacheBox()
 
@@ -770,25 +801,25 @@ struct LuminousLyricsView: View {
         // the split runs an NLTokenizer over the line, and re-running it
         // on every 30fps tick was a large share of the frame cost.
         let box = lineCache
-        let (words, placements, alignment): ([LyricWord], [LuminousLyrics.WordPlacement], LuminousLyrics.RowAlignment) = {
+        let (words, placements, justify): ([LyricWord], [LuminousLyrics.WordPlacement], LuminousLyrics.LineJustify) = {
             if box.lineID == line.id, box.lineTime == line.time,
                box.rotationEnabled == rotationEnabled, box.calm == calm {
-                return (box.words, box.placements, box.alignment)
+                return (box.words, box.placements, box.justify)
             }
             let units = LuminousLyrics.layoutUnits(for: line)
             let freshWords = LuminousLyrics.displayWords(from: units)
             let freshPlacements = freshWords.indices.map {
                 LuminousLyrics.placement(seed: line.time, index: $0, rotationEnabled: rotationEnabled, calm: calm)
             }
-            let freshAlignment = LuminousLyrics.lineAlignment(seed: line.time, calm: calm)
+            let freshJustify = LuminousLyrics.lineJustify(seed: line.time, calm: calm)
             box.lineID = line.id
             box.lineTime = line.time
             box.rotationEnabled = rotationEnabled
             box.calm = calm
             box.words = freshWords
             box.placements = freshPlacements
-            box.alignment = freshAlignment
-            return (freshWords, freshPlacements, freshAlignment)
+            box.justify = freshJustify
+            return (freshWords, freshPlacements, freshJustify)
         }()
         let breathingOn = settings.effectiveClassicBreathingFloat > 0 && !isStatic
         let breathing = breathingOn
@@ -805,13 +836,14 @@ struct LuminousLyricsView: View {
                 wordSpacing: settings.effectiveClassicWordSpacing,
                 avoidOverlap: settings.effectiveClassicAvoidOverlap,
                 placements: placements,
-                rowAlignment: alignment
+                justify: justify
             ) {
                 ForEach(words.indices, id: \.self) { index in
-                    wordView(word: words[index], placement: placements[index], time: time, font: font)
+                    wordView(word: words[index], placement: placements[index], time: time, font: font, fontSize: fontSize, rotationEnabled: rotationEnabled)
                 }
             }
             .scaleEffect(breathingScale)
+            .scaleEffect(0.9 + 0.1 * entrance)
             .offset(y: breathing)
             .opacity(entrance)
             subtitleOverlay(line: line, time: time, size: size)
@@ -821,22 +853,40 @@ struct LuminousLyricsView: View {
         .padding(.horizontal, 24)
     }
 
-    private func wordView(word: LyricWord, placement: LuminousLyrics.WordPlacement, time: TimeInterval, font: Font) -> some View {
+    private func wordView(word: LyricWord, placement: LuminousLyrics.WordPlacement, time: TimeInterval, font: Font, fontSize: CGFloat, rotationEnabled: Bool) -> some View {
         let state = LuminousLyrics.state(of: word, at: time)
         // A shadow with radius 0 costs no offscreen blur pass, so only
         // the active word pays for the double glow: a line of ~10 words
         // used to cost ~20 large-radius shadow renders per frame.
         // Waiting words never glow; passed words keep one small shadow.
-        let (opacity, scale, rotate, glowRadius, glowOpacity, secondRadius): (Double, CGFloat, Double, CGFloat, Double, CGFloat) = {
+        //
+        // Waiting (Folia `buildGlowWordLayoutVariants` + `glowWordBodyVariants`):
+        // invisible, half size, flown in from (sin(y) * 100, cos(x) * 50)
+        // with 20° extra turn and a 10px blur, springing to its place
+        // over 0.4s when the lookahead hits. Passed words keep one small
+        // shadow that fades with the glow over 0.9s.
+        //
+        // Glow radii (Folia `wordGlow.ts`, normal reveal mode: inner
+        // 20px / outer 40px at a 72px font) scale with the font size, so
+        // the halo keeps its proportion on a phone's 36pt lyrics.
+        let (opacity, scale, rotate, offsetX, offsetY, blur, glowRadius, glowOpacity, secondRadius): (Double, CGFloat, Double, CGFloat, CGFloat, CGFloat, CGFloat, Double, CGFloat) = {
             switch state {
             case .waiting:
-                return (LuminousLyrics.waitingOpacity, 0.9, placement.rotate, 0, 0, 0)
+                return (
+                    0, 0.5,
+                    rotationEnabled ? placement.rotate + 20 : 0,
+                    placement.x + CGFloat(sin(Double(placement.y))) * 100,
+                    placement.y + CGFloat(cos(Double(placement.x))) * 50,
+                    10, 0, 0, 0
+                )
             case .active:
-                return (1, placement.scale * LuminousLyrics.activeScale, placement.rotate, 18, 0.8, 9)
+                return (1, placement.scale * LuminousLyrics.activeScale, placement.rotate, placement.x, placement.y, 0,
+                        fontSize * 0.28, 0.8, fontSize * 0.56)
             case .passed:
                 let turn = min(max((time - word.end) / 5, 0), 1)
                 let fade = max(0, 1 - (time - word.end) / 0.8)
-                return (LuminousLyrics.passedOpacity, placement.scale, placement.rotate + placement.passedRotate * turn, 6, 0.35 * fade, 0)
+                return (LuminousLyrics.passedOpacity, placement.scale, placement.rotate + placement.passedRotate * turn,
+                        placement.x, placement.y, 0, 6, 0.35 * fade, 0)
             }
         }()
         return Text(word.text)
@@ -846,7 +896,8 @@ struct LuminousLyricsView: View {
             .shadow(color: .white.opacity(glowOpacity * 0.6), radius: secondRadius, x: 0, y: 0)
             .rotationEffect(.degrees(rotate))
             .scaleEffect(scale)
-            .offset(x: placement.x, y: placement.y)
+            .offset(x: offsetX, y: offsetY)
+            .blur(radius: blur)
             .animation(.spring(response: 0.35, dampingFraction: 0.75), value: state)
     }
 
