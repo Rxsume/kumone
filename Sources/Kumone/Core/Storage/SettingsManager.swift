@@ -268,7 +268,7 @@ enum LyricsFontStyle: String, CaseIterable, Identifiable {
 
 /// Which background the luminous (流光) now-playing page uses.
 /// Folia's six modes (`BuiltinVisualizerBackgroundMode`), in Folia's
-/// registry order, plus the Rumxs-only `none` (plain dark page) kept
+/// registry order, plus the Golia-only `none` (plain dark page) kept
 /// for users who chose it before the other modes were ported.
 /// `latent` is Folia's default background mode (`DEFAULT_VISUALIZER_
 /// BACKGROUND_MODE = 'latent'`): the flowing smoke + warp-dither field
