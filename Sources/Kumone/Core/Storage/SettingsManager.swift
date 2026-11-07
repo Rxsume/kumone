@@ -360,6 +360,30 @@ enum LatentColorSource: String, CaseIterable, Identifiable {
     }
 }
 
+/// The latent tuning as one value (Folia's `latent_background_tuning`).
+/// Built by `SettingsManager.latentTuning` from the `effective*`
+/// properties; the renderer only ever sees this struct, never the store.
+///
+/// Lives here, not in LatentBackgroundView.swift: that file is
+/// `#if os(iOS)`, and the shared SettingsManager is compiled for macOS
+/// too — a type it uses must not be defined inside an iOS-only file
+/// (macOS build fails with "cannot find type in scope", PR #18 run #53).
+struct LatentTuning: Equatable {
+    var displayMode: LatentDisplayMode = .both
+    var colorSource: LatentColorSource = .coverTheme
+    var overlayEnabled: Bool = true
+    var overlayOpacity: Double = 0.35
+    var ditheringSpeed: Double = 0.1
+    var ditheringAudioSpeed: Double = 1.2
+    var ditheringSize: Double = 2.5
+    var ditheringOpacity: Double = 0.55
+    var meshSpeed: Double = 0.3
+    var meshAudioSpeed: Double = 2.0
+    var meshDistortion: Double = 0.8
+    var meshSwirl: Double = 0.1
+    var enhancedBeatResponse: Bool = true
+}
+
 /// Source image for the monet / nomand backgrounds: the current song's
 /// cover, or the single user-uploaded global image (shared by both
 /// modes, like Folia's `monet_background_image`).
