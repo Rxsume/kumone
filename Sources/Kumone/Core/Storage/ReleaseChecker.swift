@@ -6,14 +6,17 @@ import Foundation
 /// Source of truth is the **fork** (Rxsume/kumone), never upstream
 /// (missuo/kumone): the fork's builds are published as GitHub Releases by
 /// the unsigned-iOS workflow (see .github/workflows/build-ios-unsigned.yml),
-/// tagged `Rumxs-<version>-build-<build>` — e.g. `Rumxs-0.3.28-build-565`.
+/// tagged `Golia-<version>-build-<build>` — e.g. `Golia-0.3.28-build-565`.
+/// Tags with the legacy `Rumxs-` prefix (published before the rename)
+/// are still accepted by `parseTag`.
 /// Every fork build shares one dotted version and differs only in its
 /// CFBundleVersion build number, so "is there an update" must compare
 /// builds too, not just versions.
 enum ReleaseChecker {
     struct Release {
         let version: String
-        /// Build number parsed from the release tag (`Rumxs-…-build-<n>`),
+        /// Build number parsed from the release tag (`Golia-…-build-<n>`,
+        /// or the legacy `Rumxs-…-build-<n>`),
         /// nil for tags that carry no build (e.g. plain `v0.3.28`).
         let build: Int?
         /// The release page (fallback download link).
@@ -77,18 +80,27 @@ enum ReleaseChecker {
     }
 
     /// Parse a release tag into (version, build). Fork tags look like
-    /// `Rumxs-0.3.28-build-565`; plain `v0.3.28` / `0.3.28` tags (and any
-    /// other shape) yield a version with no build.
+    /// `Golia-0.3.28-build-565` (legacy `Rumxs-0.3.28-build-565` tags from
+    /// before the rename are accepted too); plain `v0.3.28` / `0.3.28`
+    /// tags (and any other shape) yield a version with no build.
     static func parseTag(_ tag: String) -> (version: String, build: Int?) {
         let stripped = tag.hasPrefix("v") ? String(tag.dropFirst()) : tag
         if let range = stripped.range(of: "-build-") {
             var version = String(stripped[..<range.lowerBound])
-            if version.hasPrefix("Rumxs-") { version.removeFirst("Rumxs-".count) }
+            version = stripReleaseNamePrefix(version)
             return (version, Int(String(stripped[range.upperBound...])))
         }
         var version = stripped
-        if version.hasPrefix("Rumxs-") { version.removeFirst("Rumxs-".count) }
+        version = stripReleaseNamePrefix(version)
         return (version, nil)
+    }
+
+    /// Strip the release-name prefix: new `Golia-` tags, or legacy
+    /// `Rumxs-` tags published before the rename — both stay valid.
+    private static func stripReleaseNamePrefix(_ version: String) -> String {
+        if version.hasPrefix("Golia-") { return String(version.dropFirst("Golia-".count)) }
+        if version.hasPrefix("Rumxs-") { return String(version.dropFirst("Rumxs-".count)) }
+        return version
     }
 
     /// True when `remote` is newer than `local` (numeric dotted compare).

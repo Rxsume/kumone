@@ -11,6 +11,10 @@ cd "$ROOT"
 
 CONF="${1:-debug}"
 APP_NAME="Kumone"
+# Display name shown in Finder / Dock. Decoupled from APP_NAME: the binary
+# and bundle path stay "Kumone" (see APP_BUNDLE below); only the user-visible
+# CFBundleDisplayName is Golia (renamed from Rumxs, display layer only).
+APP_DISPLAY_NAME="Golia"
 BUNDLE_ID="sb.moe.kumone"
 # Version resolution: environment > version.env > defaults.
 ENV_MARKETING_VERSION="${MARKETING_VERSION:-}"
@@ -21,7 +25,7 @@ BUILD_NUMBER="1"
 [ -n "$ENV_MARKETING_VERSION" ] && MARKETING_VERSION="$ENV_MARKETING_VERSION"
 [ -n "$ENV_BUILD_NUMBER" ] && BUILD_NUMBER="$ENV_BUILD_NUMBER"
 
-# DO NOT repoint the Sparkle feed/key below at the Rumxs fork: the fork
+# DO NOT repoint the Sparkle feed/key below at the Golia fork: the fork
 # publishes no signed appcast.xml, the fork owner does not hold the
 # private key matching the public key below, and already-installed macOS
 # apps keep the old feed URL baked into their Info.plist — repointing
@@ -257,7 +261,7 @@ cat > "$APP_BUNDLE/Contents/Info.plist" <<PLIST
     <key>CFBundleIdentifier</key><string>$BUNDLE_ID</string>
     <key>CFBundleInfoDictionaryVersion</key><string>6.0</string>
     <key>CFBundleName</key><string>$APP_NAME</string>
-    <key>CFBundleDisplayName</key><string>$APP_NAME</string>
+    <key>CFBundleDisplayName</key><string>$APP_DISPLAY_NAME</string>
     <key>CFBundlePackageType</key><string>APPL</string>
     <key>CFBundleShortVersionString</key><string>$MARKETING_VERSION</string>
     <key>CFBundleVersion</key><string>$BUILD_NUMBER</string>

@@ -12,12 +12,17 @@ enum AudioSourceID: String, CaseIterable, Hashable {
 
     var displayName: String {
         switch self {
-        case .pyncmd: return "pyncmd"
-        case .ikun: return "ikun"
-        case .haitangw: return String(localized: "长青/海堂")
-        case .xinghai: return String(localized: "星海")
+        case .pyncmd: return String(localized: "Golia1")
+        case .ikun: return String(localized: "酸甜贤")
+        case .haitangw: return String(localized: "Golia2")
+        case .xinghai: return String(localized: "Golia3")
         }
     }
+
+    /// Presentation order in Settings (ikun first): display order only.
+    /// Enum case order, storage keys and the UnblockService resolve order
+    /// are all unchanged.
+    static var displayOrder: [AudioSourceID] = [.ikun, .pyncmd, .haitangw, .xinghai]
 
     /// Script-backend sources are off by default (see SettingsManager):
     /// they call third-party endpoints that have not been verified on

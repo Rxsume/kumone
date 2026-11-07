@@ -2,7 +2,7 @@
 # macOS signing secrets and only runs on tag pushes, so this workflow
 # builds just the unsigned IPA on demand.
 #
-# Base: main HEAD at upstream 0.3.29 plus the Rumxs rename/icon. MARKETING_VERSION stays
+# Base: main HEAD at upstream 0.3.29 plus the Golia rename/icon. MARKETING_VERSION stays
 # 0.3.29 and CURRENT_PROJECT_VERSION is the commit count, exactly as
 # the release workflow derives them, so this build is identifiable as
 # a custom build on top of 0.3.29 rather than a new upstream release.
@@ -44,21 +44,21 @@ jobs:
           APP="$RUNNER_TEMP/ios-dd/Build/Products/Release-iphoneos/KumoneIOS.app"
           mkdir -p "$RUNNER_TEMP/payload/Payload"
           cp -R "$APP" "$RUNNER_TEMP/payload/Payload/"
-          (cd "$RUNNER_TEMP/payload" && zip -qry "$GITHUB_WORKSPACE/Rumxs-iOS-$VERSION-custom.ipa" Payload)
+          (cd "$RUNNER_TEMP/payload" && zip -qry "$GITHUB_WORKSPACE/Golia-iOS-$VERSION-custom.ipa" Payload)
           ls -la "$GITHUB_WORKSPACE"/*.ipa
 
       - name: Upload unsigned IPA
         uses: actions/upload-artifact@v4
         with:
-          name: Rumxs-iOS-unsigned-ipa
+          name: Golia-iOS-unsigned-ipa
           # NOTE: `with:` is not a shell, so this must use the ${{ env.* }}
           # expression — a bare $VERSION would be taken literally.
-          path: Rumxs-iOS-${{ env.VERSION }}-custom.ipa
+          path: Golia-iOS-${{ env.VERSION }}-custom.ipa
           if-no-files-found: error
 
   # Publish the same IPA as a GitHub Release so the in-app updater
   # (ReleaseChecker, fork repo Rxsume/kumone) has something to find.
-  # The tag carries version AND build — `Rumxs-0.3.29-build-565` — because
+  # The tag carries version AND build — `Golia-0.3.29-build-565` — because
   # every fork build shares one dotted version and differs only in build
   # number. Created with the repo's own GITHUB_TOKEN (no new secrets);
   # a re-run of the same commit re-uploads to the existing release instead
@@ -75,7 +75,7 @@ jobs:
       - name: Download unsigned IPA
         uses: actions/download-artifact@v4
         with:
-          name: Rumxs-iOS-unsigned-ipa
+          name: Golia-iOS-unsigned-ipa
           path: dist
 
       - name: Publish GitHub Release
@@ -84,14 +84,14 @@ jobs:
           VERSION: ${{ needs.build-ipa.outputs.version }}
           BUILD_NUMBER: ${{ needs.build-ipa.outputs.build_number }}
         run: |
-          TAG="Rumxs-$VERSION-build-$BUILD_NUMBER"
-          IPA="dist/Rumxs-iOS-$VERSION-custom.ipa"
+          TAG="Golia-$VERSION-build-$BUILD_NUMBER"
+          IPA="dist/Golia-iOS-$VERSION-custom.ipa"
           ls -la "$IPA"
           if gh release view "$TAG" >/dev/null 2>&1; then
             gh release upload "$TAG" "$IPA" --clobber
           else
             gh release create "$TAG" \
-              --title "Rumxs $VERSION (build $BUILD_NUMBER)" \
+              --title "Golia $VERSION (build $BUILD_NUMBER)" \
               --notes "Unsigned iOS IPA built from main ($GITHUB_SHA). Sideload with your own certificate (LCSign / ESign / AltStore); TrollStore users can install it from the in-app updater." \
               "$IPA"
           fi
