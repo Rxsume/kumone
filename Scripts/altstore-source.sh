@@ -49,7 +49,7 @@ MIN_OS="$(setting IPHONEOS_DEPLOYMENT_TARGET)"
 [ -n "$BUNDLE_ID" ] || { echo "ERROR: no PRODUCT_BUNDLE_IDENTIFIER in $XCCONFIG" >&2; exit 1; }
 [ -n "$MIN_OS" ] || { echo "ERROR: no IPHONEOS_DEPLOYMENT_TARGET in $XCCONFIG" >&2; exit 1; }
 
-REPO="${GITHUB_REPOSITORY:-missuo/kumone}"
+REPO="${GITHUB_REPOSITORY:-Rxsume/kumone}"
 RELEASE_BASE="https://github.com/$REPO/releases/download/v$VERSION"
 ICON_URL="https://raw.githubusercontent.com/$REPO/main/docs/icon.png"
 TINT="#EC4949" # Theme.accent — Sources/Kumone/DesignSystem/Theme.swift
@@ -93,7 +93,7 @@ cat <<JSON
     {
       "name": "Rumxs",
       "bundleIdentifier": "$BUNDLE_ID",
-      "developerName": "missuo",
+      "developerName": "Rxsume",
       "subtitle": "原生音乐播放器 · A native music player",
       "localizedDescription": "原生音乐播放器：扫码登录、每日推荐、个人 FM、歌单管理、逐行歌词、播客与灰色歌曲解锁，界面中英双语。\n\nA native music player — QR login, daily recommendations, Personal FM, playlist management, line-synced lyrics, podcasts and gray-track unblocking, localized in English and Simplified Chinese.\n\n这里发布的 IPA 未经签名，安装时由你的 Apple ID 重新签名（AltStore、SideStore、Sideloadly 或 Xcode）。装有 TrollStore 的设备可在 设置 → 关于 → 检查更新 里一键自更新。",
       "iconURL": "$ICON_URL",

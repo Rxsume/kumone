@@ -21,6 +21,25 @@ BUILD_NUMBER="1"
 [ -n "$ENV_MARKETING_VERSION" ] && MARKETING_VERSION="$ENV_MARKETING_VERSION"
 [ -n "$ENV_BUILD_NUMBER" ] && BUILD_NUMBER="$ENV_BUILD_NUMBER"
 
+# DO NOT repoint the Sparkle feed/key below at the Rumxs fork: the fork
+# publishes no signed appcast.xml, the fork owner does not hold the
+# private key matching the public key below, and already-installed macOS
+# apps keep the old feed URL baked into their Info.plist — repointing
+# would silently break updates for them (and a feed signed with the
+# wrong key is rejected by Sparkle). Safe migration, in order:
+#   1. Generate a fresh Sparkle EdDSA keypair for the fork.
+#   2. Add the private key as fork secret SPARKLE_PRIVATE_KEY, plus the
+#      macOS signing/notarization secrets and a Developer ID identity to
+#      replace the hardcoded "Developer ID Application: MOE AI LLC"
+#      identity in .github/workflows/release.yml.
+#   3. Replace SPARKLE_FEED_URL and SPARKLE_PUBLIC_ED_KEY together —
+#      never one without the other.
+#   4. Ship a fork macOS build carrying the new key as the migration
+#      bridge (installed apps only learn the new feed from a build that
+#      already trusts the new key).
+#   5. Publish a v*-tagged release so release.yml generates a signed
+#      appcast.xml on the fork.
+#   6. Verify the fork feed end-to-end before telling users to update.
 SPARKLE_FEED_URL="https://github.com/missuo/kumone/releases/latest/download/appcast.xml"
 SPARKLE_PUBLIC_ED_KEY="RHEhllstUuuVrVDCPGrbhg/8LivSzpuZB9X3u3xdV5o="
 
