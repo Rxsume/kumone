@@ -18,11 +18,14 @@
 // an extra subtitle row, only while the harmony is active and the
 // harmony switch is on.
 
+import CoreGraphics
 import PhotosUI
 import SwiftUI
 
 #if os(iOS)
 import UIKit
+#elseif os(macOS)
+import AppKit
 #endif
 
 // MARK: - Preview samples (Folia `PreviewPlaceholder.ts`, copied verbatim)
@@ -261,6 +264,68 @@ struct LyricStylePreviewCard: View {
 
     @State private var anchor = Date()
     @State private var frozenTime: TimeInterval?
+    /// The user-uploaded background image, loaded once per stored file
+    /// name like the player page does — the monet/nomand previews show it
+    /// when their source selects it (D10c).
+    @State private var uploadedPreviewImage: PlatformImage?
+
+    /// Procedural stand-in cover for the preview, which has no song
+    /// artwork: a dark field with accent/white discs and a light band, so
+    /// the cover-driven backgrounds (nomand effects, the monet bake, the
+    /// common blurred cover) have tonal and colour variation to render.
+    /// Generated once; 400×400 is plenty for a 300pt-tall preview card.
+    private static let sampleCover: PlatformImage? = makeSampleCover()
+
+    private static func makeSampleCover() -> PlatformImage? {
+        let size = 400
+        guard let space = CGColorSpace(name: CGColorSpace.sRGB),
+              let context = CGContext(
+                data: nil, width: size, height: size,
+                bitsPerComponent: 8, bytesPerRow: 0,
+                space: space, bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue
+              )
+        else { return nil }
+        let rect = CGRect(x: 0, y: 0, width: size, height: size)
+        context.setFillColor(CGColor(srgbRed: 0.10, green: 0.12, blue: 0.20, alpha: 1))
+        context.fill(rect)
+        // Light diagonal band for tonal range.
+        context.saveGState()
+        context.translateBy(x: CGFloat(size) / 2, y: CGFloat(size) / 2)
+        context.rotate(by: .pi / 4)
+        context.setFillColor(CGColor(gray: 0.85, alpha: 0.9))
+        context.fill(CGRect(x: -CGFloat(size), y: -30, width: CGFloat(size) * 2, height: 60))
+        context.restoreGState()
+        // Accent + white discs for colour and luminance contrast.
+        context.setFillColor(PlatformColor(Theme.accent).cgColor)
+        context.fillEllipse(in: CGRect(x: 60, y: 60, width: 200, height: 200))
+        context.setFillColor(CGColor(gray: 0.95, alpha: 1))
+        context.fillEllipse(in: CGRect(x: 230, y: 220, width: 120, height: 120))
+        context.setFillColor(CGColor(gray: 0.35, alpha: 1))
+        context.fillEllipse(in: CGRect(x: 40, y: 270, width: 90, height: 90))
+        guard let cgImage = context.makeImage() else { return nil }
+        #if os(iOS)
+        return PlatformImage(cgImage: cgImage)
+        #else
+        return PlatformImage(cgImage: cgImage, size: NSSize(width: size, height: size))
+        #endif
+    }
+
+    /// The cover for a cover-driven preview background: the uploaded image
+    /// when the mode's source selects it and one is stored, else the
+    /// procedural sample cover (the preview has no song artwork).
+    private func previewCover(for source: BackgroundImageSource) -> PlatformImage? {
+        if source == .uploadedGlobal, let uploadedPreviewImage {
+            return uploadedPreviewImage
+        }
+        return Self.sampleCover
+    }
+
+    /// Whether preview backgrounds are still: static mode, the background
+    /// reduce-motion override (the same flag as the player page's
+    /// `backgroundIsStatic`, D4), or the preview's own pause button.
+    private var previewBackgroundIsStatic: Bool {
+        settings.effectiveStaticMode || settings.effectiveReduceMotionBackground || frozenTime != nil
+    }
 
     private var sample: LyricStylePreviewSample {
         // `first(where:)` — `first` is a property, not a method, so a
@@ -296,6 +361,16 @@ struct LyricStylePreviewCard: View {
                 }
                 .frame(height: 300)
                 .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
+                .task(id: settings.effectiveUploadedBackgroundImageName) {
+                    // Load once per stored file name, off the main actor:
+                    // the file read + image decode must not hitch the
+                    // preview. A missing file loads as nil and the
+                    // previews fall back to the sample cover.
+                    let name = settings.effectiveUploadedBackgroundImageName
+                    uploadedPreviewImage = await Task.detached(priority: .userInitiated) {
+                        VisualizerBackgroundImageStore.loadImage(named: name)
+                    }.value
+                }
 
                 HStack {
                     Picker("预览文本", selection: $sampleID) {
@@ -341,11 +416,11 @@ struct LyricStylePreviewCard: View {
     }
 
     /// The selected background behind the preview lyrics, drawn with the
-    /// theme colours. The preview has no cover — Folia's preview shows
-    /// the live background, so the mode's character should read here too,
-    /// even though nomand (which needs a cover) falls back to the plain
-    /// colour. Latent honours `dynamicOnlyInPlayer`: the preview is not
-    /// the player page, so it stays frozen while that is on.
+    /// theme colours. Folia's preview shows the live background, so the
+    /// mode's character should read here too: cover-driven modes render
+    /// over a procedural sample cover (the uploaded image when their
+    /// source selects it), and the drift/motion follows the same static
+    /// flag as the player page (D10).
     @ViewBuilder
     private var previewBackground: some View {
         switch settings.effectiveVisualizerBackgroundMode {
@@ -357,36 +432,71 @@ struct LyricStylePreviewCard: View {
                 accent: Theme.accent,
                 background: ArtworkColors.fallback.secondary,
                 isPlaying: false,
-                isStatic: settings.effectiveLatentDynamicOnlyInPlayer,
+                isStatic: previewBackgroundIsStatic,
                 tuning: settings.latentTuning
             )
             #else
             ArtworkColors.fallback.secondary
             #endif
         case .nomand:
-            ArtworkColors.fallback.secondary
+            // D10b: the selected nomand effect, rendered by the real
+            // view over the sample cover (or the upload) — not a plain
+            // colour. Same tuning as the player page's backdrop.
+            NomandBackgroundView(
+                cover: previewCover(for: settings.effectiveNomandImageSource),
+                songID: "preview",
+                tuning: NomandDitherer.Tuning(
+                    size: settings.effectiveNomandHalftoneSize,
+                    radius: settings.effectiveNomandHalftoneRadius,
+                    contrast: settings.effectiveNomandHalftoneContrast,
+                    originalColors: settings.effectiveNomandOriginalColors,
+                    accent: PlatformColor(Theme.accent),
+                    background: PlatformColor(ArtworkColors.fallback.secondary),
+                    effect: settings.effectiveNomandEffect,
+                    highlight: PlatformColor(Theme.accent),
+                    secondary: PlatformColor(Theme.accent),
+                    ditheringType: settings.effectiveNomandDitheringType,
+                    ditheringSize: settings.effectiveNomandDitheringSize,
+                    ditheringColorSteps: settings.effectiveNomandDitheringColorSteps,
+                    ditheringOriginalColors: settings.effectiveNomandDitheringOriginalColors,
+                    ditheringInverted: settings.effectiveNomandDitheringInverted,
+                    flutedGlassSize: settings.effectiveNomandFlutedGlassSize,
+                    flutedGlassDistortion: settings.effectiveNomandFlutedGlassDistortion,
+                    flutedGlassBlur: settings.effectiveNomandFlutedGlassBlur,
+                    paperTextureContrast: settings.effectiveNomandPaperTextureContrast,
+                    paperTextureRoughness: settings.effectiveNomandPaperTextureRoughness,
+                    paperTextureFiber: settings.effectiveNomandPaperTextureFiber,
+                    halftoneDotsInverted: settings.effectiveNomandHalftoneDotsInverted,
+                    lensDistortionSpread: settings.effectiveNomandLensDistortionSpread,
+                    lensDistortionBulge: settings.effectiveNomandLensDistortionBulge,
+                    lensDistortionDispersion: settings.effectiveNomandLensDistortionDispersion
+                ),
+                overlayOpacity: settings.effectiveNomandOverlayEnabled
+                    ? settings.effectiveNomandOverlayOpacity : 0,
+                background: ArtworkColors.fallback.secondary
+            )
         case .common:
             CommonBackgroundView(
-                cover: nil,
+                cover: Self.sampleCover,
                 background: ArtworkColors.fallback.secondary,
                 primary: Theme.accent,
                 secondary: ArtworkColors.fallback.secondary,
                 accent: Theme.accent,
                 opacity: settings.effectiveCommonOpacity,
-                useCoverColorBg: false,
+                useCoverColorBg: settings.effectiveCommonUseCoverColorBg,
                 disableVignette: settings.effectiveCommonDisableVignette,
                 disableGeometric: settings.effectiveCommonDisableGeometric,
-                isStatic: true
+                isStatic: previewBackgroundIsStatic
             )
         case .monet:
             MonetBackgroundView(
-                cover: nil,
+                cover: previewCover(for: settings.effectiveMonetBackgroundSource),
                 background: ArtworkColors.fallback.secondary,
                 primary: Theme.accent,
                 accent: Theme.accent,
                 secondary: ArtworkColors.fallback.secondary,
                 tuning: settings.monetTuning,
-                isStatic: true
+                isStatic: previewBackgroundIsStatic
             )
         case .url:
             if let url = settings.selectedUrlBackground.flatMap({ URL(string: $0.url) }) {
@@ -404,7 +514,7 @@ struct LyricStylePreviewCard: View {
                 primary: Theme.accent,
                 accent: Theme.accent,
                 background: ArtworkColors.fallback.secondary,
-                isStatic: true,
+                isStatic: previewBackgroundIsStatic,
                 blank: settings.effectiveSoraBlank
             )
             #else
@@ -537,6 +647,20 @@ struct LyricStyleSettingsView: View {
         }
     }
 
+    /// Tabs with live settings on this platform. On macOS the luminous
+    /// player page — the only consumer of the background / lyric-style /
+    /// subtitle settings — does not exist, so only the 通用 tab (preview
+    /// text + reset) is offered (D6). The other tabs' section code stays
+    /// in the `switch` below so it still compiles on both platforms, and
+    /// the preview card above keeps rendering.
+    private var visibleTabs: [LyricStyleTab] {
+        #if os(iOS)
+        LyricStyleTab.allCases
+        #else
+        [.general]
+        #endif
+    }
+
     var body: some View {
         VStack(spacing: 0) {
             LyricStylePreviewCard(sampleID: $sampleID)
@@ -544,7 +668,7 @@ struct LyricStyleSettingsView: View {
                 .padding(.top, 12)
 
             Picker("歌词样式", selection: $tab) {
-                ForEach(LyricStyleTab.allCases, id: \.self) { tab in
+                ForEach(visibleTabs, id: \.self) { tab in
                     Text(tab.title).tag(tab)
                 }
             }
@@ -619,6 +743,13 @@ struct LyricStyleSettingsView: View {
                 Text("预览文本")
             }
 
+            #if os(macOS)
+            Section {
+                Text("歌词字体、字号与透明度只在 iOS 流光播放页生效，macOS 播放页不读取这些设置。")
+                    .foregroundColor(.secondary)
+            }
+            #endif
+            #if os(iOS)
             Section {
                 Picker("字体", selection: $settings.lyricsFontStyle) {
                     ForEach(LyricsFontStyle.allCases) { style in
@@ -698,6 +829,7 @@ struct LyricStyleSettingsView: View {
                     Text("100%")
                 }
             }
+            #endif
 
             Section {
                 Button("恢复默认") {
@@ -786,7 +918,6 @@ struct LyricStyleSettingsView: View {
                         Text(source.displayName).tag(source)
                     }
                 }
-                Toggle("仅在播放页启用动态效果", isOn: $settings.latentDynamicOnlyInPlayer)
                 Toggle("增强节拍响应", isOn: $settings.latentEnhancedBeatResponse)
                 Toggle("可读性叠色", isOn: $settings.latentOverlayEnabled)
                 if settings.latentOverlayEnabled {
@@ -801,7 +932,7 @@ struct LyricStyleSettingsView: View {
             } header: {
                 Text("隐现背景")
             } footer: {
-                Text("叠加封面取色的像素与流体着色器，并使用大范围音频速度响应。仅在播放页启用动态效果时，在其他页面保持隐现背景静止，以降低 GPU 资源占用。")
+                Text("叠加封面取色的像素与流体着色器，并使用大范围音频速度响应。")
             }
 
             Section {
@@ -1345,16 +1476,28 @@ struct LyricStyleSettingsView: View {
                     }
                 }
                 Toggle("隐藏译文字幕", isOn: $settings.hideTranslationSubtitle)
+                // D2/D3: the harmony rows are preview-only — the real
+                // subtitle overlay has no harmony row and the parser
+                // produces no harmony data for real songs — so both
+                // toggles are disabled (keys kept) instead of looking live.
                 Toggle("和声字幕", isOn: $settings.subtitleHarmonyEnabled)
+                    .disabled(true)
+                Text("仅样式预览有效")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
                 Stepper("下句行数：\(settings.subtitleUpcomingLineCount)", value: $settings.subtitleUpcomingLineCount, in: SettingsManager.subtitleUpcomingLineCountRange)
                 Toggle("字幕背景", isOn: $settings.subtitleBackgroundEnabled)
                 if settings.subtitleHarmonyEnabled {
                     Toggle("和声字幕背景", isOn: $settings.subtitleHarmonyBackgroundEnabled)
+                        .disabled(true)
+                    Text("仅样式预览有效")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
                 }
             } header: {
                 Text("内容")
             } footer: {
-                Text("内容模式与歌词页的“显示译文 / 罗马音”开关是同一组设置，改一边另一边跟着变。和声字幕只在样式预览里有效——真实歌词没有和声数据。")
+                Text("内容模式与歌词页的“显示译文 / 罗马音”开关是同一组设置，改一边另一边跟着变。和声字幕只在样式预览里有效——真实歌词没有和声数据。字幕叠加只在流光播放页显示，格子模式不显示字幕叠加。")
             }
 
             Section("字幕样式") {

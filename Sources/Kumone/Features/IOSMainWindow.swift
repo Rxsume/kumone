@@ -483,11 +483,37 @@ struct IOSMiniPlayerBar: View {
     }
 
     @EnvironmentObject private var player: PlayerService
+    @ObservedObject private var clock = PlayerService.shared.clock
     let presentation: Presentation
 
     var body: some View {
         playerBarSurface
+            // Folia collapsed-capsule progress strip: a slim accent line
+            // along the bottom edge of the pill (tap-to-open is unchanged).
+            .overlay(alignment: .bottom) { progressStrip }
             .simultaneousGesture(expandGesture)
+    }
+
+    /// Slim progress line for the collapsed capsule: current progress in
+    /// accent over a faint track. Hit-testing stays off so it never
+    /// steals the tap-to-open or the transport buttons.
+    private var progressStrip: some View {
+        GeometryReader { geo in
+            let fraction = player.duration > 0
+                ? min(max(clock.progress / player.duration, 0), 1) : 0
+            ZStack(alignment: .leading) {
+                Capsule()
+                    .fill(.primary.opacity(0.15))
+                    .frame(height: 3)
+                Capsule()
+                    .fill(Theme.accent)
+                    .frame(width: max(3, geo.size.width * fraction), height: 3)
+            }
+        }
+        .frame(height: 3)
+        .padding(.horizontal, 18)
+        .padding(.bottom, 5)
+        .allowsHitTesting(false)
     }
 
     @ViewBuilder

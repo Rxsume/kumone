@@ -1,5 +1,49 @@
 import SwiftUI
 
+/// Auto-hide state for the now-playing page chrome (Folia
+/// `usePlayerChromeAutoHide`: idle timeout exactly 3000 ms). One model
+/// owns the timer so every layout and transport control resets the
+/// same clock; the page injects it as an environment object so the
+/// transport subviews can reset it too. Only the chrome fades — lyrics,
+/// artwork and backgrounds never do.
+@MainActor
+final class ChromeAutoHideModel: ObservableObject {
+    /// Idle time before the chrome fades out (Folia: exactly 3000 ms).
+    static let idleTimeoutNanoseconds: UInt64 = 3_000_000_000
+
+    @Published var controlsVisible = true
+    /// Whether auto-hide is in effect (setting on + Folia master on).
+    var autoHideEnabled = false
+
+    private var hideTask: Task<Void, Never>?
+
+    /// Restart the idle timer and show the chrome. While auto-hide is
+    /// off this just leaves the chrome visible.
+    func resetTimer() {
+        hideTask?.cancel()
+        hideTask = nil
+        controlsVisible = true
+        guard autoHideEnabled else { return }
+        hideTask = Task {
+            try? await Task.sleep(nanoseconds: Self.idleTimeoutNanoseconds)
+            guard !Task.isCancelled else { return }
+            controlsVisible = false
+        }
+    }
+
+    /// Show the chrome and restart the idle timer (tap-to-reveal).
+    func showAndResetTimer() {
+        resetTimer()
+    }
+
+    /// Stop the timer and leave the chrome visible (page dismissed).
+    func stop() {
+        hideTask?.cancel()
+        hideTask = nil
+        controlsVisible = true
+    }
+}
+
 /// Immersive full-window now-playing page: artwork-tinted gradient backdrop,
 /// large artwork on the left, big synced lyrics on the right.
 struct NowPlayingView: View {
@@ -28,6 +72,8 @@ struct NowPlayingView: View {
     @State private var isUserScrolling = false
     @State private var showLyricsOnMobile = false
     @State private var showQueueOnMobile = false
+    /// Auto-hide model for the page chrome (Folia 3s idle fade).
+    @StateObject private var chromeAutoHide = ChromeAutoHideModel()
     #if os(iOS)
     /// Folia lyric-style window (VisPlayground) sheet, opened from the
     /// luminous layout's panel button.
@@ -54,6 +100,20 @@ struct NowPlayingView: View {
                     regularLayout(size: geo.size)
                     #endif
                 }
+
+                // Tap-to-reveal: while the chrome is hidden this layer
+                // sits above the layouts (below the chrome overlays) and
+                // its tap only shows the controls — no seek, pause or
+                // navigation. It is removed the moment the chrome shows,
+                // so the second tap reaches the intended control. While
+                // hidden, scrolling is blocked by this layer (one tap
+                // reveals, then scrolling works again).
+                if !chromeAutoHide.controlsVisible {
+                    Color.clear
+                        .contentShape(Rectangle())
+                        .onTapGesture { chromeAutoHide.showAndResetTimer() }
+                        .accessibilityLabel("显示播放控件")
+                }
             }
             // Pin to the screen width so an intrinsically-wide child can never
             // stretch the ZStack and push the corner overlays off-screen.
@@ -66,6 +126,9 @@ struct NowPlayingView: View {
                 // the leading corner, where the sidebar toggle sits on the
                 // page below.
                 collapseButton(diameter: 36, glyphSize: 14)
+                    .opacity(chromeAutoHide.controlsVisible ? 1 : 0)
+                    .allowsHitTesting(chromeAutoHide.controlsVisible)
+                    .animation(AppAnimation.standard, value: chromeAutoHide.controlsVisible)
                     .padding(.top, 8)
                     .padding(.trailing, 24)
             }
@@ -75,6 +138,9 @@ struct NowPlayingView: View {
                 // compact layouts would otherwise hide it.
                 if settings.effectiveAlwaysShowPlayerBackButton || showsClassicChrome(isCompact: isCompact) {
                     collapseButton(diameter: 36, glyphSize: 14)
+                        .opacity(chromeAutoHide.controlsVisible ? 1 : 0)
+                        .allowsHitTesting(chromeAutoHide.controlsVisible)
+                        .animation(AppAnimation.standard, value: chromeAutoHide.controlsVisible)
                         .padding(.top, 20)
                         .padding(.leading, 20)
                 }
@@ -83,6 +149,7 @@ struct NowPlayingView: View {
             .overlay(alignment: .topTrailing) {
                 if isCompact, showsClassicChrome(isCompact: isCompact) {
                     Button {
+                        chromeAutoHide.resetTimer()
                         withAnimation(AppAnimation.standard) {
                             showLyricsOnMobile.toggle()
                         }
@@ -94,6 +161,9 @@ struct NowPlayingView: View {
                             .background(.white.opacity(0.12), in: Circle())
                     }
                     .buttonStyle(.pressable)
+                    .opacity(chromeAutoHide.controlsVisible ? 1 : 0)
+                    .allowsHitTesting(chromeAutoHide.controlsVisible)
+                    .animation(AppAnimation.standard, value: chromeAutoHide.controlsVisible)
                     .padding(.top, 20)
                     .padding(.trailing, 20)
                 }
@@ -106,11 +176,15 @@ struct NowPlayingView: View {
                         // C11: the card outline while a handover plays.
                         transitionHighlighted: settings.effectiveTransitionAnimationCard && transitionInProgress
                     ) {
+                        chromeAutoHide.resetTimer()
                         withAnimation(AppAnimation.standard) {
                             showLyricsOnMobile = false
                             showQueueOnMobile = false
                         }
                     }
+                    .opacity(chromeAutoHide.controlsVisible ? 1 : 0)
+                    .allowsHitTesting(chromeAutoHide.controlsVisible)
+                    .animation(AppAnimation.standard, value: chromeAutoHide.controlsVisible)
                     .padding(.trailing, 20)
                     .padding(.bottom, 108)
                 }
@@ -131,6 +205,18 @@ struct NowPlayingView: View {
                 }
             }
             #endif
+        }
+        .environmentObject(chromeAutoHide)
+        .onAppear {
+            chromeAutoHide.autoHideEnabled = settings.effectiveAutoHidePlayerChrome
+            chromeAutoHide.resetTimer()
+        }
+        .onChange(of: settings.effectiveAutoHidePlayerChrome) { enabled in
+            chromeAutoHide.autoHideEnabled = enabled
+            chromeAutoHide.resetTimer()
+        }
+        .onDisappear {
+            chromeAutoHide.stop()
         }
         #if os(macOS)
         // The window toolbar is hidden while this page is up, but SwiftUI keeps
@@ -213,6 +299,7 @@ struct NowPlayingView: View {
     /// layout can park it beside the window buttons (#128).
     private func collapseButton(diameter: CGFloat, glyphSize: CGFloat) -> some View {
         Button {
+            chromeAutoHide.resetTimer()
             close()
         } label: {
             Image(systemName: "chevron.down")
@@ -282,10 +369,12 @@ struct NowPlayingView: View {
 
     private var colors: ArtworkColors {
         let base = ArtworkColors(primary: theme.tint, secondary: theme.secondaryTint)
-        // C10: the player-page tint intensity still scales the artwork tint;
-        // a preset or custom theme carries its own intensity instead.
-        let intensity = theme.source == .artwork
-            ? settings.effectivePlayerPageTintIntensity : theme.intensity
+        // C10: the player-page tint intensity multiplies the theme's own
+        // intensity — the artwork theme's intensity is 1, so artwork-derived
+        // pages behave exactly as before, while preset/custom themes (whose
+        // intensity used to replace the slider outright) now scale with it
+        // too. Default 1.0 leaves the default appearance unchanged.
+        let intensity = theme.intensity * settings.effectivePlayerPageTintIntensity
         return tintedColors(base, intensity: intensity)
     }
 
@@ -361,9 +450,12 @@ struct NowPlayingView: View {
     }
 
     /// Backgrounds freeze in static mode, or when the background
-    /// reduce-motion override says so (C4/C5).
+    /// reduce-motion override says so (C4/C5). This deliberately reads the
+    /// *background* override, not the micro-motion one: micro-motion stills
+    /// small movements (vinyl spin, the play/pause pulse, the marquee,
+    /// lyric word float) but must not freeze the whole luminous backdrop.
     private var backgroundIsStatic: Bool {
-        settings.effectiveStaticMode || settings.effectiveReduceMotionMicroMotion
+        settings.effectiveStaticMode || settings.effectiveReduceMotionBackground
     }
 
     /// The page backdrop. In luminous mode (compact, iOS) the selected
@@ -576,6 +668,9 @@ struct NowPlayingView: View {
 
             VStack(spacing: 0) {
                 landscapeUtilityRow
+                    .opacity(chromeAutoHide.controlsVisible ? 1 : 0)
+                    .allowsHitTesting(chromeAutoHide.controlsVisible)
+                    .animation(AppAnimation.standard, value: chromeAutoHide.controlsVisible)
                     .padding(.top, 18)
                     .padding(.trailing, 24)
 
@@ -601,6 +696,9 @@ struct NowPlayingView: View {
                     landscapeNowPlayingMetadata
                     Spacer(minLength: 12)
                     landscapeTransportRow
+                        .opacity(chromeAutoHide.controlsVisible ? 1 : 0)
+                        .allowsHitTesting(chromeAutoHide.controlsVisible)
+                        .animation(AppAnimation.standard, value: chromeAutoHide.controlsVisible)
                 }
                 .padding(.horizontal, 28)
                 .padding(.bottom, max(16, size.height * 0.03))
@@ -679,6 +777,7 @@ struct NowPlayingView: View {
             if let track = player.currentTrack {
                 let liked = account.isLiked(track.id)
                 Button {
+                    chromeAutoHide.resetTimer()
                     Task { await account.toggleLike(trackID: track.id) }
                 } label: {
                     Image(systemName: liked ? "heart.fill" : "heart")
@@ -886,7 +985,18 @@ struct NowPlayingView: View {
                 showTranslation: settings.showLyricsTranslation,
                 showRomaji: settings.lyricsAnnotation == .romaji,
                 animate: player.isPlaying && !settings.effectiveStaticMode,
-                fontScale: settings.effectiveLyricsFontScale
+                fontScale: settings.effectiveLyricsFontScale,
+                // D9: the lattice card used to hardcode `.system` fonts and
+                // ignore the lyric-style settings — the font, word-motion
+                // and opacity settings now flow in, like the luminous view.
+                fontStyle: settings.effectiveLyricsFontStyle,
+                fontWeight: settings.effectiveLyricsFontWeight.map(Font.Weight.fromFoliaValue) ?? .bold,
+                customFontName: settings.effectiveLyricsCustomFont,
+                wordRotation: settings.effectiveClassicWordRotation,
+                breathingFloat: settings.effectiveClassicBreathingFloat,
+                wordSpacing: CGFloat(settings.effectiveClassicWordSpacing),
+                avoidOverlap: settings.effectiveClassicAvoidOverlap,
+                opacity: settings.effectiveVisualizerOpacity
             )
             .padding(.horizontal, 20)
             .padding(.top, 12)
@@ -953,6 +1063,7 @@ struct NowPlayingView: View {
                 CompactTransportControls()
                 HStack(spacing: 0) {
                     Button {
+                        chromeAutoHide.resetTimer()
                         withAnimation(AppAnimation.standard) {
                             showQueueOnMobile.toggle()
                         }
@@ -970,6 +1081,7 @@ struct NowPlayingView: View {
                     Spacer()
 
                     Button {
+                        chromeAutoHide.resetTimer()
                         showLyricStyleSettings = true
                     } label: {
                         Image(systemName: "slider.horizontal.3")
@@ -982,6 +1094,9 @@ struct NowPlayingView: View {
                     .accessibilityLabel("歌词样式")
                 }
             }
+            .opacity(chromeAutoHide.controlsVisible ? 1 : 0)
+            .allowsHitTesting(chromeAutoHide.controlsVisible)
+            .animation(AppAnimation.standard, value: chromeAutoHide.controlsVisible)
             .padding(.top, 14)
             .padding(.bottom, 10)
             .padding(.horizontal, 20)
@@ -1029,20 +1144,24 @@ struct NowPlayingView: View {
                             trackId: player.currentTrack?.id,
                             size: discDimension,
                             onTap: {
+                                chromeAutoHide.resetTimer()
                                 withAnimation(AppAnimation.standard) {
                                     showLyricsOnMobile = true
                                 }
                             },
                             onNextTrack: {
+                                chromeAutoHide.resetTimer()
                                 player.next()
                             },
                             onPreviousTrack: {
+                                chromeAutoHide.resetTimer()
                                 player.previous()
                             }
                         )
                         .accessibilityIdentifier("vinylTurntable")
 
                         MiniLyricsView(onOpen: {
+                            chromeAutoHide.resetTimer()
                             withAnimation(AppAnimation.standard) {
                                 showLyricsOnMobile = true
                             }
@@ -1065,6 +1184,7 @@ struct NowPlayingView: View {
                     IOSImmersiveLyricsColumn()
                         .contentShape(Rectangle())
                         .onTapGesture {
+                            chromeAutoHide.resetTimer()
                             withAnimation(AppAnimation.standard) {
                                 showLyricsOnMobile = false
                             }
@@ -1074,6 +1194,7 @@ struct NowPlayingView: View {
                     lyricsColumn
                         .contentShape(Rectangle())
                         .onTapGesture {
+                            chromeAutoHide.resetTimer()
                             withAnimation(AppAnimation.standard) {
                                 showLyricsOnMobile = false
                             }
@@ -1095,6 +1216,9 @@ struct NowPlayingView: View {
                 }
                 controls
             }
+            .opacity(chromeAutoHide.controlsVisible ? 1 : 0)
+            .allowsHitTesting(chromeAutoHide.controlsVisible)
+            .animation(AppAnimation.standard, value: chromeAutoHide.controlsVisible)
             .padding(.bottom, 24)
             #endif
         }
@@ -1115,6 +1239,7 @@ struct NowPlayingView: View {
                     artworkView(size: artworkDim)
                     trackMetaView
                     MiniLyricsView {
+                        chromeAutoHide.resetTimer()
                         withAnimation(AppAnimation.standard) {
                             showLyricsOnMobile = true
                         }
@@ -1131,6 +1256,9 @@ struct NowPlayingView: View {
                 }
                 controls
             }
+            .opacity(chromeAutoHide.controlsVisible ? 1 : 0)
+            .allowsHitTesting(chromeAutoHide.controlsVisible)
+            .animation(AppAnimation.standard, value: chromeAutoHide.controlsVisible)
             .padding(.bottom, 24)
         }
         .padding(.horizontal, 16)
@@ -1212,6 +1340,9 @@ struct NowPlayingView: View {
                 onToggleQueue: toggleImmersiveQueue
             )
         }
+        .opacity(chromeAutoHide.controlsVisible ? 1 : 0)
+        .allowsHitTesting(chromeAutoHide.controlsVisible)
+        .animation(AppAnimation.standard, value: chromeAutoHide.controlsVisible)
         .padding(.top, 14)
         .padding(.bottom, 10)
         .accessibilityIdentifier("immersiveControls")
@@ -1262,6 +1393,7 @@ struct NowPlayingView: View {
     }
 
     private func toggleImmersiveLyrics() {
+        chromeAutoHide.resetTimer()
         withAnimation(ImmersiveArtworkTransition.animation) {
             if showQueueOnMobile {
                 showQueueOnMobile = false
@@ -1273,6 +1405,7 @@ struct NowPlayingView: View {
     }
 
     private func showImmersiveLyrics() {
+        chromeAutoHide.resetTimer()
         withAnimation(ImmersiveArtworkTransition.animation) {
             showQueueOnMobile = false
             showLyricsOnMobile = true
@@ -1283,6 +1416,7 @@ struct NowPlayingView: View {
     /// expanded artwork — the Apple Music gesture requested in #50. Idempotent,
     /// so a tap while already expanded is a harmless no-op.
     private func collapseImmersiveArtwork() {
+        chromeAutoHide.resetTimer()
         guard showLyricsOnMobile || showQueueOnMobile else { return }
         withAnimation(ImmersiveArtworkTransition.animation) {
             showLyricsOnMobile = false
@@ -1291,6 +1425,7 @@ struct NowPlayingView: View {
     }
 
     private func toggleImmersiveQueue() {
+        chromeAutoHide.resetTimer()
         withAnimation(ImmersiveArtworkTransition.animation) {
             showQueueOnMobile.toggle()
         }
@@ -1382,10 +1517,14 @@ struct NowPlayingView: View {
             )
                 .padding(.horizontal, 2)
         }
+        .opacity(chromeAutoHide.controlsVisible ? 1 : 0)
+        .allowsHitTesting(chromeAutoHide.controlsVisible)
+        .animation(AppAnimation.standard, value: chromeAutoHide.controlsVisible)
         .accessibilityIdentifier("immersiveControls")
     }
 
     private func toggleMinimalLyrics() {
+        chromeAutoHide.resetTimer()
         guard showLyricsOnMobile || player.lyrics?.isEmpty == false else { return }
         showLyricsOnMobile.toggle()
     }
@@ -1507,12 +1646,15 @@ struct NowPlayingView: View {
                     trackId: player.currentTrack?.id,
                     size: artworkSize,
                     onTap: {
+                        chromeAutoHide.resetTimer()
                         player.togglePlayPause()
                     },
                     onNextTrack: {
+                        chromeAutoHide.resetTimer()
                         player.next()
                     },
                     onPreviousTrack: {
+                        chromeAutoHide.resetTimer()
                         player.previous()
                     }
                 )
@@ -1529,6 +1671,9 @@ struct NowPlayingView: View {
                 }
                 controls
             }
+            .opacity(chromeAutoHide.controlsVisible ? 1 : 0)
+            .allowsHitTesting(chromeAutoHide.controlsVisible)
+            .animation(AppAnimation.standard, value: chromeAutoHide.controlsVisible)
 
             Spacer()
         }
@@ -1655,6 +1800,7 @@ struct NowPlayingView: View {
 
     private func playPauseButton(diameter: CGFloat = 58, glyphSize: CGFloat = 21) -> some View {
         Button {
+            chromeAutoHide.resetTimer()
             player.togglePlayPause()
         } label: {
             ZStack {
@@ -1712,7 +1858,10 @@ struct NowPlayingView: View {
 
     private func circleButton(icon: String, size: CGFloat,
                               tint: Color? = nil, action: @escaping () -> Void) -> some View {
-        Button(action: action) {
+        Button {
+            chromeAutoHide.resetTimer()
+            action()
+        } label: {
             Image(systemName: icon)
                 .font(.system(size: size, weight: .medium))
                 .foregroundStyle(tint ?? .white.opacity(0.8))
@@ -2334,6 +2483,7 @@ private struct CompactTrackHeader: View {
 private struct CompactTransportControls: View {
     @EnvironmentObject private var player: PlayerService
     @EnvironmentObject private var settings: SettingsManager
+    @EnvironmentObject private var chromeAutoHide: ChromeAutoHideModel
 
     var body: some View {
         HStack(spacing: 0) {
@@ -2342,7 +2492,10 @@ private struct CompactTransportControls: View {
             // C8: each transport button renders only when its slot is on.
             if player.isFMMode, settings.effectiveAlwaysShowTrackSwitchButtons,
                PlayerControlSlot.isSelected(.previous, in: settings) {
-                Button(action: player.previous) {
+                Button {
+                    chromeAutoHide.resetTimer()
+                    player.previous()
+                } label: {
                     Image(systemName: "backward.fill")
                         .font(.system(size: 25, weight: .semibold))
                         .frame(maxWidth: .infinity, minHeight: 58)
@@ -2351,7 +2504,10 @@ private struct CompactTransportControls: View {
             }
 
             if PlayerControlSlot.isSelected(.previous, in: settings) {
-                Button(action: player.isFMMode ? player.fmTrash : player.previous) {
+                Button {
+                    chromeAutoHide.resetTimer()
+                    if player.isFMMode { player.fmTrash() } else { player.previous() }
+                } label: {
                     Image(systemName: player.isFMMode ? "trash" : "backward.fill")
                         .font(.system(size: 25, weight: .semibold))
                         .frame(maxWidth: .infinity, minHeight: 58)
@@ -2360,7 +2516,10 @@ private struct CompactTransportControls: View {
             }
 
             if PlayerControlSlot.isSelected(.playPause, in: settings) {
-                Button(action: player.togglePlayPause) {
+                Button {
+                    chromeAutoHide.resetTimer()
+                    player.togglePlayPause()
+                } label: {
                     Image(systemName: player.isPlaying ? "pause.fill" : "play.fill")
                         .font(.system(size: 36, weight: .bold))
                         .contentTransition(.opacity)
@@ -2370,7 +2529,10 @@ private struct CompactTransportControls: View {
             }
 
             if PlayerControlSlot.isSelected(.next, in: settings) {
-                Button(action: player.next) {
+                Button {
+                    chromeAutoHide.resetTimer()
+                    player.next()
+                } label: {
                     Image(systemName: "forward.fill")
                         .font(.system(size: 25, weight: .semibold))
                         .frame(maxWidth: .infinity, minHeight: 58)
@@ -2466,6 +2628,7 @@ private struct CompactVolumePopover: View {
 
 private struct CompactSecondaryControls: View {
     @EnvironmentObject private var player: PlayerService
+    @EnvironmentObject private var chromeAutoHide: ChromeAutoHideModel
     @State private var showsVolumeControl = false
     /// Resolved theme accent, passed down from NowPlayingView (C12/C14).
     let accent: Color
@@ -2480,7 +2643,10 @@ private struct CompactSecondaryControls: View {
                 icon: showsLyrics && !showsQueue ? "quote.bubble.fill" : "quote.bubble",
                 label: showsLyrics ? "显示封面" : "显示歌词",
                 isActive: showsLyrics && !showsQueue
-            ) { onToggleLyrics() }
+            ) {
+                chromeAutoHide.resetTimer()
+                onToggleLyrics()
+            }
 
             RoutePickerButton(diameter: 44, glyphSize: 17)
                 .frame(maxWidth: .infinity)
@@ -2490,6 +2656,7 @@ private struct CompactSecondaryControls: View {
                 label: showsVolumeControl ? "关闭音量控制" : "显示音量控制",
                 isActive: showsVolumeControl
             ) {
+                chromeAutoHide.resetTimer()
                 withAnimation(.spring(response: 0.28, dampingFraction: 0.82)) {
                     showsVolumeControl.toggle()
                 }
@@ -2507,7 +2674,10 @@ private struct CompactSecondaryControls: View {
                 icon: "list.bullet",
                 label: showsQueue ? "关闭播放队列" : "显示播放队列",
                 isActive: showsQueue
-            ) { onToggleQueue() }
+            ) {
+                chromeAutoHide.resetTimer()
+                onToggleQueue()
+            }
         }
     }
 
@@ -3190,6 +3360,7 @@ private struct MinimalTrackInfoRow: View {
 private struct MinimalTransportControls: View {
     @EnvironmentObject private var player: PlayerService
     @EnvironmentObject private var settings: SettingsManager
+    @EnvironmentObject private var chromeAutoHide: ChromeAutoHideModel
     /// Resolved theme accent, passed down from NowPlayingView (C12/C14).
     let accent: Color
     let backdrop: ArtworkColors
@@ -3199,6 +3370,7 @@ private struct MinimalTransportControls: View {
     var body: some View {
         HStack(spacing: 0) {
             Button {
+                chromeAutoHide.resetTimer()
                 showQueue = true
             } label: {
                 Image(systemName: "list.bullet")
@@ -3214,7 +3386,10 @@ private struct MinimalTransportControls: View {
             // C8: each transport button renders only when its slot is on.
             if player.isFMMode, settings.effectiveAlwaysShowTrackSwitchButtons,
                PlayerControlSlot.isSelected(.previous, in: settings) {
-                Button(action: player.previous) {
+                Button {
+                    chromeAutoHide.resetTimer()
+                    player.previous()
+                } label: {
                     Image(systemName: "backward.fill")
                         .font(.system(size: 25, weight: .semibold))
                         .frame(maxWidth: .infinity, minHeight: 58)
@@ -3223,7 +3398,10 @@ private struct MinimalTransportControls: View {
             }
 
             if PlayerControlSlot.isSelected(.previous, in: settings) {
-                Button(action: player.isFMMode ? player.fmTrash : player.previous) {
+                Button {
+                    chromeAutoHide.resetTimer()
+                    if player.isFMMode { player.fmTrash() } else { player.previous() }
+                } label: {
                     Image(systemName: player.isFMMode ? "trash" : "backward.fill")
                         .font(.system(size: 25, weight: .semibold))
                         .frame(maxWidth: .infinity, minHeight: 58)
@@ -3232,7 +3410,10 @@ private struct MinimalTransportControls: View {
             }
 
             if PlayerControlSlot.isSelected(.playPause, in: settings) {
-                Button(action: player.togglePlayPause) {
+                Button {
+                    chromeAutoHide.resetTimer()
+                    player.togglePlayPause()
+                } label: {
                     Image(systemName: player.isPlaying ? "pause.fill" : "play.fill")
                         .font(.system(size: 38, weight: .bold))
                         .contentTransition(.opacity)
@@ -3242,7 +3423,10 @@ private struct MinimalTransportControls: View {
             }
 
             if PlayerControlSlot.isSelected(.next, in: settings) {
-                Button(action: player.next) {
+                Button {
+                    chromeAutoHide.resetTimer()
+                    player.next()
+                } label: {
                     Image(systemName: "forward.fill")
                         .font(.system(size: 25, weight: .semibold))
                         .frame(maxWidth: .infinity, minHeight: 58)
@@ -3288,7 +3472,10 @@ private struct MinimalTransportControls: View {
             Color.clear
                 .frame(height: 44)
         } else {
-            Button(action: player.cyclePlaybackMode) {
+            Button {
+                chromeAutoHide.resetTimer()
+                player.cyclePlaybackMode()
+            } label: {
                 Image(systemName: playbackModeIcon)
                     .font(.system(size: 19, weight: .semibold))
                     .foregroundStyle(playbackModeTint)
@@ -3332,6 +3519,7 @@ private struct MinimalTransportControls: View {
 
 struct NowPlayingScrubber: View {
     @EnvironmentObject private var player: PlayerService
+    @EnvironmentObject private var chromeAutoHide: ChromeAutoHideModel
     @ObservedObject private var clock = PlayerService.shared.clock
 
     @State private var isHovering = false
@@ -3368,11 +3556,15 @@ struct NowPlayingScrubber: View {
                     DragGesture(minimumDistance: 0)
                         .onChanged { value in
                             guard player.duration > 0 else { return }
+                            // A long scrub must not hide the chrome
+                            // mid-drag; every move restarts the idle timer.
+                            chromeAutoHide.resetTimer()
                             isDragging = true
                             player.isScrubbing = true
                             dragProgress = min(max(value.location.x / width, 0), 1) * player.duration
                         }
                         .onEnded { _ in
+                            chromeAutoHide.resetTimer()
                             player.seek(to: dragProgress)
                             isDragging = false
                             player.isScrubbing = false
