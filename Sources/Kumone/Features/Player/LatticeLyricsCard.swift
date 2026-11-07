@@ -60,18 +60,72 @@ struct LatticeLyricsCard: View {
     /// follow it, so the Lattice card and the luminous mode agree.
     var fontScale: CGFloat = 1
 
+    /// Lyric-style settings (D9): the card used to hardcode `.system`
+    /// fonts and ignore these — they now match the luminous view, which
+    /// reads the same effective values.
+    var fontStyle: LyricsFontStyle = .sans
+    var fontWeight: Font.Weight = .bold
+    var customFontName: String? = nil
+    var wordRotation: Bool = false
+    var breathingFloat: Double = 0
+    var wordSpacing: CGFloat = 0
+    var avoidOverlap: Bool = false
+    /// Overall lyric opacity (Folia's `visualizerOpacity`).
+    var opacity: Double = 1
+
     @EnvironmentObject private var player: PlayerService
 
     /// One visual row inside the card: a run of chunks laid out left to
     /// right, wrapping only inside the active line's words.
+    private struct WordChunk {
+        var text: String
+        var alpha: Double
+        /// The word's deterministic ±5° tilt when word rotation is on,
+        /// else 0. Static rows (translation, romaji, surrounding lines)
+        /// always carry 0.
+        var rotation: Double = 0
+    }
+
     private struct VisualRow {
-        var chunks: [(text: String, alpha: Double)]
+        var chunks: [WordChunk]
         var font: Font
         var fontSize: CGFloat
         /// Gap below this row before the next one.
         var gapAfter: CGFloat
 
         var height: CGFloat { fontSize * 1.35 }
+    }
+
+    /// The lyric font at `size`, mirroring `LuminousLyricsView.lyricFont`:
+    /// the custom font when one is set, else the selected style's design,
+    /// at the given weight.
+    private func lyricFont(size: CGFloat, weight: Font.Weight) -> Font {
+        if let custom = customFontName, !custom.isEmpty {
+            return Font.custom(custom, size: size).weight(weight)
+        }
+        return .system(size: size, weight: weight, design: fontStyle.design)
+    }
+
+    /// Gap between two words on a row: the configured word spacing, plus
+    /// a rotation clearance when word rotation is on and overlap is to be
+    /// avoided — a ±5° tilt widens a word's footprint by ~sin(5°) of its
+    /// height. With overlap allowed the tilt may kiss its neighbour,
+    /// which is what the toggle means.
+    private func interWordGap(for fontSize: CGFloat) -> CGFloat {
+        wordSpacing + (wordRotation && avoidOverlap ? fontSize * 0.1 : 0)
+    }
+
+    /// Whole-card breathing float, mirroring the luminous line's: only
+    /// while the card animates (playing, not static); still otherwise.
+    /// `time` is the live deck position, as in `drawCard`.
+    private var breathingYOffset: CGFloat {
+        guard animate, breathingFloat > 0 else { return 0 }
+        return LuminousLyrics.breathingOffset(at: player.livePlaybackTime, multiplier: breathingFloat)
+    }
+
+    private var breathingScaleFactor: CGFloat {
+        guard animate, breathingFloat > 0 else { return 1 }
+        return LuminousLyrics.breathingScale(at: player.livePlaybackTime, multiplier: breathingFloat)
     }
 
     private var activeFontSize: CGFloat { 34 * fontScale }
@@ -88,7 +142,12 @@ struct LatticeLyricsCard: View {
                 }
             canvasContent
                 .padding(20)
+                // D9: breathing float + overall opacity, as in the luminous
+                // view (still while paused/static — see `breathingYOffset`).
+                .offset(y: breathingYOffset)
+                .scaleEffect(breathingScaleFactor)
         }
+        .opacity(opacity)
     }
 
     private var canvasContent: some View {
@@ -135,23 +194,24 @@ struct LatticeLyricsCard: View {
             if index == active {
                 rows.append(contentsOf: layoutWords(
                     LatticeLyrics.wordAlphas(line: line, at: time),
-                    font: .system(size: activeFontSize, weight: .bold),
+                    line: line,
+                    font: lyricFont(size: activeFontSize, weight: fontWeight),
                     fontSize: activeFontSize,
                     maxWidth: size.width,
                     in: &context
                 ))
                 if showTranslation, let translation = line.translation, !translation.isEmpty {
                     rows.append(VisualRow(
-                        chunks: [(translation, 0.6)],
-                        font: .system(size: secondaryFontSize),
+                        chunks: [WordChunk(text: translation, alpha: 0.6)],
+                        font: lyricFont(size: secondaryFontSize, weight: .regular),
                         fontSize: secondaryFontSize,
                         gapAfter: 2
                     ))
                 }
                 if showRomaji, let romaji = line.romaji, !romaji.isEmpty {
                     rows.append(VisualRow(
-                        chunks: [(romaji, 0.55)],
-                        font: .system(size: secondaryFontSize),
+                        chunks: [WordChunk(text: romaji, alpha: 0.55)],
+                        font: lyricFont(size: secondaryFontSize, weight: .regular),
                         fontSize: secondaryFontSize,
                         gapAfter: 2
                     ))
@@ -162,8 +222,8 @@ struct LatticeLyricsCard: View {
                 }
             } else {
                 rows.append(VisualRow(
-                    chunks: [(line.text, 0.4)],
-                    font: .system(size: surroundingFontSize, weight: .semibold),
+                    chunks: [WordChunk(text: line.text, alpha: 0.4)],
+                    font: lyricFont(size: surroundingFontSize, weight: .semibold),
                     fontSize: surroundingFontSize,
                     gapAfter: 12
                 ))
@@ -179,7 +239,7 @@ struct LatticeLyricsCard: View {
         // Pass 2: draw.
         for row in rows {
             var x: CGFloat = 0
-            for chunk in row.chunks {
+            for (chunkIndex, chunk) in row.chunks.enumerated() {
                 let resolved = context.resolve(
                     Text(chunk.text)
                         .font(row.font)
@@ -188,8 +248,23 @@ struct LatticeLyricsCard: View {
                 // Unconstrained measure: a width cap would wrap a single
                 // chunk and report the cap, breaking the x accumulation.
                 let width = resolved.measure(in: CGSize(width: CGFloat.greatestFiniteMagnitude, height: CGFloat.greatestFiniteMagnitude)).width
-                context.draw(resolved, at: CGPoint(x: x, y: y), anchor: .topLeading)
+                if chunk.rotation != 0 {
+                    // Tilt about the word's centre so the rotation does not
+                    // shift the word along the row.
+                    let center = CGPoint(x: x + width / 2, y: y + row.height / 2)
+                    let savedTransform = context.transform
+                    context.translateBy(x: center.x, y: center.y)
+                    context.rotate(by: .degrees(chunk.rotation))
+                    context.translateBy(x: -center.x, y: -center.y)
+                    context.draw(resolved, at: CGPoint(x: x, y: y), anchor: .topLeading)
+                    context.transform = savedTransform
+                } else {
+                    context.draw(resolved, at: CGPoint(x: x, y: y), anchor: .topLeading)
+                }
                 x += width
+                if chunkIndex < row.chunks.count - 1 {
+                    x += interWordGap(for: row.fontSize)
+                }
             }
             y += row.height + row.gapAfter
         }
@@ -197,27 +272,38 @@ struct LatticeLyricsCard: View {
 
     /// Wraps the active line's words into visual rows at `maxWidth`. A word
     /// carries its trailing space (the parser rides blanks on the word
-    /// before them), so no extra space width is added between chunks.
+    /// before them), so no extra space width is added between chunks — the
+    /// gap is the configured word spacing (plus rotation clearance).
     private func layoutWords(
         _ words: [(text: String, alpha: Double)],
+        line: LyricLine,
         font: Font,
         fontSize: CGFloat,
         maxWidth: CGFloat,
         in context: inout GraphicsContext
     ) -> [VisualRow] {
+        let gap = interWordGap(for: fontSize)
         var rows: [VisualRow] = []
-        var current: [(text: String, alpha: Double)] = []
+        var current: [WordChunk] = []
         var currentWidth: CGFloat = 0
-        for word in words {
+        for (index, word) in words.enumerated() {
             let width = context.resolve(
                 Text(word.text).font(font)
             ).measure(in: CGSize(width: CGFloat.greatestFiniteMagnitude, height: CGFloat.greatestFiniteMagnitude)).width
-            if !current.isEmpty, currentWidth + width > maxWidth {
+            // The word's deterministic tilt, shared with the luminous view
+            // (`LuminousLyrics.placement`, ±5°); x/y offsets and scale stay
+            // with the luminous layout — the lattice rows are sequential.
+            let rotation = wordRotation
+                ? LuminousLyrics.placement(seed: line.time, index: index, rotationEnabled: true).rotate
+                : 0
+            let chunk = WordChunk(text: word.text, alpha: word.alpha, rotation: rotation)
+            if !current.isEmpty, currentWidth + gap + width > maxWidth {
                 rows.append(VisualRow(chunks: current, font: font, fontSize: fontSize, gapAfter: 2))
                 current = []
                 currentWidth = 0
             }
-            current.append(word)
+            if !current.isEmpty { currentWidth += gap }
+            current.append(chunk)
             currentWidth += width
         }
         if !current.isEmpty {
