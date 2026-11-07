@@ -686,9 +686,18 @@ struct LuminousLyricsView: View {
         if let previewLine, let previewTime {
             lyricsContent(line: previewLine, time: previewTime, clock: previewTime, size: size)
         } else if let lyrics = player.lyrics, !lyrics.lines.isEmpty {
+            // The coarse published progress is read here (and used as the
+            // fallback time) so this view also re-renders whenever it moves:
+            // a heartbeat that bounds lyric staleness to ~0.5s even if the
+            // timeline stalls. The luminous lyrics froze while the scrubber
+            // kept moving, which means the .periodic timeline was not
+            // delivering updates in this view — the classic lyric view's
+            // .animation schedule is used instead, matching the one proven
+            // to drive per-frame karaoke in this codebase.
+            let fallback = player.progress
             if player.isPlaying && !isStatic {
-                TimelineView(.periodic(from: .now, by: 1.0 / 30.0)) { context in
-                    let time = player.livePlaybackTime
+                TimelineView(.animation(minimumInterval: 1.0 / 30.0, paused: false)) { context in
+                    let time = currentTime(fallback: fallback)
                     lyricsContent(
                         line: activeLine(in: lyrics, at: time),
                         time: time,
@@ -697,7 +706,7 @@ struct LuminousLyricsView: View {
                     )
                 }
             } else {
-                let time = player.livePlaybackTime
+                let time = currentTime(fallback: fallback)
                 lyricsContent(
                     line: activeLine(in: lyrics, at: time),
                     time: time,
@@ -716,6 +725,15 @@ struct LuminousLyricsView: View {
     private func activeLine(in lyrics: ParsedLyrics, at time: TimeInterval) -> LyricLine {
         let index = lyrics.activeIndex(at: time) ?? 0
         return lyrics.lines[min(max(index, 0), lyrics.lines.count - 1)]
+    }
+
+    /// Live deck position; falls back to the coarse published progress
+    /// when the deck reports nothing finite (no item loaded, mid-seek).
+    /// Reading `progress` as the fallback is also what subscribes this
+    /// view to its heartbeat (see `content(size:)`).
+    private func currentTime(fallback: TimeInterval) -> TimeInterval {
+        let live = player.livePlaybackTime
+        return live.isFinite ? live : fallback
     }
 
     private func lyricsContent(line: LyricLine, time: TimeInterval, clock: TimeInterval, size: CGSize) -> some View {
