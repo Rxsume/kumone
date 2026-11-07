@@ -266,10 +266,13 @@ enum LyricsFontStyle: String, CaseIterable, Identifiable {
     }
 }
 
-/// Which background the luminous (流光) now-playing page uses. Only the
-/// nomand halftone background is ported for now; `none` is the plain dark
-/// page. Other Folia backgrounds (latent / sora / monet) are not ported.
+/// Which background the luminous (流光) now-playing page uses.
+/// `latent` is Folia's default background mode (`DEFAULT_VISUALIZER_
+/// BACKGROUND_MODE = 'latent'`): the flowing smoke + warp-dither field
+/// from the reference video. `nomand` is the static halftone-dot cover;
+/// `none` is the plain dark page. Sora / monet are not ported.
 enum VisualizerBackgroundMode: String, CaseIterable, Identifiable {
+    case latent
     case nomand
     case none
 
@@ -277,6 +280,7 @@ enum VisualizerBackgroundMode: String, CaseIterable, Identifiable {
 
     var displayName: String {
         switch self {
+        case .latent: return String(localized: "潜流（流动烟雾）")
         case .nomand: return String(localized: "漫游（半调圆点）")
         case .none: return String(localized: "无背景")
         }
@@ -642,7 +646,7 @@ final class SettingsManager: ObservableObject {
     nonisolated static let defaultClassicBreathingFloat = 1.0
     nonisolated static let defaultClassicWordSpacing = 0.7
     nonisolated static let defaultClassicAvoidOverlap = false
-    nonisolated static let defaultVisualizerBackgroundMode = VisualizerBackgroundMode.nomand
+    nonisolated static let defaultVisualizerBackgroundMode = VisualizerBackgroundMode.latent
     nonisolated static let defaultNomandEffect = NomandEffect.halftoneDots
     nonisolated static let defaultNomandHalftoneSize = 0.5
     nonisolated static let defaultNomandHalftoneRadius = 1.25
