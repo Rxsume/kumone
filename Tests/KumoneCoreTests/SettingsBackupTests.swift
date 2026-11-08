@@ -25,7 +25,7 @@ struct SettingsBackupTests {
         var spotifyClientID: String
         var fnmusicUsername: String
 
-        static func take() -> Snapshot {
+        @MainActor static func take() -> Snapshot {
             let s = SettingsManager.shared
             return Snapshot(
                 audioQuality: s.audioQuality,
@@ -38,7 +38,7 @@ struct SettingsBackupTests {
             )
         }
 
-        func restore() {
+        @MainActor func restore() {
             let s = SettingsManager.shared
             s.audioQuality = audioQuality
             s.enableAudioCache = enableAudioCache
