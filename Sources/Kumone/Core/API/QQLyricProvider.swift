@@ -386,7 +386,7 @@ struct QQLyricProvider: LyricProvider {
                             CCOptions(kCCOptionECBMode),
                             keyPtr.baseAddress, key.count, nil,
                             dataPtr.baseAddress, padded.count,
-                            outPtr.baseAddress, out.count, &written)
+                            outPtr.baseAddress, outPtr.count, &written)
                 }
             }
         }
