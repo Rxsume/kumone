@@ -55,6 +55,14 @@ public struct IOSMainWindow: View {
             .environment(\.openLogin, { showLogin = true })
             .environment(\.openDestination, openDestination)
             .modifier(PlaybackLifecycle())
+            .onOpenURL { url in
+                // Live Activity island / lock-screen taps land here via the
+                // golia:// (and legacy rumxs://) scheme; routing just flips
+                // player state.
+                Task { @MainActor in
+                    RumxsDeepLink.handle(url, player: player)
+                }
+            }
             .task {
                 await DownloadManager.shared.start()
                 await account.bootstrap()
