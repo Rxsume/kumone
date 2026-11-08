@@ -728,6 +728,15 @@ struct LyricStyleSettingsView: View {
         #endif
     }
 
+    /// Global lyric timeline offset label (Folia B12): negative shifts
+    /// lyrics earlier, positive shifts them later.
+    private var lyricOffsetLabel: String {
+        let ms = settings.globalLyricTimelineOffsetMs
+        if ms == 0 { return "关闭" }
+        if ms < 0 { return "提前 \(-ms) 毫秒" }
+        return "延后 \(ms) 毫秒"
+    }
+
     // MARK: 通用
 
     private var generalSection: some View {
@@ -830,6 +839,32 @@ struct LyricStyleSettingsView: View {
                 }
             }
             #endif
+
+            Section("时间轴偏移") {
+                Slider(value: Binding(
+                    get: { Double(settings.globalLyricTimelineOffsetMs) },
+                    set: { settings.globalLyricTimelineOffsetMs = Int($0) }
+                ), in: -2000...2000, step: 50) {
+                    Text("时间轴偏移")
+                } minimumValueLabel: {
+                    Text("-2s")
+                } maximumValueLabel: {
+                    Text("+2s")
+                }
+                HStack {
+                    Text(lyricOffsetLabel)
+                        .foregroundStyle(.secondary)
+                    Spacer()
+                    Button("归零") {
+                        settings.globalLyricTimelineOffsetMs = 0
+                    }
+                    .buttonStyle(.bordered)
+                    .tint(settings.globalLyricTimelineOffsetMs == 0 ? .secondary : .accentColor)
+                    .disabled(settings.globalLyricTimelineOffsetMs == 0)
+                }
+            } footer: {
+                Text("歌词整体提前或延后，解决某首歌词对不上拍的问题；仅在 Folia 总开关开启时生效。")
+            }
 
             Section {
                 Button("恢复默认") {
