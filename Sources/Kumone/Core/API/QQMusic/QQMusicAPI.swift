@@ -115,6 +115,16 @@ struct QQMusicUserPlaylist: Hashable, Identifiable, Sendable {
     let trackCount: Int?
 }
 
+/// One QQ Music chart, from `fcg_myqq_toplist.fcg`.
+struct QQTopInfo: Hashable, Sendable {
+    let id: Int
+    let name: String
+    let subTitle: String
+    /// Names of the chart's top songs, for the card subtitle.
+    let topSongNames: [String]
+    let coverURL: URL?
+}
+
 /// A resolved QQ Music playback URL plus which quality tier hit, so the
 /// player can keep stepping down when `AVPlayer` itself fails.
 struct QQMusicSongURLResult: Hashable, Sendable {
@@ -139,10 +149,13 @@ struct QQMusicSongURLResult: Hashable, Sendable {
 ///   Anonymous (logged-out) requests work for free tracks; logged-in
 ///   requests attach `authst` + cookies so VIP tracks resolve.
 ///
-/// Skipped from Beans on purpose: comments, top lists, recommend
-/// songs, hot playlists, lyric (lyrics are PR #23's `QQLyricProvider`
-/// — untouched), playlist create/delete and playlist-song browsing
-/// beyond what `favoriteSongs` needs.
+/// Skipped from Beans on purpose: comments, recommend songs, the
+/// y.qq.com hot-playlists HTML scrape (SSR parsing breaks on every
+/// redesign — the home feed uses the clean musicu
+/// `RecommendPlaylist.GetRecommendPlaylist` instead), lyric (lyrics
+/// are PR #23's `QQLyricProvider` — untouched), playlist create/delete
+/// and playlist-song browsing beyond what `favoriteSongs` and the home
+/// feed need.
 ///
 /// Errors are `QQMusicError` (defined at the top of this file). A 401 on an
 /// authenticated call, or a vkey answer with no `midurlinfo` at all
@@ -1091,6 +1104,84 @@ final class QQMusicAPI: Sendable {
             }
         }
         return []
+    }
+
+    // MARK: - Home feed (anonymous)
+
+    /// Songs of one (public) playlist by its real ID. Anonymous
+    /// (loginUin 0, no cookies) works for public playlists — this is
+    /// the tap-to-play path for the home feed's QQ playlist cards.
+    func playlistSongs(listID: Int, limit: Int = 100) async throws -> [QQMusicSong] {
+        try await playlistSongs(listID: listID, preferredCookie: nil, limit: limit)
+    }
+
+    /// QQ Music charts, from the anonymous `fcg_myqq_toplist.fcg`.
+    /// MV/有声/电台 lists are filtered out: their detail endpoint has
+    /// no playable songs, so a tap would open an empty chart.
+    func topLists() async throws -> [QQTopInfo] {
+        let json = try await get("https://c.y.qq.com/v8/fcg-bin/fcg_myqq_toplist.fcg?format=json")
+        let data = json["data"] as? [String: Any] ?? json
+        let list = data["topList"] as? [[String: Any]] ?? []
+        var result: [QQTopInfo] = []
+        for item in list {
+            guard let id = item["id"] as? Int else { continue }
+            let name = item["topTitle"] as? String ?? (item["title"] as? String ?? "")
+            guard !Self.isNonSongTopList(id: id, name: name) else { continue }
+            let songs = (item["songList"] as? [[String: Any]]) ?? []
+            let topNames = songs.compactMap { $0["songname"] as? String }.prefix(3)
+            result.append(QQTopInfo(
+                id: id, name: name,
+                subTitle: item["subTitle"] as? String ?? "",
+                topSongNames: Array(topNames),
+                coverURL: Self.normalizedQQImageURL(item["picUrl"])))
+        }
+        return result
+    }
+
+    private static func isNonSongTopList(id: Int, name: String) -> Bool {
+        if id == 201 || id == 75 { return true }
+        let normalized = name.lowercased()
+        return normalized.contains("mv") || name.contains("有声") || name.contains("电台")
+    }
+
+    /// Songs of one chart, from the anonymous `fcg_v8_toplist_cp.fcg`
+    /// detail endpoint. The `songlist` rows are `data`-wrapped the same
+    /// way search rows are, so the shared `song(from:)` parses them.
+    func topListSongs(topid: Int, limit: Int = 30) async throws -> [QQMusicSong] {
+        let url = "https://c.y.qq.com/v8/fcg-bin/fcg_v8_toplist_cp.fcg?format=json&page=detail&type=top&topid=\(topid)&song_begin=0&song_num=\(limit)"
+        let json = try await get(url)
+        let list = json["songlist"] as? [[String: Any]] ?? []
+        return list.compactMap { item -> QQMusicSong? in
+            if let data = item["data"] as? [String: Any] { return song(from: data) }
+            return song(from: item)
+        }
+    }
+
+    /// Recommended playlists for the home feed, from the anonymous
+    /// musicu `RecommendPlaylist.GetRecommendPlaylist` call (uin: 0).
+    func recommendPlaylists(limit: Int = 12) async throws -> [QQMusicUserPlaylist] {
+        let payload: [String: Any] = [
+            "comm": ["ct": 24, "cv": 0],
+            "req_1": [
+                "module": "music.srfDissInfo.RecommendPlaylist",
+                "method": "GetRecommendPlaylist",
+                "param": ["uin": 0, "lastDissid": 0, "songtype": 1, "scene": 0],
+            ],
+        ]
+        let json = try await musicu(payload)
+        let list = nestedArray(json, path: ["req_1", "data", "v_playlist"])
+        var playlists: [QQMusicUserPlaylist] = []
+        for item in list {
+            guard let id = item["tid"] as? Int ?? (item["id"] as? Int) else { continue }
+            let name = item["title"] as? String ?? ""
+            let pic = Self.normalizedQQImageURL(item["cover"])
+                ?? Self.normalizedQQImageURL(item["pic_url"])
+            let songNum = item["songnum"] as? Int ?? 0
+            playlists.append(QQMusicUserPlaylist(
+                id: id, name: name, coverURL: pic, trackCount: songNum))
+            if playlists.count >= max(1, limit) { break }
+        }
+        return playlists
     }
 
     /// Resolves the "我的喜欢" real playlist ID: the `dirid=201`
