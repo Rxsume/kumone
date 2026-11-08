@@ -23,9 +23,9 @@ import Security
 /// `UserDefaults`. Nothing credential-like is ever written to
 /// `UserDefaults`, and no credential is ever logged.
 ///
-/// The class is `@MainActor` like `SpotifyAuthSession`: `@Published`
-/// state is only ever mutated on the main actor, and API-layer callers
-/// reach it with `await QQMusicAuth.shared.<member>`.
+/// The class is `@MainActor`: `@Published` state is only ever mutated
+/// on the main actor, and API-layer callers reach it with
+/// `await QQMusicAuth.shared.<member>`.
 @MainActor
 final class QQMusicAuth: ObservableObject {
     static let shared = QQMusicAuth()

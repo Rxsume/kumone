@@ -10,7 +10,6 @@ struct SettingsView: View {
     @Environment(\.dismiss) private var dismiss
     @State private var loginProvider: ProviderLogin?
     @State private var accountsVersion = 0
-    @StateObject private var spotifySession = SpotifyAuthSession.shared
     // Beans-based QQ/Kugou logins: @Published isLoggedIn/nickname drive
     // these rows, so logout in LoginSheet refreshes them with no bump.
     @ObservedObject private var qqAuth = QQMusicAuth.shared
@@ -470,77 +469,6 @@ struct SettingsView: View {
                         .foregroundStyle(.secondary)
                 }
 
-                Group {
-                    if FNMusicSession.shared.isAuthenticated {
-                        LabeledContent("飞牛音乐", value: FNMusicSession.shared.currentUser?.nickname ?? FNMusicSession.shared.username ?? "")
-                        if let host = FNMusicSession.shared.serverBase.flatMap({ URL(string: $0)?.host }) {
-                            Text(host)
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
-                        }
-                        Button("退出登录", role: .destructive) {
-                            FNMusicSession.shared.logout()
-                            accountsVersion += 1
-                        }
-                    } else {
-                        LabeledContent("飞牛音乐", value: "未登录")
-                        Button("登录飞牛音乐") { loginProvider = .fnmusic }
-                    }
-                }
-
-                Group {
-                    if AppleMusicSession.shared.isSignedIn {
-                        LabeledContent("Apple Music", value: "已登录")
-                        Button("退出登录", role: .destructive) {
-                            AppleMusicSession.shared.signOut()
-                            accountsVersion += 1
-                        }
-                    } else {
-                        LabeledContent("Apple Music", value: "未登录")
-                        Button("登录 Apple Music") { loginProvider = .appleMusic }
-                    }
-                    SecureField("粘贴 Developer Token (JWT)", text: $settings.appleMusicDeveloperToken)
-                    if let expiry = AppleMusicSession.shared.developerTokenExpiry {
-                        Text("当前 Token 有效期至：\(expiry.formatted(date: .long, time: .shortened))")
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                    }
-                    Text("Developer Token 由你自己的 Apple Developer MusicKit 凭据签发（Team ID + Key ID + .p8 私钥），最长 6 个月有效，过期前重新签发并粘贴。.p8 私钥不要放进 App，也不要发给任何人。")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                    Text("登录 Apple Music 后只能浏览目录与曲库（搜索、歌单、已添加的歌曲），不能在 Golia 内播放。")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                }
-            }
-
-            Section("Spotify") {
-                TextField("Spotify Client ID", text: $settings.spotifyClientID)
-                    #if os(iOS)
-                    .autocapitalization(.none)
-                    .autocorrectionDisabled()
-                    #endif
-                TextField("golia-spotify://callback", text: $settings.spotifyRedirectURI)
-                    #if os(iOS)
-                    .keyboardType(.URL)
-                    .textContentType(.URL)
-                    .autocapitalization(.none)
-                    .autocorrectionDisabled()
-                    #endif
-                if spotifySession.isLoggedIn {
-                    LabeledContent("Spotify 账号", value: spotifySession.currentUser?.displayName ?? "")
-                    Button("退出登录", role: .destructive) {
-                        spotifySession.logout()
-                    }
-                } else {
-                    Text("未登录")
-                        .foregroundStyle(.secondary)
-                    Button("登录 Spotify") { loginProvider = .spotify }
-                        .disabled(!SpotifyConfiguration().canLogIn)
-                }
-                Text("登录后只能浏览、搜索与查看歌单，不能播放。Spotify 音频需 librespot，iOS 无此目标。")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
             }
 
             if showsUpdateControls {

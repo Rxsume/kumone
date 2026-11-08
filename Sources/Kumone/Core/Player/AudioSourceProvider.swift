@@ -15,7 +15,6 @@ enum AudioSourceID: String, CaseIterable, Hashable, Codable {
     // existing resolve order is untouched.
     case qqmusic
     case kugou
-    case fnmusic
 
     var displayName: String {
         switch self {
@@ -25,24 +24,23 @@ enum AudioSourceID: String, CaseIterable, Hashable, Codable {
         case .xinghai: return String(localized: "Golia3")
         case .qqmusic: return String(localized: "QQ音乐")
         case .kugou: return String(localized: "酷狗")
-        case .fnmusic: return String(localized: "飞牛音乐")
         }
     }
 
     /// Presentation order in Settings (ikun first): display order only.
     /// Enum case order, storage keys and the UnblockService resolve order
     /// are all unchanged.
-    static var displayOrder: [AudioSourceID] = [.ikun, .pyncmd, .haitangw, .xinghai, .kugou, .qqmusic, .fnmusic]
+    static var displayOrder: [AudioSourceID] = [.ikun, .pyncmd, .haitangw, .xinghai, .kugou, .qqmusic]
 
     /// Unverified third-party sources are off by default (see
     /// SettingsManager): they call third-party endpoints that have not
     /// been verified on device, so they must be opted into explicitly in
     /// Settings. ikun is the preferred source and is on by default.
     /// This covers the script backends (haitangw/xinghai) and the Folia
-    /// platform providers (qqmusic/kugou/fnmusic) alike.
+    /// platform providers (qqmusic/kugou) alike.
     var isScriptBackend: Bool {
         switch self {
-        case .haitangw, .xinghai, .qqmusic, .kugou, .fnmusic: return true
+        case .haitangw, .xinghai, .qqmusic, .kugou: return true
         case .pyncmd, .ikun: return false
         }
     }

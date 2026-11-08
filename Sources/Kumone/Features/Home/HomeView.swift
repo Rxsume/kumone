@@ -27,44 +27,102 @@ final class HomeViewModel: ObservableObject {
     }
 
     @Published var state: State = .idle
+    @Published var currentPlatform: HomePlatform = .netease
     @Published var recommendPlaylists: [PlaylistSummary] = []
     @Published var radarPlaylists: [RadarPlaylist] = []
     @Published var toplists: [ToplistItem] = []
     @Published var newAlbums: [AlbumSummary] = []
     @Published var topArtists: [ArtistSummary] = []
     @Published var dailyFirstCover: String?
+    /// QQ/Kugou home feed for the active platform; empty on NetEase.
+    @Published var platformPlaylists: [PlatformPlaylistSummary] = []
+    @Published var platformToplists: [PlatformToplistItem] = []
 
-    func load(loggedIn: Bool) async {
-        if case .loaded = state { return }
+    func load(platform: HomePlatform, loggedIn: Bool) async {
+        if case .loaded = state, platform == currentPlatform { return }
         state = .loading
+        currentPlatform = platform
 
-        async let playlistsTask = fetchRecommendPlaylists(loggedIn: loggedIn)
-        async let toplistsTask = try? MusicAPI.toplists()
-        async let albumsTask = try? MusicAPI.newAlbums(limit: 20)
-        async let artistsTask = try? MusicAPI.topArtists()
+        if platform == .netease {
+            async let playlistsTask = fetchRecommendPlaylists(loggedIn: loggedIn)
+            async let toplistsTask = try? MusicAPI.toplists()
+            async let albumsTask = try? MusicAPI.newAlbums(limit: 20)
+            async let artistsTask = try? MusicAPI.topArtists()
 
-        let playlists = await playlistsTask
-        recommendPlaylists = playlists
-        toplists = (await toplistsTask ?? []).filter {
-            [19_723_756, 3_779_629, 2_884_035, 3_778_678, 60198].contains($0.id)
-        }
-        newAlbums = await albumsTask ?? []
-        let artists = await artistsTask ?? []
-        topArtists = Array(artists.shuffled().prefix(6))
-
-        if loggedIn {
-            if let daily = try? await MusicAPI.dailyRecommendSongs() {
-                dailyFirstCover = daily.first?.album.picUrl
+            let playlists = await playlistsTask
+            recommendPlaylists = playlists
+            toplists = (await toplistsTask ?? []).filter {
+                [19_723_756, 3_779_629, 2_884_035, 3_778_678, 60198].contains($0.id)
             }
-            await loadRadarPlaylists()
+            newAlbums = await albumsTask ?? []
+            let artists = await artistsTask ?? []
+            topArtists = Array(artists.shuffled().prefix(6))
+
+            if loggedIn {
+                if let daily = try? await MusicAPI.dailyRecommendSongs() {
+                    dailyFirstCover = daily.first?.album.picUrl
+                }
+                await loadRadarPlaylists()
+            }
+
+            state = playlists.isEmpty && newAlbums.isEmpty ? .error(String(localized: "网络连接失败")) : .loaded
+            return
         }
 
-        state = playlists.isEmpty && newAlbums.isEmpty ? .error(String(localized: "网络连接失败")) : .loaded
+        // QQ/Kugou: recommended playlists + charts only. New albums,
+        // top artists, radar and the login feature cards are
+        // NetEase-only — neither platform has a usable endpoint for
+        // them, so those sections are hidden instead of faked.
+        async let playlistsTask = fetchPlatformPlaylists(platform: platform)
+        async let toplistsTask = fetchPlatformToplists(platform: platform)
+        platformPlaylists = await playlistsTask
+        platformToplists = await toplistsTask
+        state = platformPlaylists.isEmpty && platformToplists.isEmpty
+            ? .error(String(localized: "网络连接失败")) : .loaded
     }
 
-    func reload(loggedIn: Bool) async {
+    func reload(platform: HomePlatform, loggedIn: Bool) async {
         state = .idle
-        await load(loggedIn: loggedIn)
+        await load(platform: platform, loggedIn: loggedIn)
+    }
+
+    private func fetchPlatformPlaylists(platform: HomePlatform) async -> [PlatformPlaylistSummary] {
+        switch platform {
+        case .netease:
+            return []
+        case .qqmusic:
+            return (try? await QQMusicAPI.shared.recommendPlaylists(limit: 12))?.map {
+                PlatformPlaylistSummary(source: .qqmusic, platformID: $0.id, name: $0.name,
+                                        coverURL: $0.coverURL, trackCount: $0.trackCount)
+            } ?? []
+        case .kugou:
+            return (try? await KugouMusicAPI.shared.recommendPlaylists(limit: 12))?.map {
+                PlatformPlaylistSummary(source: .kugou, platformID: $0.id, name: $0.name,
+                                        coverURL: $0.coverURL, trackCount: $0.trackCount)
+            } ?? []
+        }
+    }
+
+    private func fetchPlatformToplists(platform: HomePlatform) async -> [PlatformToplistItem] {
+        switch platform {
+        case .netease:
+            return []
+        case .qqmusic:
+            return (try? await QQMusicAPI.shared.topLists())?.map {
+                PlatformToplistItem(
+                    source: .qqmusic, platformID: $0.id, name: $0.name,
+                    coverURL: $0.coverURL,
+                    subtitle: $0.subTitle.isEmpty
+                        ? $0.topSongNames.joined(separator: " / ") : $0.subTitle)
+            } ?? []
+        case .kugou:
+            return (try? await KugouMusicAPI.shared.topLists(limit: 10))?.map {
+                PlatformToplistItem(
+                    source: .kugou, platformID: $0.id, name: $0.name,
+                    coverURL: $0.coverURL,
+                    subtitle: $0.updateFrequency.isEmpty ? nil : $0.updateFrequency)
+            } ?? []
+        }
     }
 
     private func loadRadarPlaylists() async {
@@ -107,6 +165,25 @@ struct HomeView: View {
     @EnvironmentObject private var account: AccountStore
     @EnvironmentObject private var player: PlayerService
     @StateObject private var model = HomeViewModel.shared
+    @ObservedObject private var settings = SettingsManager.shared
+
+    /// `.task(id:)` needs an `Equatable` id; tuples cannot conform to
+    /// `Equatable` in Swift, so the (loggedIn, platform) pair gets a
+    /// tiny struct instead.
+    private struct FeedTaskID: Equatable {
+        let loggedIn: Bool
+        let platform: HomePlatform
+    }
+
+    /// `.topBarLeading` does not exist on macOS; `.navigation` is the
+    /// macOS toolbar leading slot (same pattern as MainWindow.swift).
+    private var platformSwitcherPlacement: ToolbarItemPlacement {
+        #if os(macOS)
+        return .navigation
+        #else
+        return .topBarLeading
+        #endif
+    }
 
     var body: some View {
         ScrollView {
@@ -115,7 +192,7 @@ struct HomeView: View {
                 loadingBody
             case .error(let message):
                 ErrorStateView(message: message) {
-                    Task { await model.reload(loggedIn: account.isLoggedIn) }
+                    Task { await model.reload(platform: settings.homePlatform, loggedIn: account.isLoggedIn) }
                 }
                 .frame(minHeight: 400)
             case .loaded:
@@ -123,8 +200,47 @@ struct HomeView: View {
             }
         }
         .navigationTitle("推荐")
-        .task(id: account.isLoggedIn) {
-            await model.load(loggedIn: account.isLoggedIn)
+        .toolbar {
+            ToolbarItem(placement: platformSwitcherPlacement) {
+                Menu {
+                    ForEach(HomePlatform.allCases) { platform in
+                        Button {
+                            selectPlatform(platform)
+                        } label: {
+                            if platform == settings.homePlatform {
+                                Label(platform.displayName, systemImage: "checkmark")
+                            } else {
+                                Text(platform.displayName)
+                            }
+                        }
+                    }
+                } label: {
+                    HStack(spacing: 4) {
+                        Text(settings.homePlatform.displayName)
+                            .font(.headline)
+                        Image(systemName: "chevron.down")
+                            .font(.caption)
+                    }
+                    .contentShape(Rectangle())
+                }
+            }
+        }
+        .task(id: FeedTaskID(loggedIn: account.isLoggedIn, platform: settings.homePlatform)) {
+            await model.load(platform: settings.homePlatform, loggedIn: account.isLoggedIn)
+        }
+    }
+
+    /// Switching home platform also opts into that platform's content:
+    /// its source toggle is enabled so its songs actually play (and
+    /// appear in search). NetEase has no toggle. Picking the platform
+    /// is an explicit choice, so this is the same opt-in as flipping
+    /// the toggle in Settings → 音源 by hand.
+    private func selectPlatform(_ platform: HomePlatform) {
+        guard platform != settings.homePlatform else { return }
+        settings.homePlatform = platform
+        if let source = platform.sourceID,
+           !settings.enabledAudioSourceIDs.contains(source) {
+            settings.enabledAudioSourceIDs.insert(source)
         }
     }
 
@@ -147,6 +263,23 @@ struct HomeView: View {
 
     private var loadedBody: some View {
         LazyVStack(alignment: .leading, spacing: Theme.Layout.sectionSpacing) {
+            if settings.homePlatform == .netease {
+                netEaseSections
+            } else {
+                platformSections
+            }
+
+            PlayerClearanceSpacer()
+        }
+        .padding(.top, Theme.Layout.pageTopPadding)
+        .padding(.bottom, Theme.Layout.contentInset - 8)
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    /// Today's NetEase feed, byte-identical behaviour: feature cards,
+    /// recommended playlists, radar, charts, new albums, top artists.
+    private var netEaseSections: some View {
+        Group {
             // Anonymous users go straight to recommended playlists;
             // the login entry lives in the sidebar / 我的 tab only.
             if account.isLoggedIn {
@@ -220,12 +353,32 @@ struct HomeView: View {
                     }
                 }
             }
-
-            PlayerClearanceSpacer()
         }
-        .padding(.top, Theme.Layout.pageTopPadding)
-        .padding(.bottom, Theme.Layout.contentInset - 8)
-        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    /// QQ/Kugou feed: recommended playlists + charts only. There is no
+    /// platform playlist/chart detail page, so tapping a card plays
+    /// its songs directly. New albums / top artists / radar / feature
+    /// cards are NetEase-only and hidden here.
+    private var platformSections: some View {
+        Group {
+            if !model.platformPlaylists.isEmpty {
+                Shelf(title: "推荐歌单", rowHeight: Theme.Layout.coverShelfHeight) {
+                    ForEach(Array(model.platformPlaylists.prefix(12).enumerated()), id: \.element.id) { index, playlist in
+                        platformPlaylistCard(playlist)
+                            .staggeredAppearance(index: index, id: "home-platform-rec-\(playlist.id)")
+                    }
+                }
+            }
+
+            if !model.platformToplists.isEmpty {
+                Shelf(title: "排行榜", seeAll: nil, rowHeight: Theme.Layout.coverShelfHeight) {
+                    ForEach(model.platformToplists) { toplist in
+                        platformToplistCard(toplist)
+                    }
+                }
+            }
+        }
     }
 
     // MARK: - Feature cards
@@ -357,26 +510,106 @@ struct HomeView: View {
     }
 
     private func toplistCard(_ toplist: ToplistItem) -> some View {
+        toplistCard(coverURL: toplist.coverImgUrl?.resizedImageURL(384),
+                    name: toplist.name, subtitle: toplist.updateFrequency)
+    }
+
+    /// Shared chart card body (NetEase + platform charts). Platform
+    /// covers are used raw — `resizedImageURL` appends a NetEase
+    /// `param=` size query that other CDNs ignore at best.
+    private func toplistCard(coverURL: URL?, name: String, subtitle: String?) -> some View {
         VStack(alignment: .leading, spacing: 8) {
             ZStack(alignment: .bottomLeading) {
-                CachedAsyncImage(url: toplist.coverImgUrl?.resizedImageURL(384))
+                CachedAsyncImage(url: coverURL)
                     .frame(width: Theme.Layout.cardSize, height: Theme.Layout.cardSize)
                     .clipShape(RoundedRectangle(cornerRadius: Theme.Radius.standard, style: .continuous))
                 LinearGradient(colors: [.clear, .black.opacity(0.55)], startPoint: .center, endPoint: .bottom)
                     .clipShape(RoundedRectangle(cornerRadius: Theme.Radius.standard, style: .continuous))
-                Text(toplist.updateFrequency ?? "")
-                    .font(.system(size: 10, weight: .medium))
-                    .foregroundStyle(.white.opacity(0.9))
-                    .padding(8)
+                if let subtitle, !subtitle.isEmpty {
+                    Text(subtitle)
+                        .font(.system(size: 10, weight: .medium))
+                        .foregroundStyle(.white.opacity(0.9))
+                        .padding(8)
+                }
             }
             .frame(width: Theme.Layout.cardSize, height: Theme.Layout.cardSize)
-            Text(toplist.name)
+            Text(name)
                 .font(.system(size: 13, weight: .medium))
                 .foregroundStyle(.primary)
                 .lineLimit(1)
         }
         .frame(width: Theme.Layout.cardSize, alignment: .leading)
         .contentShape(Rectangle())
+    }
+
+    private func platformPlaylistCard(_ playlist: PlatformPlaylistSummary) -> some View {
+        Button {
+            playPlatformPlaylist(playlist)
+        } label: {
+            CoverCardBody(
+                coverURL: playlist.coverURL,
+                title: playlist.name,
+                subtitle: playlist.trackCount.map { "\($0)首" },
+                titleLineLimit: Theme.Layout.shelfTitleLineLimit
+            ) {
+                playPlatformPlaylist(playlist)
+            }
+        }
+        .buttonStyle(.plain)
+    }
+
+    private func platformToplistCard(_ toplist: PlatformToplistItem) -> some View {
+        Button {
+            playPlatformToplist(toplist)
+        } label: {
+            toplistCard(coverURL: toplist.coverURL, name: toplist.name, subtitle: toplist.subtitle)
+        }
+        .buttonStyle(.plain)
+    }
+
+    /// Tap-to-play for a platform playlist card: there is no platform
+    /// playlist detail page, so the songs are fetched and played
+    /// directly. An empty result shows a toast instead of silence.
+    private func playPlatformPlaylist(_ playlist: PlatformPlaylistSummary) {
+        Task {
+            let songs: [Track]
+            switch playlist.source {
+            case .qqmusic:
+                songs = (try? await QQMusicAPI.shared.playlistSongs(listID: playlist.platformID))?
+                    .compactMap(Track.fromQQSong) ?? []
+            case .kugou:
+                songs = (try? await KugouMusicAPI.shared.playlistSongs(listID: playlist.platformID))?
+                    .compactMap(Track.fromKugouSong) ?? []
+            default:
+                songs = []
+            }
+            guard !songs.isEmpty else {
+                ToastCenter.shared.show(String(localized: "这个歌单暂时没有可播放的歌曲"))
+                return
+            }
+            player.play(tracks: songs, source: .none)
+        }
+    }
+
+    private func playPlatformToplist(_ toplist: PlatformToplistItem) {
+        Task {
+            let songs: [Track]
+            switch toplist.source {
+            case .qqmusic:
+                songs = (try? await QQMusicAPI.shared.topListSongs(topid: toplist.platformID))?
+                    .compactMap(Track.fromQQSong) ?? []
+            case .kugou:
+                songs = (try? await KugouMusicAPI.shared.rankSongs(rankID: toplist.platformID))?
+                    .compactMap(Track.fromKugouSong) ?? []
+            default:
+                songs = []
+            }
+            guard !songs.isEmpty else {
+                ToastCenter.shared.show(String(localized: "这个榜单暂时没有可播放的歌曲"))
+                return
+            }
+            player.play(tracks: songs, source: .none)
+        }
     }
 
     private func playPlaylist(_ id: Int) {

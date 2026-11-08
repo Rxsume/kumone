@@ -8,9 +8,6 @@ import WebKit
 enum ProviderLogin: String, CaseIterable, Identifiable {
     case qqmusic = "QQ音乐"
     case kugou = "酷狗"
-    case fnmusic = "飞牛音乐"
-    case spotify = "Spotify"
-    case appleMusic = "Apple Music"
 
     var id: String { rawValue }
 }
@@ -59,18 +56,6 @@ struct LoginSheet: View {
     @State private var kgQRImage: PlatformImage?
     @State private var kgKey: String?
     @State private var kgPollTask: Task<Void, Never>?
-    // FNMusic form login.
-    @State private var fnBase = FNMusicSession.shared.serverBase ?? ""
-    @State private var fnUsername = FNMusicSession.shared.username ?? ""
-    @State private var fnPassword = ""
-    @State private var fnLoggingIn = false
-    @State private var fnMessage: String?
-    // Spotify OAuth login.
-    @State private var spLoggingIn = false
-    @State private var spMessage: String?
-    // Apple Music (MusicKit) login.
-    @State private var amLoggingIn = false
-    @State private var amMessage: String?
 
     init(initialProvider: ProviderLogin? = nil) {
         _provider = State(initialValue: initialProvider)
@@ -190,9 +175,6 @@ struct LoginSheet: View {
             switch item {
             case .qqmusic: qqSection
             case .kugou: kugouSection
-            case .fnmusic: fnmusicSection
-            case .spotify: spotifySection
-            case .appleMusic: appleMusicSection
             }
         }
     }
@@ -222,7 +204,7 @@ struct LoginSheet: View {
                 }
                 .buttonStyle(.plain)
             }
-            Text("QQ / 酷狗直连官方登录，无需自托管后端；飞牛连自己的 NAS；Spotify 需填 Client ID；Apple Music 需粘贴 Developer Token。")
+            Text("QQ / 酷狗直连官方登录，无需自托管后端。")
                 .font(.system(size: 11))
                 .foregroundStyle(.tertiary)
                 .multilineTextAlignment(.center)
@@ -236,7 +218,6 @@ struct LoginSheet: View {
         // QQ web login loads y.qq.com on appear; sync is manual.
         case .qqmusic: break
         case .kugou: startKugouLogin()
-        case .fnmusic, .spotify, .appleMusic: break
         }
     }
 
@@ -532,231 +513,6 @@ struct LoginSheet: View {
                 }
             } catch {
                 if !Task.isCancelled { kgPhase = .failed(error.localizedDescription) }
-            }
-        }
-    }
-
-    // MARK: - FNMusic
-
-    private var fnmusicSection: some View {
-        VStack(spacing: 16) {
-            Text("登录飞牛音乐，连接你自己的 NAS")
-                .font(.system(size: 12.5))
-                .foregroundStyle(.secondary)
-
-            VStack(spacing: 12) {
-                HStack(spacing: 10) {
-                    Image(systemName: "server.rack")
-                        .font(.system(size: 15)).foregroundStyle(.secondary).frame(width: 20)
-                    TextField("服务器地址，例如 http://192.168.1.10:5666", text: $fnBase)
-                        .textFieldStyle(.plain).font(.system(size: 15))
-                        #if os(iOS)
-                        .keyboardType(.URL).textContentType(.URL)
-                        .autocapitalization(.none).autocorrectionDisabled()
-                        #endif
-                }
-                .fieldChrome()
-
-                HStack(spacing: 10) {
-                    Image(systemName: "person")
-                        .font(.system(size: 15)).foregroundStyle(.secondary).frame(width: 20)
-                    TextField("账号", text: $fnUsername)
-                        .textFieldStyle(.plain).font(.system(size: 15))
-                        #if os(iOS)
-                        .autocapitalization(.none).autocorrectionDisabled()
-                        #endif
-                }
-                .fieldChrome()
-
-                HStack(spacing: 10) {
-                    Image(systemName: "lock")
-                        .font(.system(size: 15)).foregroundStyle(.secondary).frame(width: 20)
-                    SecureField("密码", text: $fnPassword)
-                        .textFieldStyle(.plain).font(.system(size: 15))
-                }
-                .fieldChrome()
-            }
-            .padding(.horizontal, 28)
-
-            if let fnMessage {
-                Text(fnMessage)
-                    .font(.system(size: 12)).foregroundStyle(Theme.accent)
-                    .multilineTextAlignment(.center).padding(.horizontal, 24)
-            }
-
-            Button {
-                loginFNMusic()
-            } label: {
-                Group {
-                    if fnLoggingIn {
-                        ProgressView().controlSize(.small).tint(.white)
-                    } else {
-                        Text("登录")
-                    }
-                }
-                .font(.system(size: 15, weight: .semibold)).foregroundStyle(.white)
-                .frame(maxWidth: .infinity).padding(.vertical, 13)
-                .background(
-                    Capsule().fill(canLoginFNMusic ? AnyShapeStyle(Theme.accentGradient)
-                                                    : AnyShapeStyle(Color.secondary.opacity(0.25)))
-                )
-            }
-            .buttonStyle(.pressable).disabled(!canLoginFNMusic)
-            .padding(.horizontal, 28).padding(.top, 2)
-        }
-        .frame(minHeight: 300)
-    }
-
-    private var canLoginFNMusic: Bool {
-        !fnLoggingIn && !fnBase.trimmingCharacters(in: .whitespaces).isEmpty
-            && !fnUsername.trimmingCharacters(in: .whitespaces).isEmpty
-            && !fnPassword.isEmpty
-    }
-
-    private func loginFNMusic() {
-        fnLoggingIn = true
-        fnMessage = nil
-        Task {
-            defer { fnLoggingIn = false }
-            do {
-                let user = try await FNMusicSession.shared.login(base: fnBase, username: fnUsername, password: fnPassword)
-                ToastCenter.shared.show(String(localized: "飞牛音乐已登录，欢迎回来，\(user.nickname)"))
-                dismiss()
-            } catch {
-                fnMessage = error.localizedDescription
-            }
-        }
-    }
-
-    // MARK: - Spotify
-
-    private var spotifySection: some View {
-        VStack(spacing: 16) {
-            Text("用 Spotify 账号登录（浏览器授权），只浏览、搜索与查看歌单，不能播放。")
-                .font(.system(size: 12.5))
-                .foregroundStyle(.secondary)
-                .multilineTextAlignment(.center)
-                .padding(.horizontal, 24)
-            if !SpotifyConfiguration().canLogIn {
-                Text("需先在 Spotify Developer Dashboard 注册应用，并在设置 → Spotify 里填入 Client ID 与 Redirect URI。")
-                    .font(.system(size: 12))
-                    .foregroundStyle(Theme.accent)
-                    .multilineTextAlignment(.center)
-                    .padding(.horizontal, 24)
-            }
-            Button {
-                loginSpotify()
-            } label: {
-                Group {
-                    if spLoggingIn {
-                        ProgressView().controlSize(.small).tint(.white)
-                    } else {
-                        Text("登录 Spotify")
-                    }
-                }
-                .font(.system(size: 15, weight: .semibold)).foregroundStyle(.white)
-                .frame(maxWidth: .infinity).padding(.vertical, 13)
-                .background(
-                    Capsule().fill(SpotifyConfiguration().canLogIn && !spLoggingIn
-                        ? AnyShapeStyle(Theme.accentGradient)
-                        : AnyShapeStyle(Color.secondary.opacity(0.25)))
-                )
-            }
-            .buttonStyle(.pressable).disabled(!SpotifyConfiguration().canLogIn || spLoggingIn)
-            .padding(.horizontal, 28).padding(.top, 2)
-            if let spMessage {
-                Text(spMessage)
-                    .font(.system(size: 12)).foregroundStyle(Theme.accent)
-                    .multilineTextAlignment(.center).padding(.horizontal, 24)
-            }
-        }
-        .frame(minHeight: 200)
-    }
-
-    private func loginSpotify() {
-        spLoggingIn = true
-        spMessage = nil
-        Task {
-            defer { spLoggingIn = false }
-            do {
-                let profile = try await SpotifyAuthSession.shared.beginLogin()
-                ToastCenter.shared.show(String(localized: "Spotify 已登录，欢迎回来，\(profile.displayName ?? "")"))
-                dismiss()
-            } catch {
-                spMessage = error.localizedDescription
-            }
-        }
-    }
-
-    // MARK: - Apple Music
-
-    private var appleMusicSection: some View {
-        VStack(spacing: 16) {
-            Text("用 Apple ID 登录 Apple Music（系统授权），只浏览目录与曲库，不播放。")
-                .font(.system(size: 12.5))
-                .foregroundStyle(.secondary)
-                .multilineTextAlignment(.center)
-                .padding(.horizontal, 24)
-            if let blocker = AppleMusicSession.shared.loginBlocker {
-                Text(appleMusicBlockerText(blocker))
-                    .font(.system(size: 12))
-                    .foregroundStyle(Theme.accent)
-                    .multilineTextAlignment(.center)
-                    .padding(.horizontal, 24)
-            }
-            Button {
-                loginAppleMusic()
-            } label: {
-                Group {
-                    if amLoggingIn {
-                        ProgressView().controlSize(.small).tint(.white)
-                    } else {
-                        Text("登录 Apple Music")
-                    }
-                }
-                .font(.system(size: 15, weight: .semibold)).foregroundStyle(.white)
-                .frame(maxWidth: .infinity).padding(.vertical, 13)
-                .background(
-                    Capsule().fill(AppleMusicSession.shared.loginBlocker == nil && !amLoggingIn
-                        ? AnyShapeStyle(Theme.accentGradient)
-                        : AnyShapeStyle(Color.secondary.opacity(0.25)))
-                )
-            }
-            .buttonStyle(.pressable).disabled(AppleMusicSession.shared.loginBlocker != nil || amLoggingIn)
-            .padding(.horizontal, 28).padding(.top, 2)
-            if let amMessage {
-                Text(amMessage)
-                    .font(.system(size: 12)).foregroundStyle(Theme.accent)
-                    .multilineTextAlignment(.center).padding(.horizontal, 24)
-            }
-        }
-        .frame(minHeight: 200)
-    }
-
-    private func appleMusicBlockerText(_ blocker: AppleMusicSession.LoginBlocker) -> String {
-        switch blocker {
-        case .missingDeveloperToken:
-            return "需先在设置 → 账号 → Apple Music 里粘贴 Developer Token（用自己的 Apple Developer MusicKit 凭据签发）。"
-        case .developerTokenExpired:
-            return "Developer Token 已过期，请重新签发并粘贴。"
-        case .notAuthorized:
-            return "已在系统设置里拒绝 Apple Music 访问，请去设置 → 隐私与安全性里允许。"
-        case .missingUserToken:
-            return "点下方按钮登录 Apple Music。"
-        }
-    }
-
-    private func loginAppleMusic() {
-        amLoggingIn = true
-        amMessage = nil
-        Task {
-            defer { amLoggingIn = false }
-            do {
-                try await AppleMusicSession.shared.signIn()
-                ToastCenter.shared.show(String(localized: "Apple Music 已登录"))
-                dismiss()
-            } catch {
-                amMessage = error.localizedDescription
             }
         }
     }

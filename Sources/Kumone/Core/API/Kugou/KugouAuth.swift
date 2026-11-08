@@ -25,9 +25,9 @@ import Security
 /// device, not the account, and minting a new device identity on every
 /// login would look like a fresh device each time.
 ///
-/// `@MainActor` like `QQMusicAuth` / `SpotifyAuthSession`: `@Published`
-/// state is only ever mutated on the main actor, and API-layer callers
-/// reach the auth with `await KugouMusicAuth.shared.<member>`.
+/// `@MainActor` like `QQMusicAuth`: `@Published` state is only ever
+/// mutated on the main actor, and API-layer callers reach the auth
+/// with `await KugouMusicAuth.shared.<member>`.
 @MainActor
 final class KugouMusicAuth: ObservableObject {
     static let shared = KugouMusicAuth()
