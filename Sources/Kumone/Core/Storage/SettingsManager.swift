@@ -458,15 +458,7 @@ final class SettingsManager: ObservableObject {
         static let fmMode = "settings.fmMode"
         static let unblock = "settings.enableUnblock"
         static let unblockSources = "settings.enabledUnblockSources"
-        // Folia platform providers (folia-full-ios-port): backend URLs and
-        // user-supplied credentials. Empty means "not configured". The
-        // sessions read these keys straight from UserDefaults; the
-        // @Published properties below exist for Settings UI binding only.
-        static let fnmusicServerURL = "settings.fnmusicServerURL"
-        static let fnmusicUsername = "settings.fnmusicUsername"
-        static let spotifyClientID = "settings.spotifyClientID"
-        static let spotifyRedirectURI = "settings.spotifyRedirectURI"
-        static let appleMusicDeveloperToken = "settings.appleMusicDeveloperToken"
+
         // Folia B12: global lyric timeline offset, milliseconds, ±2000.
         static let globalLyricTimelineOffsetMs = "settings.globalLyricTimelineOffsetMs"
         // Folia B18: report listening to NetEase (scrobble), default on.
@@ -491,6 +483,7 @@ final class SettingsManager: ObservableObject {
         static let audioCacheAutomatic = "settings.audioCacheAutomatic"
         static let lyricAnimationStyle = "settings.lyricAnimationStyle"
         static let preferredLyricSource = "settings.preferredLyricSource"
+        static let homePlatform = "settings.homePlatform"
         static let themePreset = "settings.themePreset"
         static let customTheme = "settings.customTheme"
         static let preferCustomTheme = "settings.preferCustomTheme"
@@ -723,34 +716,6 @@ final class SettingsManager: ObservableObject {
 
     var canResolveUnblockedTracks: Bool {
         enableUnblock && !enabledAudioSourceIDs.isEmpty
-    }
-
-    /// Folia platform provider configuration (folia-full-ios-port).
-    /// User-supplied credentials (Spotify Client ID, Apple Music
-    /// developer token) are filled in by the user in Settings; empty
-    /// means the platform is not configured. Never write a credential
-    /// here — there are no defaults for them.
-    /// QQ/Kugou no longer take a self-hosted backend address (Beans
-    /// replacement): they log in straight against the official
-    /// services, so their backend-URL keys were removed.
-    @Published var fnmusicServerURL: String {
-        didSet { UserDefaults.standard.set(fnmusicServerURL, forKey: Keys.fnmusicServerURL) }
-    }
-
-    @Published var fnmusicUsername: String {
-        didSet { UserDefaults.standard.set(fnmusicUsername, forKey: Keys.fnmusicUsername) }
-    }
-
-    @Published var spotifyClientID: String {
-        didSet { UserDefaults.standard.set(spotifyClientID, forKey: Keys.spotifyClientID) }
-    }
-
-    @Published var spotifyRedirectURI: String {
-        didSet { UserDefaults.standard.set(spotifyRedirectURI, forKey: Keys.spotifyRedirectURI) }
-    }
-
-    @Published var appleMusicDeveloperToken: String {
-        didSet { UserDefaults.standard.set(appleMusicDeveloperToken, forKey: Keys.appleMusicDeveloperToken) }
     }
 
     /// Report listening to NetEase (scrobble), Folia B18. On by default,
@@ -1023,6 +988,12 @@ final class SettingsManager: ObservableObject {
     /// NetEase first by default, which preserves today's behaviour.
     @Published var preferredLyricSource: LyricSource {
         didSet { UserDefaults.standard.set(preferredLyricSource.rawValue, forKey: Keys.preferredLyricSource) }
+    }
+
+    /// Home-page platform: which service's feed the home page shows.
+    /// NetEase by default, which preserves today's behaviour.
+    @Published var homePlatform: HomePlatform {
+        didSet { UserDefaults.standard.set(homePlatform.rawValue, forKey: Keys.homePlatform) }
     }
 
     /// Preferred lyric source with the master switch off: NetEase only, i.e.
@@ -2488,11 +2459,6 @@ final class SettingsManager: ObservableObject {
             )
         }
         autoCheckUpdates = defaults.object(forKey: Keys.autoCheckUpdates) as? Bool ?? true
-        fnmusicServerURL = defaults.string(forKey: Keys.fnmusicServerURL) ?? ""
-        fnmusicUsername = defaults.string(forKey: Keys.fnmusicUsername) ?? ""
-        spotifyClientID = defaults.string(forKey: Keys.spotifyClientID) ?? ""
-        spotifyRedirectURI = defaults.string(forKey: Keys.spotifyRedirectURI) ?? ""
-        appleMusicDeveloperToken = defaults.string(forKey: Keys.appleMusicDeveloperToken) ?? ""
         neteaseScrobbleEnabled = defaults.object(forKey: Keys.neteaseScrobbleEnabled) as? Bool ?? true
         showDesktopLyrics = defaults.object(forKey: Keys.desktopLyrics) as? Bool ?? false
         #if os(macOS)
@@ -2523,6 +2489,8 @@ final class SettingsManager: ObservableObject {
             .flatMap(LyricAnimationStyle.init) ?? .fade
         preferredLyricSource = defaults.string(forKey: Keys.preferredLyricSource)
             .flatMap(LyricSource.init) ?? .netease
+        homePlatform = defaults.string(forKey: Keys.homePlatform)
+            .flatMap(HomePlatform.init) ?? .netease
         themePresetID = defaults.string(forKey: Keys.themePreset) ?? "default"
         customThemeJSON = defaults.string(forKey: Keys.customTheme) ?? ""
         preferCustomTheme = defaults.object(forKey: Keys.preferCustomTheme) as? Bool ?? false
