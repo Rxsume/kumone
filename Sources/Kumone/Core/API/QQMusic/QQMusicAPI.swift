@@ -58,6 +58,14 @@ struct QQMusicArtist: Hashable, Identifiable, Sendable {
     let mid: String? = nil
 
     var id: String { name }
+
+    /// Explicit init: CI (run #82) rejects the synthesized memberwise
+    /// init's `mid:` argument, so spell it out.
+    init(name: String, picURL: URL?, mid: String? = nil) {
+        self.name = name
+        self.picURL = picURL
+        self.mid = mid
+    }
 }
 
 /// One QQ Music album search hit.
@@ -70,6 +78,15 @@ struct QQMusicAlbum: Hashable, Identifiable, Sendable {
     let mid: String? = nil
 
     var id: String { "\(artistName)-\(name)" }
+
+    /// Explicit init: CI (run #82) rejects the synthesized memberwise
+    /// init's `mid:` argument, so spell it out.
+    init(name: String, artistName: String, picURL: URL?, mid: String? = nil) {
+        self.name = name
+        self.artistName = artistName
+        self.picURL = picURL
+        self.mid = mid
+    }
 }
 
 /// Full QQ Music album detail, from `fcg_v8_album_info_cp.fcg`.
@@ -1003,8 +1020,8 @@ final class QQMusicAPI: Sendable {
         }
         let json = try await get(url.absoluteString, referer: "https://y.qq.com/portal/player.html")
         let data = json["data"] as? [String: Any] ?? [:]
-        let song = data["song"] as? [String: Any] ?? [:]
-        let list = song["list"] as? [[String: Any]] ?? []
+        let songData = data["song"] as? [String: Any] ?? [:]
+        let list = songData["list"] as? [[String: Any]] ?? []
         return list.compactMap { song(from: $0) }
     }
 
