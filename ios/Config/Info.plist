@@ -37,7 +37,23 @@
                 <string>rumxs</string>
             </array>
         </dict>
+        <!-- Spotify OAuth callback (folia-full-ios-port). Deliberately a
+             separate scheme from golia://, which serves Live Activity
+             deep links; the Spotify redirect URI is golia-spotify://callback
+             and must be registered verbatim in the Spotify Dashboard. -->
+        <dict>
+            <key>CFBundleURLName</key>
+            <string>sb.moe.kumone.spotify</string>
+            <key>CFBundleURLSchemes</key>
+            <array>
+                <string>golia-spotify</string>
+            </array>
+        </dict>
     </array>
+    <!-- Apple Music login (folia-full-ios-port, MusicKit): required —
+         MusicAuthorization.request() crashes without it. -->
+    <key>NSAppleMusicUsageDescription</key>
+    <string>Golia 需要访问你的 Apple Music 曲库，以显示你的歌单与已添加的歌曲</string>
     <!-- Live Activities (Dynamic Island / lock screen) require this opt-in:
          without NSSupportsLiveActivities, iOS refuses to start any
          ActivityKit activity and the per-app Live Activities toggle never
