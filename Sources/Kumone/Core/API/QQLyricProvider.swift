@@ -669,11 +669,12 @@ struct QQLyricProvider: LyricProvider {
     #if canImport(zlib)
     private static func inflateRawDeflate(_ data: Data) -> Data? {
         guard !data.isEmpty else { return Data() }
-        if let inflated = Self.inflate(data, windowBits: MAX_WBITS) { return inflated }
-        return Self.inflate(data, windowBits: -MAX_WBITS)
+        if let inflated = Self.inflateWithWindowBits(data, windowBits: MAX_WBITS) { return inflated }
+        return Self.inflateWithWindowBits(data, windowBits: -MAX_WBITS)
     }
 
-    private static func inflate(_ data: Data, windowBits: CInt) -> Data? {
+    /// Named to avoid colliding with zlib's C `inflate` below.
+    private static func inflateWithWindowBits(_ data: Data, windowBits: CInt) -> Data? {
         return data.withUnsafeBytes { inputRaw -> Data? in
             guard let inputBase = inputRaw.baseAddress?.assumingMemoryBound(to: Bytef.self) else { return nil }
             var stream = z_stream()
