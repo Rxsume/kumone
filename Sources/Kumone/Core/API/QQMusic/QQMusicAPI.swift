@@ -1158,30 +1158,119 @@ final class QQMusicAPI: Sendable {
     }
 
     /// Recommended playlists for the home feed, from the anonymous
-    /// musicu `RecommendPlaylist.GetRecommendPlaylist` call (uin: 0).
+    /// `PlaylistSquare.GetRecommendFeed` musicu call.
+    ///
+    /// The old `RecommendPlaylist.GetRecommendPlaylist` (uin: 0) is
+    /// dead for anonymous callers: it now answers code 500003 with no
+    /// data, which is why the 推荐歌单 shelf rendered empty while the
+    /// charts (a different endpoint) kept working. `GetRecommendFeed`
+    /// is the replacement the Folia backend (`qq-music-api`) uses for
+    /// the same shelf, verified anonymous from this VM (code 0, 12
+    /// items, `List[].Playlist.basic` with `tid`/`title`/`song_cnt`
+    /// and `cover.{medium,big,default,small}_url`).
     func recommendPlaylists(limit: Int = 12) async throws -> [QQMusicUserPlaylist] {
         let payload: [String: Any] = [
             "comm": ["ct": 24, "cv": 0],
             "req_1": [
-                "module": "music.srfDissInfo.RecommendPlaylist",
-                "method": "GetRecommendPlaylist",
-                "param": ["uin": 0, "lastDissid": 0, "songtype": 1, "scene": 0],
+                "module": "music.playlist.PlaylistSquare",
+                "method": "GetRecommendFeed",
+                "param": ["From": 0, "Size": max(1, limit)],
             ],
         ]
         let json = try await musicu(payload)
-        let list = nestedArray(json, path: ["req_1", "data", "v_playlist"])
+        let list = nestedArray(json, path: ["req_1", "data", "List"])
         var playlists: [QQMusicUserPlaylist] = []
         for item in list {
-            guard let id = item["tid"] as? Int ?? (item["id"] as? Int) else { continue }
-            let name = item["title"] as? String ?? ""
-            let pic = Self.normalizedQQImageURL(item["cover"])
-                ?? Self.normalizedQQImageURL(item["pic_url"])
-            let songNum = item["songnum"] as? Int ?? 0
+            guard let basic = (item["Playlist"] as? [String: Any])?["basic"] as? [String: Any],
+                  let id = basic["tid"] as? Int, id > 0 else { continue }
+            let name = basic["title"] as? String ?? ""
+            let cover = basic["cover"] as? [String: Any] ?? [:]
+            let pic = Self.normalizedQQImageURL(cover["medium_url"])
+                ?? Self.normalizedQQImageURL(cover["big_url"])
+                ?? Self.normalizedQQImageURL(cover["default_url"])
+                ?? Self.normalizedQQImageURL(cover["small_url"])
+            let songNum = basic["song_cnt"] as? Int ?? 0
             playlists.append(QQMusicUserPlaylist(
                 id: id, name: name, coverURL: pic, trackCount: songNum))
             if playlists.count >= max(1, limit) { break }
         }
         return playlists
+    }
+
+    /// Recommended songs for the QQ home feed ("推荐"), from the
+    /// anonymous radar (`TrackRelationServer.GetRadarSong`, QQ's
+    /// 刷歌/雷达 — the same source Folia's explore page uses for its
+    /// radar shelf, verified anonymous from this VM: code 0, 10 songs
+    /// per page, `VecSongs[].Track` in `track_info` shape, pages 1
+    /// and 2 with zero overlap). Pages are fetched in parallel and
+    /// merged in page order, deduped by songmid. Rows parse with the
+    /// shared `song(from:)` — radar tracks carry `mid`/`name`/`singer`/
+    /// `album`/`interval`/`file.media_mid`, everything it reads.
+    func radarSongs(limit: Int = 20) async throws -> [QQMusicSong] {
+        let pages = max(1, (limit + 9) / 10)
+        var byPage: [Int: [QQMusicSong]] = [:]
+        await withTaskGroup(of: (Int, [QQMusicSong]).self) { group in
+            for page in 1...pages {
+                group.addTask {
+                    let payload: [String: Any] = [
+                        "comm": ["ct": 24, "cv": 0],
+                        "req_1": [
+                            "module": "music.recommend.TrackRelationServer",
+                            "method": "GetRadarSong",
+                            "param": ["Page": page, "ReqType": 0,
+                                      "FavSongs": [], "EntranceSongs": []],
+                        ],
+                    ]
+                    guard let json = try? await self.musicu(payload) else { return (page, []) }
+                    let songs = self.nestedArray(json, path: ["req_1", "data", "VecSongs"])
+                        .compactMap { item -> QQMusicSong? in
+                            guard let track = item["Track"] as? [String: Any] else { return nil }
+                            return self.song(from: track)
+                        }
+                    return (page, songs)
+                }
+            }
+            for await (page, pageSongs) in group { byPage[page] = pageSongs }
+        }
+        var seen = Set<String>()
+        var result: [QQMusicSong] = []
+        for page in 1...pages {
+            for song in byPage[page] ?? [] {
+                guard result.count < limit else { break }
+                guard seen.insert(song.songmid).inserted else { continue }
+                result.append(song)
+            }
+        }
+        return result
+    }
+
+    /// Hot songs for the QQ home feed ("热门歌曲"): the top of the
+    /// 巅峰榜·热歌 chart (topid 26), via the same detail endpoint the
+    /// chart cards already use — no new endpoint to verify.
+    func hotSongs(limit: Int = 15) async throws -> [QQMusicSong] {
+        try await topListSongs(topid: 26, limit: limit)
+    }
+
+    /// Hot artists for the QQ home feed ("热门歌手"): the
+    /// popularity-ordered singer list (`v8.fcg`,
+    /// `key=all_all_all`), verified anonymous from this VM (code 0;
+    /// the first rows are 薛之谦 / 周杰伦 / BIGBANG / 陈奕迅 /
+    /// 林俊杰 …). Avatars use the T001 singer template — the T002
+    /// album template 404s for singer mids (see `singerPhotoURL`).
+    func hotArtists(limit: Int = 12) async throws -> [QQMusicArtist] {
+        let url = "https://c.y.qq.com/v8/fcg-bin/v8.fcg?g_tk=5381&format=json&channel=singer&page=list&key=all_all_all&pagesize=\(max(1, limit))&pagenum=1"
+        let json = try await get(url)
+        let data = json["data"] as? [String: Any] ?? [:]
+        let list = data["list"] as? [[String: Any]] ?? []
+        var artists: [QQMusicArtist] = []
+        for item in list {
+            guard artists.count < max(1, limit) else { break }
+            let name = item["Fsinger_name"] as? String ?? ""
+            guard !name.isEmpty else { continue }
+            let mid = item["Fsinger_mid"] as? String
+            artists.append(QQMusicArtist(name: name, picURL: Self.singerPhotoURL(mid), mid: mid))
+        }
+        return artists
     }
 
     /// Resolves the "我的喜欢" real playlist ID: the `dirid=201`
