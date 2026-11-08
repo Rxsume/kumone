@@ -2252,17 +2252,23 @@ final class PlayerService: ObservableObject {
         }
     }
 
+    /// Global lyric timeline offset (Folia B12), seconds. 0 when the
+    /// Folia master switch is off (see SettingsManager).
+    private var lyricOffsetSeconds: TimeInterval {
+        TimeInterval(SettingsManager.shared.effectiveGlobalLyricTimelineOffsetMs) / 1000
+    }
+
     private func loadLyrics(for track: Track, generation: Int) async {
         let scope = offlineAccountScope
         if let scope, let saved = await OfflineMetadataStore.shared.lyrics(trackID: track.id, scope: scope) {
             guard generation == resolveGeneration else { return }
-            lyrics = LyricsParser.parse(saved)
+            lyrics = LyricsParser.parse(saved).applyingOffset(lyricOffsetSeconds)
             updateLyricsCursor(at: progress)
         }
         guard !usesOfflineQueue else { return }
         let response = await MusicAPI.lyric(for: track)
         guard generation == resolveGeneration, let response else { return }
-        lyrics = LyricsParser.parse(response)
+        lyrics = LyricsParser.parse(response).applyingOffset(lyricOffsetSeconds)
         updateLyricsCursor(at: progress)
         if let scope, SettingsManager.shared.enableAudioCache || DownloadManager.shared.isDownloaded(trackID: track.id) {
             await OfflineMetadataStore.shared.keepPlaybackData(track: track, lyrics: response, scope: scope)
@@ -2493,6 +2499,7 @@ final class PlayerService: ObservableObject {
     // MARK: - Scrobble
 
     private func scrobbleStartIfNeeded() {
+        guard SettingsManager.shared.effectiveNetEaseScrobbleEnabled else { return }
         guard let track = currentTrack, !startScrobbled else { return }
         startScrobbled = true
         let trackID = track.id
@@ -2503,6 +2510,7 @@ final class PlayerService: ObservableObject {
     }
 
     private func scrobbleIfNeeded(completed: Bool) {
+        guard SettingsManager.shared.effectiveNetEaseScrobbleEnabled else { return }
         guard let track = currentTrack, !scrobbled, progress > 1 else { return }
         scrobbled = true
         let seconds = completed ? Int(duration) : Int(progress)

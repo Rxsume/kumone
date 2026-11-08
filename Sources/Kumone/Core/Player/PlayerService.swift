@@ -2869,8 +2869,14 @@ final class PlayerService: ObservableObject {
         if let scope { await OfflineMetadataStore.shared.keepPlaybackData(track: track, lyrics: response, scope: scope) }
     }
 
+    /// Global lyric timeline offset (Folia B12), seconds. 0 when the
+    /// Folia master switch is off (see SettingsManager).
+    private var lyricOffsetSeconds: TimeInterval {
+        TimeInterval(SettingsManager.shared.effectiveGlobalLyricTimelineOffsetMs) / 1000
+    }
+
     private func applyLyrics(_ response: LyricResponse) {
-        lyrics = LyricsParser.parse(response)
+        lyrics = LyricsParser.parse(response).applyingOffset(lyricOffsetSeconds)
         updateLyricsCursor(at: livePlaybackTime)
         currentLyricLRC = response.lrc?.lyric
         persistCurrentLyricsSidecar()
@@ -3381,6 +3387,7 @@ final class PlayerService: ObservableObject {
     /// point playback actually begins — the cache-hit path and the streaming
     /// path both reach it, and `startPlaying` clears the flag.
     private func scrobbleStartIfNeeded(_ track: Track) {
+        guard SettingsManager.shared.effectiveNetEaseScrobbleEnabled else { return }
         guard !startScrobbled else { return }
         startScrobbled = true
         let tid = track.id
@@ -3389,6 +3396,7 @@ final class PlayerService: ObservableObject {
     }
 
     private func scrobbleIfNeeded(completed: Bool) {
+        guard SettingsManager.shared.effectiveNetEaseScrobbleEnabled else { return }
         guard let track = currentTrack, !scrobbled, progress > 1 else { return }
         scrobbled = true
         let seconds = completed ? Int(duration) : Int(progress)

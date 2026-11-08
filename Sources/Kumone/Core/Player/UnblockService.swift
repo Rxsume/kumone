@@ -22,6 +22,13 @@ enum UnblockService {
     private static let fallbackProviders: [any AudioSourceProvider] = [
         HaitangwAudioSourceProvider(),
         XinghaiAudioSourceProvider(),
+        // Folia platform providers, appended last so the existing order
+        // is untouched. Kugou first: its anonymous search needs no
+        // backend and no login, so it can resolve out of the box; QQ and
+        // FNMusic only resolve once their login is configured.
+        KugouAudioSourceProvider(),
+        QQMusicAudioSourceProvider(),
+        FNMusicAudioSourceProvider(),
     ]
 
     struct Resolution {
