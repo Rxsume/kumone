@@ -462,8 +462,6 @@ final class SettingsManager: ObservableObject {
         // user-supplied credentials. Empty means "not configured". The
         // sessions read these keys straight from UserDefaults; the
         // @Published properties below exist for Settings UI binding only.
-        static let qqMusicAPIBaseURL = "settings.qqMusicAPIBaseURL"
-        static let kugouApiBaseURL = "settings.kugouApiBaseURL"
         static let fnmusicServerURL = "settings.fnmusicServerURL"
         static let fnmusicUsername = "settings.fnmusicUsername"
         static let spotifyClientID = "settings.spotifyClientID"
@@ -728,19 +726,13 @@ final class SettingsManager: ObservableObject {
     }
 
     /// Folia platform provider configuration (folia-full-ios-port).
-    /// Self-hosted backend addresses (QQ/Kugou) and user-supplied
-    /// credentials (Spotify Client ID, Apple Music developer token) are
-    /// filled in by the user in Settings; empty means the platform is
-    /// not configured. Never write a backend address or a credential
+    /// User-supplied credentials (Spotify Client ID, Apple Music
+    /// developer token) are filled in by the user in Settings; empty
+    /// means the platform is not configured. Never write a credential
     /// here — there are no defaults for them.
-    @Published var qqMusicAPIBaseURL: String {
-        didSet { UserDefaults.standard.set(qqMusicAPIBaseURL, forKey: Keys.qqMusicAPIBaseURL) }
-    }
-
-    @Published var kugouApiBaseURL: String {
-        didSet { UserDefaults.standard.set(kugouApiBaseURL, forKey: Keys.kugouApiBaseURL) }
-    }
-
+    /// QQ/Kugou no longer take a self-hosted backend address (Beans
+    /// replacement): they log in straight against the official
+    /// services, so their backend-URL keys were removed.
     @Published var fnmusicServerURL: String {
         didSet { UserDefaults.standard.set(fnmusicServerURL, forKey: Keys.fnmusicServerURL) }
     }
@@ -2496,8 +2488,6 @@ final class SettingsManager: ObservableObject {
             )
         }
         autoCheckUpdates = defaults.object(forKey: Keys.autoCheckUpdates) as? Bool ?? true
-        qqMusicAPIBaseURL = defaults.string(forKey: Keys.qqMusicAPIBaseURL) ?? ""
-        kugouApiBaseURL = defaults.string(forKey: Keys.kugouApiBaseURL) ?? ""
         fnmusicServerURL = defaults.string(forKey: Keys.fnmusicServerURL) ?? ""
         fnmusicUsername = defaults.string(forKey: Keys.fnmusicUsername) ?? ""
         spotifyClientID = defaults.string(forKey: Keys.spotifyClientID) ?? ""
