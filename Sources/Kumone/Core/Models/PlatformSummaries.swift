@@ -1,5 +1,34 @@
 import Foundation
 
+/// The home-page platform: which service's feed the home page shows.
+/// NetEase is the default and preserves today's behaviour; QQ/Kugou
+/// feeds are anonymous (their home endpoints need no login).
+enum HomePlatform: String, CaseIterable, Identifiable {
+    case netease
+    case qqmusic
+    case kugou
+
+    var id: String { rawValue }
+
+    var displayName: String {
+        switch self {
+        case .netease: return String(localized: "网易云")
+        case .qqmusic: return String(localized: "QQ音乐")
+        case .kugou: return String(localized: "酷狗")
+        }
+    }
+
+    /// The audio-source toggle that gates this platform's search
+    /// results and playback fallback. Nil for NetEase (always on).
+    var sourceID: AudioSourceID? {
+        switch self {
+        case .netease: return nil
+        case .qqmusic: return .qqmusic
+        case .kugou: return .kugou
+        }
+    }
+}
+
 /// A QQ/Kugou artist hit from cross-platform search: just enough to
 /// render a card and open `PlatformArtistDetailView`. The detail page
 /// loads songs/albums from the platform APIs; there is no NetEase ID
@@ -25,4 +54,33 @@ struct PlatformAlbumSummary: Hashable, Identifiable, Sendable {
     let platformID: String?
 
     var id: String { "\(source.rawValue)|\(platformID ?? "name:\(artistName)|\(name)")" }
+}
+
+/// A QQ/Kugou playlist from the platform home feed: just enough to
+/// render a card. There is no platform playlist detail page — tapping
+/// a card plays the playlist's songs directly.
+struct PlatformPlaylistSummary: Hashable, Identifiable, Sendable {
+    let source: AudioSourceID
+    /// QQ playlist tid / Kugou special id.
+    let platformID: Int
+    let name: String
+    let coverURL: URL?
+    /// Song count when the feed carries one.
+    let trackCount: Int?
+
+    var id: String { "\(source.rawValue)|\(platformID)" }
+}
+
+/// A QQ/Kugou chart from the platform home feed: just enough to
+/// render a card. Tapping a card plays the chart's songs directly.
+struct PlatformToplistItem: Hashable, Identifiable, Sendable {
+    let source: AudioSourceID
+    /// QQ top id / Kugou rank id.
+    let platformID: Int
+    let name: String
+    let coverURL: URL?
+    /// QQ `subTitle` / Kugou update frequency, when the feed has one.
+    let subtitle: String?
+
+    var id: String { "\(source.rawValue)|\(platformID)" }
 }
