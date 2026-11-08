@@ -5,9 +5,9 @@ import os.log
 /// Resolves gray tracks, trying sources in this order: ikun first (the
 /// preferred source), then the direct pyncmd source, then the remaining
 /// providers (Haitangw / Xinghai, which resolve by NetEase ID directly
-/// with no search step, then the Beans platform providers Kugou / QQ /
-/// FNMusic, which resolve by cross-platform search + match and
-/// short-circuit when `track.platformSource` is their own ID).
+/// with no search step, then the Beans platform providers Kugou / QQ,
+/// which resolve by cross-platform search + match and short-circuit
+/// when `track.platformSource` is their own ID).
 ///
 /// Kuwo was removed: Kuwo's unauthenticated convert_url
 /// endpoint answers VIP tracks with a ~11s spoken prompt clip ("use the
@@ -26,11 +26,10 @@ enum UnblockService {
         XinghaiAudioSourceProvider(),
         // Folia platform providers, appended last so the existing order
         // is untouched. Kugou first: its anonymous search needs no
-        // backend and no login, so it can resolve out of the box; QQ and
-        // FNMusic only resolve once their login is configured.
+        // backend and no login, so it can resolve out of the box; QQ
+        // only resolves once its login is configured.
         KugouAudioSourceProvider(),
         QQMusicAudioSourceProvider(),
-        FNMusicAudioSourceProvider(),
     ]
 
     struct Resolution {
