@@ -101,15 +101,6 @@ final class NowPlayingManager {
             session.becomeActiveIfPossible { _ in }
         }
         #endif
-        #if os(iOS)
-        // The Live Activity is the Dynamic Island mechanism; the system Now
-        // Playing surface above stays as the Control Center / lock-screen
-        // fallback. LiveActivityManager observes the player's published
-        // state itself, so this is the only call site it needs.
-        if #available(iOS 16.1, *) {
-            LiveActivityManager.shared.attach(to: player)
-        }
-        #endif
         registerRemoteCommands(for: player)
     }
 
