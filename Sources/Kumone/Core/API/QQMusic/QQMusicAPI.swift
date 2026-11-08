@@ -55,7 +55,9 @@ struct QQMusicArtist: Hashable, Identifiable, Sendable {
     let picURL: URL?
     /// Platform singer MID (from `singerMID` / `mid` in search
     /// responses). Nil when the source did not carry one.
-    let mid: String? = nil
+    /// (No `= nil` default: the explicit init below assigns it, and a
+    /// defaulted `let` cannot be assigned again in init — CI run #83.)
+    let mid: String?
 
     var id: String { name }
 
@@ -75,7 +77,9 @@ struct QQMusicAlbum: Hashable, Identifiable, Sendable {
     let picURL: URL?
     /// Platform album MID (from `mid` / `albummid` / `albumMID` in
     /// search responses). Nil when the source did not carry one.
-    let mid: String? = nil
+    /// (No `= nil` default: the explicit init below assigns it, and a
+    /// defaulted `let` cannot be assigned again in init — CI run #83.)
+    let mid: String?
 
     var id: String { "\(artistName)-\(name)" }
 
