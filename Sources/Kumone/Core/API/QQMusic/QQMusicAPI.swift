@@ -1111,8 +1111,51 @@ final class QQMusicAPI: Sendable {
     /// Songs of one (public) playlist by its real ID. Anonymous
     /// (loginUin 0, no cookies) works for public playlists — this is
     /// the tap-to-play path for the home feed's QQ playlist cards.
+    ///
+    /// The legacy `fcg_ucc_getcdinfo_byids_cp.fcg` detail endpoint
+    /// answers HTTP 404 now (live-probed 2026-11-09, tid 8870221359),
+    /// so the current `music.srfDissInfo.DissInfo` `CgiGetDiss` call
+    /// runs first — it returns the same songs anonymously — and the
+    /// legacy endpoint stays as the fallback.
     func playlistSongs(listID: Int, limit: Int = 100) async throws -> [QQMusicSong] {
-        try await playlistSongs(listID: listID, preferredCookie: nil, limit: limit)
+        if let songs = try? await playlistSongsViaDissInfo(listID: listID, limit: limit),
+           !songs.isEmpty {
+            return songs
+        }
+        return try await playlistSongs(listID: listID, preferredCookie: nil, limit: limit)
+    }
+
+    /// Playlist songs through the current `CgiGetDiss` endpoint
+    /// (anonymous: uin 0, no cookies). Nil when QQ answers nothing.
+    private func playlistSongsViaDissInfo(listID: Int, limit: Int) async throws -> [QQMusicSong]? {
+        let payload: [String: Any] = [
+            "comm": [
+                "ct": 24,
+                "cv": 0,
+                "uin": "0",
+                "g_tk": "5381",
+                "platform": "yqq",
+            ],
+            "req_1": [
+                "module": "music.srfDissInfo.DissInfo",
+                "method": "CgiGetDiss",
+                "param": [
+                    "new_format": 1,
+                    "disstid": listID,
+                    "dirid": 0,
+                    "song_begin": 0,
+                    "song_num": limit,
+                    "enc_host_uin": "0",
+                    "onlysonglist": 0,
+                    "userinfo": 1,
+                ],
+            ],
+        ]
+        let json = try await musicu(payload, timeout: 15)
+        let raw = Self.favoriteSongArray(from: json)
+        guard !raw.isEmpty else { return nil }
+        let songs = raw.prefix(limit).compactMap { song(from: Self.unwrapQQSong($0)) }
+        return songs.isEmpty ? nil : songs
     }
 
     /// QQ Music charts, from the anonymous `fcg_myqq_toplist.fcg`.
