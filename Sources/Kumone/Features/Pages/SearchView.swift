@@ -12,8 +12,27 @@ final class SearchViewModel: ObservableObject {
         var id: String { rawValue }
     }
 
+    /// Folia-style search source (see `searchSources.ts`): 全部 keeps
+    /// the merged three-source search; a single source re-runs the
+    /// current query against that platform only. Folia lists the
+    /// active platform first, then the other available ones — here
+    /// the order is fixed (全部 / 网易云 / QQ音乐 / 酷狗) because the
+    /// merged tab is the default and the home platform already
+    /// reorders results inside it.
+    enum SearchSource: String, CaseIterable, Identifiable {
+        case all = "全部"
+        case netease = "网易云"
+        case qqmusic = "QQ音乐"
+        case kugou = "酷狗"
+
+        var id: String { rawValue }
+    }
+
     var query: String
     @Published var tab: Tab = .all
+    /// The source filter; .all is the default and preserves today's
+    /// merged NetEase + QQ + Kugou search (PR #30).
+    @Published var source: SearchSource = .all
     @Published var songs: [Track] = []
     @Published var artists: [ArtistSummary] = []
     @Published var albums: [AlbumSummary] = []
@@ -48,6 +67,34 @@ final class SearchViewModel: ObservableObject {
         platformAlbums = []
     }
 
+    /// Kind tabs the current source offers. Folia shows kinds per
+    /// source capability (`getSearchKinds`); here only 歌单 differs —
+    /// there is no QQ/Kugou playlist search, so those sources hide
+    /// it instead of showing an empty tab.
+    var availableTabs: [Tab] {
+        switch source {
+        case .all, .netease: return Tab.allCases
+        case .qqmusic, .kugou: return Tab.allCases.filter { $0 != .playlists }
+        }
+    }
+
+    /// Called when the source picker changes: drop in-flight work and
+    /// cached results so the current tab re-queries against the new
+    /// source only, and fall back to 综合 when the current kind tab
+    /// is not offered by the new source (QQ/Kugou have no 歌单).
+    func applySourceChange() {
+        generation &+= 1
+        loadedTabs.removeAll()
+        loadingTabs.removeAll()
+        songs = []
+        artists = []
+        albums = []
+        playlists = []
+        platformArtists = []
+        platformAlbums = []
+        if !availableTabs.contains(tab) { tab = .all }
+    }
+
     func load(tab: Tab) async {
         let trimmed = query.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return }
@@ -61,58 +108,161 @@ final class SearchViewModel: ObservableObject {
 
         // A failed request leaves the tab unloaded so submitting again retries
         // instead of keeping an empty result for this query.
+        //
+        // The source filter only changes *which* platforms are queried:
+        // .all runs the merged three-source search exactly as before;
+        // a single source queries that platform directly (no merge, no
+        // filtering of merged results) and leaves the other lists empty.
         switch tab {
         case .all:
-            async let songsTask = try? MusicAPI.search(trimmed, type: .songs, limit: 12)
-            async let artistsTask = try? MusicAPI.search(trimmed, type: .artists, limit: 10)
-            async let albumsTask = try? MusicAPI.search(trimmed, type: .albums, limit: 10)
-            async let playlistsTask = try? MusicAPI.search(trimmed, type: .playlists, limit: 10)
-            async let qqSongsTask = searchQQSongs(keyword: trimmed)
-            async let kgSongsTask = searchKugouSongs(keyword: trimmed)
-            async let qqArtistsTask = searchQQArtists(keyword: trimmed, limit: 10)
-            async let kgArtistsTask = searchKugouArtists(keyword: trimmed, limit: 10)
-            async let qqAlbumsTask = searchQQAlbums(keyword: trimmed, limit: 10)
-            async let kgAlbumsTask = searchKugouAlbums(keyword: trimmed, limit: 10)
-            let (songResult, artistResult, albumResult, playlistResult, qqSongs, kgSongs,
-                 qqArtists, kgArtists, qqAlbums, kgAlbums) =
-                await (songsTask, artistsTask, albumsTask, playlistsTask, qqSongsTask, kgSongsTask,
-                       qqArtistsTask, kgArtistsTask, qqAlbumsTask, kgAlbumsTask)
-            guard generation == requestGeneration else { return }
-            songs = mergePlatformSongs(netEase: songResult?.songs ?? [], qq: qqSongs, kugou: kgSongs)
-            artists = artistResult?.artists ?? []
-            albums = albumResult?.albums ?? []
-            playlists = playlistResult?.playlists ?? []
-            platformArtists = mergePlatformArtists(netEase: artists, qq: qqArtists, kugou: kgArtists, cap: 10)
-            platformAlbums = mergePlatformAlbums(netEase: albums, qq: qqAlbums, kugou: kgAlbums, cap: 10)
-            if songResult == nil || artistResult == nil || albumResult == nil || playlistResult == nil {
-                loadedTabs.remove(tab)
+            switch source {
+            case .all:
+                async let songsTask = try? MusicAPI.search(trimmed, type: .songs, limit: 12)
+                async let artistsTask = try? MusicAPI.search(trimmed, type: .artists, limit: 10)
+                async let albumsTask = try? MusicAPI.search(trimmed, type: .albums, limit: 10)
+                async let playlistsTask = try? MusicAPI.search(trimmed, type: .playlists, limit: 10)
+                async let qqSongsTask = searchQQSongs(keyword: trimmed)
+                async let kgSongsTask = searchKugouSongs(keyword: trimmed)
+                async let qqArtistsTask = searchQQArtists(keyword: trimmed, limit: 10)
+                async let kgArtistsTask = searchKugouArtists(keyword: trimmed, limit: 10)
+                async let qqAlbumsTask = searchQQAlbums(keyword: trimmed, limit: 10)
+                async let kgAlbumsTask = searchKugouAlbums(keyword: trimmed, limit: 10)
+                let (songResult, artistResult, albumResult, playlistResult, qqSongs, kgSongs,
+                     qqArtists, kgArtists, qqAlbums, kgAlbums) =
+                    await (songsTask, artistsTask, albumsTask, playlistsTask, qqSongsTask, kgSongsTask,
+                           qqArtistsTask, kgArtistsTask, qqAlbumsTask, kgAlbumsTask)
+                guard generation == requestGeneration else { return }
+                songs = mergePlatformSongs(netEase: songResult?.songs ?? [], qq: qqSongs, kugou: kgSongs)
+                artists = artistResult?.artists ?? []
+                albums = albumResult?.albums ?? []
+                playlists = playlistResult?.playlists ?? []
+                platformArtists = mergePlatformArtists(netEase: artists, qq: qqArtists, kugou: kgArtists, cap: 10)
+                platformAlbums = mergePlatformAlbums(netEase: albums, qq: qqAlbums, kugou: kgAlbums, cap: 10)
+                if songResult == nil || artistResult == nil || albumResult == nil || playlistResult == nil {
+                    loadedTabs.remove(tab)
+                }
+            case .netease:
+                async let songsTask = try? MusicAPI.search(trimmed, type: .songs, limit: 12)
+                async let artistsTask = try? MusicAPI.search(trimmed, type: .artists, limit: 10)
+                async let albumsTask = try? MusicAPI.search(trimmed, type: .albums, limit: 10)
+                async let playlistsTask = try? MusicAPI.search(trimmed, type: .playlists, limit: 10)
+                let (songResult, artistResult, albumResult, playlistResult) =
+                    await (songsTask, artistsTask, albumsTask, playlistsTask)
+                guard generation == requestGeneration else { return }
+                songs = songResult?.songs ?? []
+                artists = artistResult?.artists ?? []
+                albums = albumResult?.albums ?? []
+                playlists = playlistResult?.playlists ?? []
+                platformArtists = []
+                platformAlbums = []
+                if songResult == nil || artistResult == nil || albumResult == nil || playlistResult == nil {
+                    loadedTabs.remove(tab)
+                }
+            case .qqmusic:
+                async let qqSongsTask = searchQQSongs(keyword: trimmed)
+                async let qqArtistsTask = searchQQArtists(keyword: trimmed, limit: 10)
+                async let qqAlbumsTask = searchQQAlbums(keyword: trimmed, limit: 10)
+                let (qqSongs, qqArtists, qqAlbums) = await (qqSongsTask, qqArtistsTask, qqAlbumsTask)
+                guard generation == requestGeneration else { return }
+                songs = qqSongs
+                artists = []
+                albums = []
+                playlists = []
+                platformArtists = qqArtists
+                platformAlbums = qqAlbums
+            case .kugou:
+                async let kgSongsTask = searchKugouSongs(keyword: trimmed)
+                async let kgArtistsTask = searchKugouArtists(keyword: trimmed, limit: 10)
+                async let kgAlbumsTask = searchKugouAlbums(keyword: trimmed, limit: 10)
+                let (kgSongs, kgArtists, kgAlbums) = await (kgSongsTask, kgArtistsTask, kgAlbumsTask)
+                guard generation == requestGeneration else { return }
+                songs = kgSongs
+                artists = []
+                albums = []
+                playlists = []
+                platformArtists = kgArtists
+                platformAlbums = kgAlbums
             }
         case .songs:
-            async let netEaseTask = try? MusicAPI.search(trimmed, type: .songs, limit: 100)
-            async let qqSongsTask = searchQQSongs(keyword: trimmed)
-            async let kgSongsTask = searchKugouSongs(keyword: trimmed)
-            let (result, qqSongs, kgSongs) = await (netEaseTask, qqSongsTask, kgSongsTask)
-            guard generation == requestGeneration else { return }
-            if let result {
-                songs = mergePlatformSongs(netEase: result.songs ?? songs, qq: qqSongs, kugou: kgSongs)
-            } else { loadedTabs.remove(tab) }
+            switch source {
+            case .all:
+                async let netEaseTask = try? MusicAPI.search(trimmed, type: .songs, limit: 100)
+                async let qqSongsTask = searchQQSongs(keyword: trimmed)
+                async let kgSongsTask = searchKugouSongs(keyword: trimmed)
+                let (result, qqSongs, kgSongs) = await (netEaseTask, qqSongsTask, kgSongsTask)
+                guard generation == requestGeneration else { return }
+                if let result {
+                    songs = mergePlatformSongs(netEase: result.songs ?? songs, qq: qqSongs, kugou: kgSongs)
+                } else { loadedTabs.remove(tab) }
+            case .netease:
+                let result = try? await MusicAPI.search(trimmed, type: .songs, limit: 100)
+                guard generation == requestGeneration else { return }
+                if let result { songs = result.songs ?? songs } else { loadedTabs.remove(tab) }
+            case .qqmusic:
+                let qqSongs = await searchQQSongs(keyword: trimmed)
+                guard generation == requestGeneration else { return }
+                songs = qqSongs
+            case .kugou:
+                let kgSongs = await searchKugouSongs(keyword: trimmed)
+                guard generation == requestGeneration else { return }
+                songs = kgSongs
+            }
         case .artists:
-            async let netEaseTask = try? MusicAPI.search(trimmed, type: .artists, limit: 50)
-            async let qqArtistsTask = searchQQArtists(keyword: trimmed, limit: 30)
-            async let kgArtistsTask = searchKugouArtists(keyword: trimmed, limit: 40)
-            let (result, qqArtists, kgArtists) = await (netEaseTask, qqArtistsTask, kgArtistsTask)
-            guard generation == requestGeneration else { return }
-            if let result { artists = result.artists ?? artists } else { loadedTabs.remove(tab) }
-            platformArtists = mergePlatformArtists(netEase: artists, qq: qqArtists, kugou: kgArtists)
+            switch source {
+            case .all:
+                async let netEaseTask = try? MusicAPI.search(trimmed, type: .artists, limit: 50)
+                async let qqArtistsTask = searchQQArtists(keyword: trimmed, limit: 30)
+                async let kgArtistsTask = searchKugouArtists(keyword: trimmed, limit: 40)
+                let (result, qqArtists, kgArtists) = await (netEaseTask, qqArtistsTask, kgArtistsTask)
+                guard generation == requestGeneration else { return }
+                if let result { artists = result.artists ?? artists } else { loadedTabs.remove(tab) }
+                platformArtists = mergePlatformArtists(netEase: artists, qq: qqArtists, kugou: kgArtists)
+            case .netease:
+                let result = try? await MusicAPI.search(trimmed, type: .artists, limit: 50)
+                guard generation == requestGeneration else { return }
+                if let result { artists = result.artists ?? artists } else { loadedTabs.remove(tab) }
+                platformArtists = []
+            case .qqmusic:
+                let qqArtists = await searchQQArtists(keyword: trimmed, limit: 30)
+                guard generation == requestGeneration else { return }
+                artists = []
+                platformArtists = qqArtists
+            case .kugou:
+                let kgArtists = await searchKugouArtists(keyword: trimmed, limit: 40)
+                guard generation == requestGeneration else { return }
+                artists = []
+                platformArtists = kgArtists
+            }
         case .albums:
-            async let netEaseTask = try? MusicAPI.search(trimmed, type: .albums, limit: 50)
-            async let qqAlbumsTask = searchQQAlbums(keyword: trimmed, limit: 30)
-            async let kgAlbumsTask = searchKugouAlbums(keyword: trimmed, limit: 40)
-            let (result, qqAlbums, kgAlbums) = await (netEaseTask, qqAlbumsTask, kgAlbumsTask)
-            guard generation == requestGeneration else { return }
-            if let result { albums = result.albums ?? albums } else { loadedTabs.remove(tab) }
-            platformAlbums = mergePlatformAlbums(netEase: albums, qq: qqAlbums, kugou: kgAlbums)
+            switch source {
+            case .all:
+                async let netEaseTask = try? MusicAPI.search(trimmed, type: .albums, limit: 50)
+                async let qqAlbumsTask = searchQQAlbums(keyword: trimmed, limit: 30)
+                async let kgAlbumsTask = searchKugouAlbums(keyword: trimmed, limit: 40)
+                let (result, qqAlbums, kgAlbums) = await (netEaseTask, qqAlbumsTask, kgAlbumsTask)
+                guard generation == requestGeneration else { return }
+                if let result { albums = result.albums ?? albums } else { loadedTabs.remove(tab) }
+                platformAlbums = mergePlatformAlbums(netEase: albums, qq: qqAlbums, kugou: kgAlbums)
+            case .netease:
+                let result = try? await MusicAPI.search(trimmed, type: .albums, limit: 50)
+                guard generation == requestGeneration else { return }
+                if let result { albums = result.albums ?? albums } else { loadedTabs.remove(tab) }
+                platformAlbums = []
+            case .qqmusic:
+                let qqAlbums = await searchQQAlbums(keyword: trimmed, limit: 30)
+                guard generation == requestGeneration else { return }
+                albums = []
+                platformAlbums = qqAlbums
+            case .kugou:
+                let kgAlbums = await searchKugouAlbums(keyword: trimmed, limit: 40)
+                guard generation == requestGeneration else { return }
+                albums = []
+                platformAlbums = kgAlbums
+            }
         case .playlists:
+            // NetEase-only by construction: `availableTabs` hides 歌单
+            // for QQ/Kugou and `applySourceChange` falls back to 综合,
+            // so this case only ever runs for .all / .netease.
             let result = try? await MusicAPI.search(trimmed, type: .playlists, limit: 50)
             guard generation == requestGeneration else { return }
             if let result { playlists = result.playlists ?? playlists } else { loadedTabs.remove(tab) }
@@ -302,6 +452,10 @@ struct SearchView: View {
         .task(id: model.tab) {
             await model.load(tab: model.tab)
         }
+        .onChange(of: model.source) { _ in
+            model.applySourceChange()
+            Task { await model.load(tab: model.tab) }
+        }
     }
 
     @ViewBuilder
@@ -310,7 +464,7 @@ struct SearchView: View {
         if model.tab == .songs, !searchText.trimmingCharacters(in: .whitespaces).isEmpty {
             TrackListScrollView(trackIDs: model.songs.map(\.id)) {
                 VStack(spacing: 20) {
-                    tabPicker
+                    pickers
                     if model.isLoading && currentEmpty {
                         ProgressView().frame(maxWidth: .infinity, minHeight: 300)
                     }
@@ -333,7 +487,7 @@ struct SearchView: View {
         ScrollView {
             VStack(alignment: .leading, spacing: 20) {
                 if !searchText.trimmingCharacters(in: .whitespaces).isEmpty {
-                    tabPicker
+                    pickers
 
                     if model.isLoading && currentEmpty {
                         ProgressView()
@@ -349,16 +503,39 @@ struct SearchView: View {
         }
     }
 
+    /// Folia-style source tabs, above the kind tabs: 全部 keeps the
+    /// merged three-source search; a single source re-runs the query
+    /// against that platform only. Same segmented style as the kind
+    /// picker; shared by iOS and macOS (the search field itself is
+    /// platform-specific, the pickers are not).
+    private var sourcePicker: some View {
+        Picker("", selection: $model.source) {
+            ForEach(SearchViewModel.SearchSource.allCases) { source in
+                Text(LocalizedStringKey(source.rawValue)).tag(source)
+            }
+        }
+        .pickerStyle(.segmented)
+        .labelsHidden()
+        .padding(.horizontal, Theme.Layout.contentInset)
+    }
+
+    private var pickers: some View {
+        VStack(spacing: 8) {
+            sourcePicker
+            tabPicker
+        }
+        .padding(.top, 12)
+    }
+
     private var tabPicker: some View {
         Picker("", selection: $model.tab) {
-            ForEach(SearchViewModel.Tab.allCases) { tab in
+            ForEach(model.availableTabs) { tab in
                 Text(LocalizedStringKey(tab.rawValue)).tag(tab)
             }
         }
         .pickerStyle(.segmented)
         .labelsHidden()
         .padding(.horizontal, Theme.Layout.contentInset)
-        .padding(.top, 12)
     }
 
     private var emptySearchPrompt: some View {
