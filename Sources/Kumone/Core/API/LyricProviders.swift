@@ -157,7 +157,7 @@ enum LyricMatch {
     }
 
     private static let versionMarkerPattern =
-        /instrumental|inst|off\s*vocal|karaoke|remix|mix|version|ver\.?|cover|live|edit|arrange|伴奏|カラオケ|インスト|リミックス|remaster|remastered/i
+        #/instrumental|inst|off\s*vocal|karaoke|remix|mix|version|ver\.?|cover|live|edit|arrange|伴奏|カラオケ|インスト|リミックス|remaster|remastered/#.ignoresCase()
 
     /// Folia `stringSimilarity`: exact → 1, containment → length ratio,
     /// else Jaccard over the character sets.
@@ -340,7 +340,7 @@ enum LyricMultiSource {
     }
 
     private static let instrumentalMarker =
-        /instrumental|\binst\b|off\s*vocal|karaoke|伴奏|カラオケ|インスト/i
+        #/instrumental|\binst\b|off\s*vocal|karaoke|伴奏|カラオケ|インスト/#.ignoresCase()
 
     private static func dropsInstrumentalMarker(title: String, alias: String) -> Bool {
         title.contains(instrumentalMarker) && !alias.contains(instrumentalMarker)
