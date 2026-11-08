@@ -31,10 +31,12 @@ jobs:
           ARCHES="arm64 x86_64" FETCH_MLX_METALLIB=1 \
             Scripts/build-app.sh release
 
-      # Compile the iOS app shell unsigned. Same xcodebuild invocation as the
-      # unsigned IPA workflow, without packaging; version overrides are
-      # unnecessary for a compile check, so the xcconfig defaults apply.
-      - name: Build iOS app (unsigned)
+      # Compile the iOS app shell unsigned, including the Live Activity
+      # widget extension (embedded via the app target's Embed App
+      # Extensions phase). Same xcodebuild invocation as the unsigned IPA
+      # workflow, without packaging; version overrides are unnecessary for
+      # a compile check, so the xcconfig defaults apply.
+      - name: Build iOS app (unsigned, incl. Live Activity extension)
         run: |
           xcodebuild -workspace ios/KumoneIOS.xcworkspace -scheme KumoneIOS \
             -configuration Release -destination 'generic/platform=iOS' \
