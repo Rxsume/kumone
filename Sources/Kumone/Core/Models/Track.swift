@@ -219,7 +219,7 @@ extension Track {
             hash ^= UInt64(byte)
             hash &*= 0x0000_0100_0000_01b3
         }
-        let id = Int(bitPattern: hash)
+        let id = Int(bitPattern: UInt(hash))
         if id == 0 { return -1 }
         if id == Int.min { return Int.min + 1 }
         return id < 0 ? id : -id
