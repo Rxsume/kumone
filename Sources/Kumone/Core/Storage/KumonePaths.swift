@@ -30,7 +30,7 @@ enum KumonePaths {
 
     static var networkCache: URL {
         if isOfflineUITest { return applicationSupport.appendingPathComponent("network-cache") }
-        let identifier = Bundle.main.bundleIdentifier ?? "sb.moe.kumone"
+        let identifier = Bundle.main.bundleIdentifier ?? "ovo.Golia"
         return FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask)[0]
             .appendingPathComponent(identifier, isDirectory: true)
     }
