@@ -336,7 +336,7 @@ struct QQLyricProvider: LyricProvider {
     // MARK: - QRC decryption (`qrcDecrypt.ts`)
 
     /// Decrypts one hex-encoded QRC payload with Folia's hand-rolled DES
-    /// (see `qrcSBox` — not standard 3DES), then raw-deflate
+    /// (see `qrcSBox` — not standard 3DES), then zlib/raw-deflate
     /// decompression. Internal for the `QQLyricDecryptTests` fixture.
     /// Nil on any failure.
     static func qrcDecrypt(hex: String) -> String? {
@@ -632,7 +632,7 @@ struct QQLyricProvider: LyricProvider {
 
     /// Decrypts one hex-encoded QRC payload: Folia's hand-rolled DES
     /// (see the note above `qrcSBox`) with the fixed 24-byte QRC key,
-    /// then raw-deflate decompression. A trailing partial block is
+    /// then zlib/raw-deflate decompression. A trailing partial block is
     /// zero-padded before decrypting and the padding dropped
     /// afterwards, mirroring the TS loop. Nil on any failure.
     private static func tripleDESDecrypt(_ data: Data) -> Data? {
@@ -656,20 +656,28 @@ struct QQLyricProvider: LyricProvider {
         return decrypted
     }
 
-    /// Raw-deflate (RFC 1951, no zlib header) decompression, mirroring
-    /// `qrcDecrypt.ts`'s `DecompressionStream('deflate')` step. The system
-    /// zlib is used with `inflateInit2(..., -15)`; `zlib` is an SDK module
-    /// on Apple platforms (the same mechanism `CommonCrypto` already
-    /// relies on in this target), and the `canImport` guard keeps the file
-    /// compiling anywhere it is absent — decryption then fails closed and
-    /// the provider yields no lyrics.
+    /// Decompression for QRC payloads. QQ's decrypted plaintext is a
+    /// zlib-wrapped stream (RFC 1950 — it starts with the 0x78 0x9c
+    /// header), NOT raw deflate (RFC 1951), even though Folia calls
+    /// `DecompressionStream('deflate')`: browsers accept the wrapper
+    /// there, but `inflateInit2(..., -15)` does not, so the previous
+    /// raw-only version returned nil for every QQ lyric. Try the zlib
+    /// wrapper first, then raw deflate as a fallback. `zlib` is an SDK
+    /// module on Apple platforms, and the `canImport` guard keeps the
+    /// file compiling anywhere it is absent — decryption then fails
+    /// closed and the provider yields no lyrics.
     #if canImport(zlib)
     private static func inflateRawDeflate(_ data: Data) -> Data? {
         guard !data.isEmpty else { return Data() }
+        if let inflated = Self.inflate(data, windowBits: MAX_WBITS) { return inflated }
+        return Self.inflate(data, windowBits: -MAX_WBITS)
+    }
+
+    private static func inflate(_ data: Data, windowBits: CInt) -> Data? {
         return data.withUnsafeBytes { inputRaw -> Data? in
             guard let inputBase = inputRaw.baseAddress?.assumingMemoryBound(to: Bytef.self) else { return nil }
             var stream = z_stream()
-            let initStatus = inflateInit2_(&stream, -MAX_WBITS, ZLIB_VERSION, Int32(MemoryLayout<z_stream>.size))
+            let initStatus = inflateInit2_(&stream, windowBits, ZLIB_VERSION, Int32(MemoryLayout<z_stream>.size))
             guard initStatus == Z_OK else { return nil }
             defer { _ = inflateEnd(&stream) }
             stream.next_in = UnsafeMutablePointer(mutating: inputBase)
