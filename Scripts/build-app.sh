@@ -15,7 +15,7 @@ APP_NAME="Kumone"
 # and bundle path stay "Kumone" (see APP_BUNDLE below); only the user-visible
 # CFBundleDisplayName is Golia (renamed from Rumxs, display layer only).
 APP_DISPLAY_NAME="Golia"
-BUNDLE_ID="sb.moe.kumone"
+BUNDLE_ID="ovo.Golia"
 # Version resolution: environment > version.env > defaults.
 ENV_MARKETING_VERSION="${MARKETING_VERSION:-}"
 ENV_BUILD_NUMBER="${BUILD_NUMBER:-}"
