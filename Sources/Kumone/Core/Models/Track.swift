@@ -178,6 +178,41 @@ extension Track {
         )
     }
 
+    /// Maps one QQ search/detail song to a platform `Track`. Same
+    /// mapping (guards, key construction, `Track.platform` call) as
+    /// `SearchViewModel.searchQQSongs` used to inline; moved here so
+    /// the platform detail pages share it exactly.
+    static func fromQQSong(_ song: QQMusicSong) -> Track? {
+        guard !song.title.isEmpty else { return nil }
+        let key: String
+        if let mediaMid = song.mediaMid, !mediaMid.isEmpty {
+            key = "\(song.songmid)|\(mediaMid)"
+        } else {
+            key = song.songmid
+        }
+        return Track.platform(
+            source: .qqmusic, songKey: key, name: song.title,
+            artistNames: song.artistNames, albumName: song.albumName,
+            albumPicURL: song.albumPicURL, durationMS: song.durationMS)
+    }
+
+    /// Maps one Kugou search/detail song to a platform `Track`. Same
+    /// mapping as `SearchViewModel.searchKugouSongs` used to inline.
+    static func fromKugouSong(_ song: KugouMusicSong) -> Track? {
+        guard !song.title.isEmpty, !song.hash.isEmpty else { return nil }
+        let key: String
+        if let audioId = song.albumAudioId, !audioId.isEmpty,
+           let albumId = song.albumId, !albumId.isEmpty {
+            key = "\(song.hash)|\(audioId)|\(albumId)"
+        } else {
+            key = song.hash
+        }
+        return Track.platform(
+            source: .kugou, songKey: key, name: song.title,
+            artistNames: song.artistNames, albumName: song.albumName,
+            albumPicURL: song.albumPicURL, durationMS: song.durationMS)
+    }
+
     private static func stableNegativeID(source: AudioSourceID, songKey: String) -> Int {
         var hash: UInt64 = 0xcbf2_9ce4_8422_2325
         for byte in "\(source.rawValue)|\(songKey)".utf8 {
