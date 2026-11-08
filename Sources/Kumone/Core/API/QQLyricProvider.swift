@@ -1,5 +1,4 @@
 import Foundation
-import CommonCrypto
 #if canImport(zlib)
 import zlib
 #endif
@@ -336,9 +335,11 @@ struct QQLyricProvider: LyricProvider {
 
     // MARK: - QRC decryption (`qrcDecrypt.ts`)
 
-    /// Decrypts one hex-encoded QRC payload: 3DES-ECB with the fixed key,
-    /// then raw-deflate decompression. Nil on any failure.
-    private static func qrcDecrypt(hex: String) -> String? {
+    /// Decrypts one hex-encoded QRC payload with Folia's hand-rolled DES
+    /// (see `qrcSBox` — not standard 3DES), then raw-deflate
+    /// decompression. Internal for the `QQLyricDecryptTests` fixture.
+    /// Nil on any failure.
+    static func qrcDecrypt(hex: String) -> String? {
         guard let cipher = Self.data(fromHex: hex), !cipher.isEmpty,
               let decrypted = Self.tripleDESDecrypt(cipher),
               let inflated = Self.inflateRawDeflate(decrypted)
@@ -360,38 +361,299 @@ struct QQLyricProvider: LyricProvider {
         return bytes
     }
 
-    /// 3DES-EDE decryption in ECB mode with the fixed 24-byte QRC key.
-    /// `qrcDecrypt.ts` hand-rolls DES, but its parameters are exactly
-    /// standard 3DES — EDE, ECB, no IV — so CommonCrypto's `CCCrypt`
-    /// (`kCCAlgorithm3DES`) does the same work: the TS key schedule drops
-    /// the parity bits just like a standard DES schedule, and its DECRYPT
-    /// setup (decrypt K3, encrypt K2, decrypt K1) is EDE decrypt. A
-    /// trailing partial block is zero-padded before decrypting and the
-    /// padding dropped afterwards, mirroring the TS loop.
-    private static func tripleDESDecrypt(_ data: Data) -> Data? {
-        let key = Data("!@#)(*$%123ZXC!@!@#)(NHL".utf8)
-        let blockSize = kCCBlockSize3DES
-        let paddedLength = ((data.count + blockSize - 1) / blockSize) * blockSize
-        var padded = data
-        if padded.count < paddedLength {
-            padded.append(Data(repeating: 0, count: paddedLength - padded.count))
+    // MARK: - QRC decryption (Folia `qrcDecrypt.ts`, ported)
+    //
+    // Folia hand-rolls DES in TypeScript. The previous Swift version
+    // assumed that was standard 3DES and used CommonCrypto's `CCCrypt`
+    // — it is not: live-probed 2026-11-09, Folia's decrypt of a real
+    // `GetPlayLyricInfo` payload yields valid QRC text while a standard
+    // 3DES-ECB decrypt of the same bytes does not inflate at all, so
+    // every QQ lyric fetch failed at this step ("暂无歌词" for all QQ
+    // songs). The DES below is a faithful port of Folia's bit-level
+    // implementation (same S-boxes, permutations, key schedule and EDE
+    // order); do not "simplify" it back to `CCCrypt`.
+
+    private static let qrcSBox: [[Int]] = [
+        [
+            14, 4, 13, 1, 2, 15, 11, 8, 3, 10, 6, 12, 5, 9, 0, 7,
+            0, 15, 7, 4, 14, 2, 13, 1, 10, 6, 12, 11, 9, 5, 3, 8,
+            4, 1, 14, 8, 13, 6, 2, 11, 15, 12, 9, 7, 3, 10, 5, 0,
+            15, 12, 8, 2, 4, 9, 1, 7, 5, 11, 3, 14, 10, 0, 6, 13,
+        ],
+        [
+            15, 1, 8, 14, 6, 11, 3, 4, 9, 7, 2, 13, 12, 0, 5, 10,
+            3, 13, 4, 7, 15, 2, 8, 15, 12, 0, 1, 10, 6, 9, 11, 5,
+            0, 14, 7, 11, 10, 4, 13, 1, 5, 8, 12, 6, 9, 3, 2, 15,
+            13, 8, 10, 1, 3, 15, 4, 2, 11, 6, 7, 12, 0, 5, 14, 9,
+        ],
+        [
+            10, 0, 9, 14, 6, 3, 15, 5, 1, 13, 12, 7, 11, 4, 2, 8,
+            13, 7, 0, 9, 3, 4, 6, 10, 2, 8, 5, 14, 12, 11, 15, 1,
+            13, 6, 4, 9, 8, 15, 3, 0, 11, 1, 2, 12, 5, 10, 14, 7,
+            1, 10, 13, 0, 6, 9, 8, 7, 4, 15, 14, 3, 11, 5, 2, 12,
+        ],
+        [
+            7, 13, 14, 3, 0, 6, 9, 10, 1, 2, 8, 5, 11, 12, 4, 15,
+            13, 8, 11, 5, 6, 15, 0, 3, 4, 7, 2, 12, 1, 10, 14, 9,
+            10, 6, 9, 0, 12, 11, 7, 13, 15, 1, 3, 14, 5, 2, 8, 4,
+            3, 15, 0, 6, 10, 10, 13, 8, 9, 4, 5, 11, 12, 7, 2, 14,
+        ],
+        [
+            2, 12, 4, 1, 7, 10, 11, 6, 8, 5, 3, 15, 13, 0, 14, 9,
+            14, 11, 2, 12, 4, 7, 13, 1, 5, 0, 15, 10, 3, 9, 8, 6,
+            4, 2, 1, 11, 10, 13, 7, 8, 15, 9, 12, 5, 6, 3, 0, 14,
+            11, 8, 12, 7, 1, 14, 2, 13, 6, 15, 0, 9, 10, 4, 5, 3,
+        ],
+        [
+            12, 1, 10, 15, 9, 2, 6, 8, 0, 13, 3, 4, 14, 7, 5, 11,
+            10, 15, 4, 2, 7, 12, 9, 5, 6, 1, 13, 14, 0, 11, 3, 8,
+            9, 14, 15, 5, 2, 8, 12, 3, 7, 0, 4, 10, 1, 13, 11, 6,
+            4, 3, 2, 12, 9, 5, 15, 10, 11, 14, 1, 7, 6, 0, 8, 13,
+        ],
+        [
+            4, 11, 2, 14, 15, 0, 8, 13, 3, 12, 9, 7, 5, 10, 6, 1,
+            13, 0, 11, 7, 4, 9, 1, 10, 14, 3, 5, 12, 2, 15, 8, 6,
+            1, 4, 11, 13, 12, 3, 7, 14, 10, 15, 6, 8, 0, 5, 9, 2,
+            6, 11, 13, 8, 1, 4, 10, 7, 9, 5, 0, 15, 14, 2, 3, 12,
+        ],
+        [
+            13, 2, 8, 4, 6, 15, 11, 1, 10, 9, 3, 14, 5, 0, 12, 7,
+            1, 15, 13, 8, 10, 3, 7, 4, 12, 5, 6, 11, 0, 14, 9, 2,
+            7, 11, 4, 1, 9, 12, 14, 2, 0, 6, 10, 13, 15, 3, 5, 8,
+            2, 1, 14, 7, 4, 10, 8, 13, 15, 12, 9, 0, 3, 5, 6, 11,
+        ],
+    ]
+
+    private static let qrcKeyPermC: [Int] = [
+        56, 48, 40, 32, 24, 16, 8, 0, 57, 49, 41, 33, 25, 17, 9, 1,
+        58, 50, 42, 34, 26, 18, 10, 2, 59, 51, 43, 35,
+    ]
+
+    private static let qrcKeyPermD: [Int] = [
+        62, 54, 46, 38, 30, 22, 14, 6, 61, 53, 45, 37, 29, 21, 13, 5,
+        60, 52, 44, 36, 28, 20, 12, 4, 27, 19, 11, 3,
+    ]
+
+    private static let qrcKeyCompression: [Int] = [
+        13, 16, 10, 23, 0, 4, 2, 27, 14, 5, 20, 9, 22, 18, 11, 3,
+        25, 7, 15, 6, 26, 19, 12, 1, 40, 51, 30, 36, 46, 54, 29, 39,
+        50, 44, 32, 47, 43, 48, 38, 55, 33, 52, 45, 41, 49, 35, 28, 31,
+    ]
+
+    private static let qrcKeyRoundShift: [Int] = [
+        1, 1, 2, 2, 2, 2, 2, 2, 1, 2, 2, 2, 2, 2, 2, 1,
+    ]
+
+    /// Extracts one bit from a byte array, DES bit numbering.
+    private static func qrcBit(_ data: [UInt8], _ bit: Int, _ shift: Int) -> Int {
+        let index = (bit / 32) * 4 + 3 - ((bit % 32) / 8)
+        let bitShift = 7 - (bit % 8)
+        return ((Int(data[index]) >> bitShift) & 1) << shift
+    }
+
+    private static func qrcBitInt(_ value: UInt32, _ bit: Int, _ shift: Int) -> Int {
+        return Int((value >> (31 - bit)) & 1) << shift
+    }
+
+    private static func qrcBitIntL(_ value: UInt32, _ bit: Int, _ shift: Int) -> UInt32 {
+        return ((value &<< bit) & 0x80000000) >> shift
+    }
+
+    private static func qrcSBoxBit(_ value: Int) -> Int {
+        return (value & 32) | ((value & 31) >> 1) | ((value & 1) << 4)
+    }
+
+    private static func qrcInitialPermutation(_ input: [UInt8]) -> (UInt32, UInt32) {
+        let s0 = UInt32(
+            qrcBit(input, 57, 31) | qrcBit(input, 49, 30) | qrcBit(input, 41, 29) | qrcBit(input, 33, 28) |
+            qrcBit(input, 25, 27) | qrcBit(input, 17, 26) | qrcBit(input, 9, 25) | qrcBit(input, 1, 24) |
+            qrcBit(input, 59, 23) | qrcBit(input, 51, 22) | qrcBit(input, 43, 21) | qrcBit(input, 35, 20) |
+            qrcBit(input, 27, 19) | qrcBit(input, 19, 18) | qrcBit(input, 11, 17) | qrcBit(input, 3, 16) |
+            qrcBit(input, 61, 15) | qrcBit(input, 53, 14) | qrcBit(input, 45, 13) | qrcBit(input, 37, 12) |
+            qrcBit(input, 29, 11) | qrcBit(input, 21, 10) | qrcBit(input, 13, 9) | qrcBit(input, 5, 8) |
+            qrcBit(input, 63, 7) | qrcBit(input, 55, 6) | qrcBit(input, 47, 5) | qrcBit(input, 39, 4) |
+            qrcBit(input, 31, 3) | qrcBit(input, 23, 2) | qrcBit(input, 15, 1) | qrcBit(input, 7, 0))
+        let s1 = UInt32(
+            qrcBit(input, 56, 31) | qrcBit(input, 48, 30) | qrcBit(input, 40, 29) | qrcBit(input, 32, 28) |
+            qrcBit(input, 24, 27) | qrcBit(input, 16, 26) | qrcBit(input, 8, 25) | qrcBit(input, 0, 24) |
+            qrcBit(input, 58, 23) | qrcBit(input, 50, 22) | qrcBit(input, 42, 21) | qrcBit(input, 34, 20) |
+            qrcBit(input, 26, 19) | qrcBit(input, 18, 18) | qrcBit(input, 10, 17) | qrcBit(input, 2, 16) |
+            qrcBit(input, 60, 15) | qrcBit(input, 52, 14) | qrcBit(input, 44, 13) | qrcBit(input, 36, 12) |
+            qrcBit(input, 28, 11) | qrcBit(input, 20, 10) | qrcBit(input, 12, 9) | qrcBit(input, 4, 8) |
+            qrcBit(input, 62, 7) | qrcBit(input, 54, 6) | qrcBit(input, 46, 5) | qrcBit(input, 38, 4) |
+            qrcBit(input, 30, 3) | qrcBit(input, 22, 2) | qrcBit(input, 14, 1) | qrcBit(input, 6, 0))
+        return (s0, s1)
+    }
+
+    private static func qrcInversePermutation(_ s0: UInt32, _ s1: UInt32) -> [UInt8] {
+        var data = [UInt8](repeating: 0, count: 8)
+        data[3] = UInt8(qrcBitInt(s1, 7, 7) | qrcBitInt(s0, 7, 6) | qrcBitInt(s1, 15, 5) |
+                        qrcBitInt(s0, 15, 4) | qrcBitInt(s1, 23, 3) | qrcBitInt(s0, 23, 2) |
+                        qrcBitInt(s1, 31, 1) | qrcBitInt(s0, 31, 0))
+        data[2] = UInt8(qrcBitInt(s1, 6, 7) | qrcBitInt(s0, 6, 6) | qrcBitInt(s1, 14, 5) |
+                        qrcBitInt(s0, 14, 4) | qrcBitInt(s1, 22, 3) | qrcBitInt(s0, 22, 2) |
+                        qrcBitInt(s1, 30, 1) | qrcBitInt(s0, 30, 0))
+        data[1] = UInt8(qrcBitInt(s1, 5, 7) | qrcBitInt(s0, 5, 6) | qrcBitInt(s1, 13, 5) |
+                        qrcBitInt(s0, 13, 4) | qrcBitInt(s1, 21, 3) | qrcBitInt(s0, 21, 2) |
+                        qrcBitInt(s1, 29, 1) | qrcBitInt(s0, 29, 0))
+        data[0] = UInt8(qrcBitInt(s1, 4, 7) | qrcBitInt(s0, 4, 6) | qrcBitInt(s1, 12, 5) |
+                        qrcBitInt(s0, 12, 4) | qrcBitInt(s1, 20, 3) | qrcBitInt(s0, 20, 2) |
+                        qrcBitInt(s1, 28, 1) | qrcBitInt(s0, 28, 0))
+        data[7] = UInt8(qrcBitInt(s1, 3, 7) | qrcBitInt(s0, 3, 6) | qrcBitInt(s1, 11, 5) |
+                        qrcBitInt(s0, 11, 4) | qrcBitInt(s1, 19, 3) | qrcBitInt(s0, 19, 2) |
+                        qrcBitInt(s1, 27, 1) | qrcBitInt(s0, 27, 0))
+        data[6] = UInt8(qrcBitInt(s1, 2, 7) | qrcBitInt(s0, 2, 6) | qrcBitInt(s1, 10, 5) |
+                        qrcBitInt(s0, 10, 4) | qrcBitInt(s1, 18, 3) | qrcBitInt(s0, 18, 2) |
+                        qrcBitInt(s1, 26, 1) | qrcBitInt(s0, 26, 0))
+        data[5] = UInt8(qrcBitInt(s1, 1, 7) | qrcBitInt(s0, 1, 6) | qrcBitInt(s1, 9, 5) |
+                        qrcBitInt(s0, 9, 4) | qrcBitInt(s1, 17, 3) | qrcBitInt(s0, 17, 2) |
+                        qrcBitInt(s1, 25, 1) | qrcBitInt(s0, 25, 0))
+        data[4] = UInt8(qrcBitInt(s1, 0, 7) | qrcBitInt(s0, 0, 6) | qrcBitInt(s1, 8, 5) |
+                        qrcBitInt(s0, 8, 4) | qrcBitInt(s1, 16, 3) | qrcBitInt(s0, 16, 2) |
+                        qrcBitInt(s1, 24, 1) | qrcBitInt(s0, 24, 0))
+        return data
+    }
+
+    /// DES round function f.
+    private static func qrcF(_ state: UInt32, _ key: [UInt8]) -> UInt32 {
+        let t1 = qrcBitIntL(state, 31, 0) |
+            ((state & 0xf0000000) >> 1) |
+            qrcBitIntL(state, 4, 5) |
+            qrcBitIntL(state, 3, 6) |
+            ((state & 0x0f000000) >> 3) |
+            qrcBitIntL(state, 8, 11) |
+            qrcBitIntL(state, 7, 12) |
+            ((state & 0x00f00000) >> 5) |
+            qrcBitIntL(state, 12, 17) |
+            qrcBitIntL(state, 11, 18) |
+            ((state & 0x000f0000) >> 7) |
+            qrcBitIntL(state, 16, 23)
+        let t2 = qrcBitIntL(state, 15, 0) |
+            ((state & 0x0000f000) << 15) |
+            qrcBitIntL(state, 20, 5) |
+            qrcBitIntL(state, 19, 6) |
+            ((state & 0x00000f00) << 13) |
+            qrcBitIntL(state, 24, 11) |
+            qrcBitIntL(state, 23, 12) |
+            ((state & 0x000000f0) << 11) |
+            qrcBitIntL(state, 28, 17) |
+            qrcBitIntL(state, 27, 18) |
+            ((state & 0x0000000f) << 9) |
+            qrcBitIntL(state, 0, 23)
+        let lrgstate = [
+            Int((t1 >> 24) & 0xff),
+            Int((t1 >> 16) & 0xff),
+            Int((t1 >> 8) & 0xff),
+            Int((t2 >> 24) & 0xff),
+            Int((t2 >> 16) & 0xff),
+            Int((t2 >> 8) & 0xff),
+        ]
+        let xorState = lrgstate.enumerated().map { $0.element ^ Int(key[$0.offset]) }
+        let outputState = UInt32(
+            (qrcSBox[0][qrcSBoxBit(xorState[0] >> 2)] << 28) |
+            (qrcSBox[1][qrcSBoxBit(((xorState[0] & 0x03) << 4) | (xorState[1] >> 4))] << 24) |
+            (qrcSBox[2][qrcSBoxBit(((xorState[1] & 0x0f) << 2) | (xorState[2] >> 6))] << 20) |
+            (qrcSBox[3][qrcSBoxBit(xorState[2] & 0x3f)] << 16) |
+            (qrcSBox[4][qrcSBoxBit(xorState[3] >> 2)] << 12) |
+            (qrcSBox[5][qrcSBoxBit(((xorState[3] & 0x03) << 4) | (xorState[4] >> 4))] << 8) |
+            (qrcSBox[6][qrcSBoxBit(((xorState[4] & 0x0f) << 2) | (xorState[5] >> 6))] << 4) |
+            qrcSBox[7][qrcSBoxBit(xorState[5] & 0x3f)])
+        return qrcBitIntL(outputState, 15, 0) | qrcBitIntL(outputState, 6, 1) | qrcBitIntL(outputState, 19, 2) |
+            qrcBitIntL(outputState, 20, 3) | qrcBitIntL(outputState, 28, 4) | qrcBitIntL(outputState, 11, 5) |
+            qrcBitIntL(outputState, 27, 6) | qrcBitIntL(outputState, 16, 7) | qrcBitIntL(outputState, 0, 8) |
+            qrcBitIntL(outputState, 14, 9) | qrcBitIntL(outputState, 22, 10) | qrcBitIntL(outputState, 25, 11) |
+            qrcBitIntL(outputState, 4, 12) | qrcBitIntL(outputState, 17, 13) | qrcBitIntL(outputState, 30, 14) |
+            qrcBitIntL(outputState, 9, 15) | qrcBitIntL(outputState, 1, 16) | qrcBitIntL(outputState, 7, 17) |
+            qrcBitIntL(outputState, 23, 18) | qrcBitIntL(outputState, 13, 19) | qrcBitIntL(outputState, 31, 20) |
+            qrcBitIntL(outputState, 26, 21) | qrcBitIntL(outputState, 2, 22) | qrcBitIntL(outputState, 8, 23) |
+            qrcBitIntL(outputState, 18, 24) | qrcBitIntL(outputState, 12, 25) | qrcBitIntL(outputState, 29, 26) |
+            qrcBitIntL(outputState, 5, 27) | qrcBitIntL(outputState, 21, 28) | qrcBitIntL(outputState, 10, 29) |
+            qrcBitIntL(outputState, 3, 30) | qrcBitIntL(outputState, 24, 31)
+    }
+
+    /// Standard single block DES crypt (enc/dec depending on key scheduling).
+    private static func qrcCrypt(_ input: [UInt8], _ key: [[UInt8]]) -> [UInt8] {
+        var (s0, s1) = qrcInitialPermutation(input)
+        for idx in 0..<15 {
+            let previousS1 = s1
+            s1 = qrcF(s1, key[idx]) ^ s0
+            s0 = previousS1
         }
-        guard !padded.isEmpty else { return Data() }
-        var out = Data(count: padded.count)
-        var written = 0
-        let status = out.withUnsafeMutableBytes { outPtr in
-            padded.withUnsafeBytes { dataPtr in
-                key.withUnsafeBytes { keyPtr in
-                    CCCrypt(CCOperation(kCCDecrypt), CCAlgorithm(kCCAlgorithm3DES),
-                            CCOptions(kCCOptionECBMode),
-                            keyPtr.baseAddress, key.count, nil,
-                            dataPtr.baseAddress, padded.count,
-                            outPtr.baseAddress, outPtr.count, &written)
-                }
+        s0 = qrcF(s1, key[15]) ^ s0
+        return qrcInversePermutation(s0, s1)
+    }
+
+    /// Standard DES key scheduling.
+    private static func qrcKeySchedule(_ key: [UInt8], _ mode: Int) -> [[UInt8]] {
+        var schedule = [[UInt8]](repeating: [UInt8](repeating: 0, count: 6), count: 16)
+        var c: UInt32 = 0
+        for i in 0..<28 {
+            c |= UInt32(qrcBit(key, qrcKeyPermC[i], 31 - i))
+        }
+        var d: UInt32 = 0
+        for i in 0..<28 {
+            d |= UInt32(qrcBit(key, qrcKeyPermD[i], 31 - i))
+        }
+        for i in 0..<16 {
+            let shift = qrcKeyRoundShift[i]
+            c = ((c &<< shift) | (c >> (28 - shift))) & 0xfffffff0
+            d = ((d &<< shift) | (d >> (28 - shift))) & 0xfffffff0
+            let togen = mode == 0 ? 15 - i : i
+            for j in 0..<24 {
+                schedule[togen][j / 8] |= UInt8(qrcBitInt(c, qrcKeyCompression[j], 7 - (j % 8)))
+            }
+            for j in 24..<48 {
+                schedule[togen][j / 8] |= UInt8(qrcBitInt(d, qrcKeyCompression[j] - 27, 7 - (j % 8)))
             }
         }
-        guard status == kCCSuccess else { return nil }
-        return out.prefix(data.count)
+        return schedule
+    }
+
+    /// 3DES key setup. Builds 3 schedules from the 24-byte key.
+    private static func qrcTripleDESKeySetup(_ key: [UInt8], _ mode: Int) -> [[[UInt8]]] {
+        let key0 = Array(key[0..<8])
+        let key8 = Array(key[8..<16])
+        let key16 = Array(key[16..<24])
+        if mode == 1 { // ENCRYPT
+            return [qrcKeySchedule(key0, 1), qrcKeySchedule(key8, 0), qrcKeySchedule(key16, 1)]
+        }
+        // DECRYPT
+        return [qrcKeySchedule(key16, 0), qrcKeySchedule(key8, 1), qrcKeySchedule(key0, 0)]
+    }
+
+    /// Encrypts/decrypts 8-byte blocks using 3DES.
+    private static func qrcTripleDESCrypt(_ data: [UInt8], _ keySchedule: [[[UInt8]]]) -> [UInt8] {
+        var temp = data
+        for i in 0..<3 {
+            temp = qrcCrypt(temp, keySchedule[i])
+        }
+        return temp
+    }
+
+    /// Decrypts one hex-encoded QRC payload: Folia's hand-rolled DES
+    /// (see the note above `qrcSBox`) with the fixed 24-byte QRC key,
+    /// then raw-deflate decompression. A trailing partial block is
+    /// zero-padded before decrypting and the padding dropped
+    /// afterwards, mirroring the TS loop. Nil on any failure.
+    private static func tripleDESDecrypt(_ data: Data) -> Data? {
+        guard !data.isEmpty else { return Data() }
+        let key = [UInt8]("!@#)(*$%123ZXC!@!@#)(NHL".utf8)
+        let schedule = qrcTripleDESKeySetup(key, 0) // 0 = DECRYPT
+        var decrypted = Data()
+        decrypted.reserveCapacity(data.count)
+        var offset = 0
+        while offset < data.count {
+            let end = min(offset + 8, data.count)
+            var block = [UInt8](data[offset..<end])
+            let length = block.count
+            if length < 8 {
+                block += [UInt8](repeating: 0, count: 8 - length)
+            }
+            let out = qrcTripleDESCrypt(block, schedule)
+            decrypted.append(contentsOf: out.prefix(length))
+            offset = end
+        }
+        return decrypted
     }
 
     /// Raw-deflate (RFC 1951, no zlib header) decompression, mirroring
