@@ -175,6 +175,16 @@ struct HomeView: View {
         let platform: HomePlatform
     }
 
+    /// `.topBarLeading` does not exist on macOS; `.navigation` is the
+    /// macOS toolbar leading slot (same pattern as MainWindow.swift).
+    private var platformSwitcherPlacement: ToolbarItemPlacement {
+        #if os(macOS)
+        return .navigation
+        #else
+        return .topBarLeading
+        #endif
+    }
+
     var body: some View {
         ScrollView {
             switch model.state {
@@ -191,7 +201,7 @@ struct HomeView: View {
         }
         .navigationTitle("推荐")
         .toolbar {
-            ToolbarItem(placement: .topBarLeading) {
+            ToolbarItem(placement: platformSwitcherPlacement) {
                 Menu {
                     ForEach(HomePlatform.allCases) { platform in
                         Button {
