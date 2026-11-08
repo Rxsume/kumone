@@ -19,6 +19,29 @@
          DistributionChannel to decide whether the in-app updater may run. -->
     <key>KumoneDistribution</key>
     <string>$(KUMONE_DISTRIBUTION)</string>
+    <!-- URL scheme for the Spotify OAuth callback (folia-full-ios-port):
+         the redirect URI is golia-spotify://callback and must be
+         registered verbatim in the Spotify Dashboard. (The golia:// deep
+         links and NSSupportsLiveActivities from PR #22 were removed with
+         Live Activity by PR #24; only the Spotify scheme stays.) This
+         partial plist is merged into the generated Info.plist at build time
+         (GENERATE_INFOPLIST_FILE in Shared.xcconfig); the CarPlay overlay
+         copies this file, so the scheme carries over there too. -->
+    <key>CFBundleURLTypes</key>
+    <array>
+        <dict>
+            <key>CFBundleURLName</key>
+            <string>sb.moe.kumone.spotify</string>
+            <key>CFBundleURLSchemes</key>
+            <array>
+                <string>golia-spotify</string>
+            </array>
+        </dict>
+    </array>
+    <!-- Apple Music login (folia-full-ios-port, MusicKit): required —
+         MusicAuthorization.request() crashes without it. -->
+    <key>NSAppleMusicUsageDescription</key>
+    <string>Golia 需要访问你的 Apple Music 曲库，以显示你的歌单与已添加的歌曲</string>
     <key>UIBackgroundModes</key>
     <array>
         <string>audio</string>

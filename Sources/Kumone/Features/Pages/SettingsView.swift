@@ -8,6 +8,13 @@ struct SettingsView: View {
     @EnvironmentObject private var account: AccountStore
     @Environment(\.openDestination) private var openDestination
     @Environment(\.dismiss) private var dismiss
+    @State private var loginProvider: ProviderLogin?
+    @State private var accountsVersion = 0
+    @StateObject private var spotifySession = SpotifyAuthSession.shared
+    // Beans-based QQ/Kugou logins: @Published isLoggedIn/nickname drive
+    // these rows, so logout in LoginSheet refreshes them with no bump.
+    @ObservedObject private var qqAuth = QQMusicAuth.shared
+    @ObservedObject private var kgAuth = KugouMusicAuth.shared
     #if os(macOS)
     @AppStorage(SettingsManager.Keys.menuBarPlayer) private var showMenuBarPlayer = false
     @State private var navigationPath: [SettingsPage] = []
@@ -421,6 +428,119 @@ struct SettingsView: View {
                     Text("未登录")
                         .foregroundStyle(.secondary)
                 }
+
+                Toggle("听歌打卡", isOn: $settings.neteaseScrobbleEnabled)
+                Text("向网易云上报听歌记录，影响每日推荐与听歌排行。关闭后不再上报。")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+
+                // Folia platform logins (folia-full-ios-port). Each keeps
+                // its own session; none touches the NetEase AccountStore.
+                // Status is read at render time; `accountsVersion` is
+                // bumped after logout so the rows refresh.
+                Group {
+                    if qqAuth.isLoggedIn {
+                        LabeledContent("QQ音乐", value: qqDisplayName)
+                        Button("退出登录", role: .destructive) {
+                            qqAuth.logout()
+                            accountsVersion += 1
+                        }
+                    } else {
+                        LabeledContent("QQ音乐", value: "未登录")
+                        Button("登录 QQ音乐") { loginProvider = .qqmusic }
+                    }
+                    Text("QQ 音乐直连官方登录，无需自托管后端。")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+
+                Group {
+                    if kgAuth.isLoggedIn {
+                        LabeledContent("酷狗", value: kgDisplayName)
+                        Button("退出登录", role: .destructive) {
+                            kgAuth.logout()
+                            accountsVersion += 1
+                        }
+                    } else {
+                        LabeledContent("酷狗", value: "未登录")
+                        Button("登录酷狗") { loginProvider = .kugou }
+                    }
+                    Text("酷狗直连官方扫码登录，无需自托管后端。")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+
+                Group {
+                    if FNMusicSession.shared.isAuthenticated {
+                        LabeledContent("飞牛音乐", value: FNMusicSession.shared.currentUser?.nickname ?? FNMusicSession.shared.username ?? "")
+                        if let host = FNMusicSession.shared.serverBase.flatMap({ URL(string: $0)?.host }) {
+                            Text(host)
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
+                        Button("退出登录", role: .destructive) {
+                            FNMusicSession.shared.logout()
+                            accountsVersion += 1
+                        }
+                    } else {
+                        LabeledContent("飞牛音乐", value: "未登录")
+                        Button("登录飞牛音乐") { loginProvider = .fnmusic }
+                    }
+                }
+
+                Group {
+                    if AppleMusicSession.shared.isSignedIn {
+                        LabeledContent("Apple Music", value: "已登录")
+                        Button("退出登录", role: .destructive) {
+                            AppleMusicSession.shared.signOut()
+                            accountsVersion += 1
+                        }
+                    } else {
+                        LabeledContent("Apple Music", value: "未登录")
+                        Button("登录 Apple Music") { loginProvider = .appleMusic }
+                    }
+                    SecureField("粘贴 Developer Token (JWT)", text: $settings.appleMusicDeveloperToken)
+                    if let expiry = AppleMusicSession.shared.developerTokenExpiry {
+                        Text("当前 Token 有效期至：\(expiry.formatted(date: .long, time: .shortened))")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                    Text("Developer Token 由你自己的 Apple Developer MusicKit 凭据签发（Team ID + Key ID + .p8 私钥），最长 6 个月有效，过期前重新签发并粘贴。.p8 私钥不要放进 App，也不要发给任何人。")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                    Text("登录 Apple Music 后只能浏览目录与曲库（搜索、歌单、已添加的歌曲），不能在 Golia 内播放。")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+            }
+
+            Section("Spotify") {
+                TextField("Spotify Client ID", text: $settings.spotifyClientID)
+                    #if os(iOS)
+                    .autocapitalization(.none)
+                    .autocorrectionDisabled()
+                    #endif
+                TextField("golia-spotify://callback", text: $settings.spotifyRedirectURI)
+                    #if os(iOS)
+                    .keyboardType(.URL)
+                    .textContentType(.URL)
+                    .autocapitalization(.none)
+                    .autocorrectionDisabled()
+                    #endif
+                if spotifySession.isLoggedIn {
+                    LabeledContent("Spotify 账号", value: spotifySession.currentUser?.displayName ?? "")
+                    Button("退出登录", role: .destructive) {
+                        spotifySession.logout()
+                    }
+                } else {
+                    Text("未登录")
+                        .foregroundStyle(.secondary)
+                    Button("登录 Spotify") { loginProvider = .spotify }
+                        .disabled(!SpotifyConfiguration().canLogIn)
+                }
+                Text("登录后只能浏览、搜索与查看歌单，不能播放。Spotify 音频需 librespot，iOS 无此目标。")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
             }
 
             if showsUpdateControls {
@@ -464,6 +584,9 @@ struct SettingsView: View {
             }
         }
         .formStyle(.grouped)
+        .sheet(item: $loginProvider) { item in
+            LoginSheet(initialProvider: item)
+        }
         .navigationDestination(for: SettingsPage.self) { page in
             Group {
                 switch page {
@@ -526,6 +649,19 @@ struct SettingsView: View {
         #else
         return true
         #endif
+    }
+
+    /// Beans QQ login display name, with the VIP badge when present.
+    private var qqDisplayName: String {
+        let base = qqAuth.nickname.isEmpty ? "已登录" : qqAuth.nickname
+        if let badge = qqAuth.vipBadge, !badge.isEmpty { return "\(base) · \(badge)" }
+        return base
+    }
+
+    /// Beans Kugou login display name, with a VIP marker when applicable.
+    private var kgDisplayName: String {
+        let base = kgAuth.nickname.isEmpty ? "已登录" : kgAuth.nickname
+        return kgAuth.vipType > 0 ? "\(base) · VIP" : base
     }
 
     private var appVersion: String {

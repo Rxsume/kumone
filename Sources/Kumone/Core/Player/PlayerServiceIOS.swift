@@ -1271,6 +1271,19 @@ final class PlayerService: ObservableObject {
     ) async {
         let remote = CDNHost.preferred(for: url)
         var asset = AVURLAsset(url: remote)
+        // Beans pattern: a QQ/Kugou stream needs the platform login
+        // headers (UA/Referer + cookies) on the asset or the host 403s.
+        // This only covers the direct asset: when the cache loader below
+        // takes over, `asset` is replaced by the loader's cached asset
+        // and the download goes through the loader's own session, which
+        // does not get these headers (see the note on `loadResolvedURL`).
+        if let headers = Self.playbackHeaders(for: unblockID) {
+            // The AVURLAssetHTTPHeaderFieldsKey constant is not exposed
+            // to Swift by the iOS SDK (CI run #85: "cannot find in
+            // scope"), so the option key is spelled out as its literal
+            // string — the same value, and the standard workaround.
+            asset = AVURLAsset(url: remote, options: ["AVURLAssetHTTPHeaderFieldsKey": headers])
+        }
         var resourceLoader: CachingAudioResourceLoader?
         if SettingsManager.shared.enableAudioCache, !isTrial {
             let cacheLimitMB = await SettingsManager.shared.effectiveAudioCacheSizeMB()
@@ -1925,6 +1938,24 @@ final class PlayerService: ObservableObject {
         advanceToNext(userInitiated: false)
     }
 
+    /// Playback headers for a resolved third-party URL (Beans
+    /// `PlayerManager` pattern: QQ gets a Firefox UA + y.qq.com Referer
+    /// + login Cookie; Kugou gets its Android UA + kugou.com Referer +
+    /// login Cookie). Nil for NetEase and every other source, and nil
+    /// when the platform reports no headers at all.
+    private static func playbackHeaders(for source: AudioSourceID?) -> [String: String]? {
+        switch source {
+        case .qqmusic:
+            let headers = QQMusicAuth.shared.playbackHeaders
+            return headers.isEmpty ? nil : headers
+        case .kugou:
+            let headers = KugouMusicAuth.shared.playbackHeaders
+            return headers.isEmpty ? nil : headers
+        default:
+            return nil
+        }
+    }
+
     private func loadResolvedURL(
         _ track: Track,
         url: URL,
@@ -1936,6 +1967,22 @@ final class PlayerService: ObservableObject {
         let remote = CDNHost.preferred(for: url)
 
         var asset = AVURLAsset(url: remote)
+        // Beans pattern (see `prepareLoadedURL`): a QQ/Kugou stream
+        // needs the platform login headers on the asset or the host
+        // 403s. `loadResolvedURL` takes no source parameter; the caller
+        // (`resolveAndLoadUnblocked`) records it in
+        // `currentUnblockSourceID` before calling here. As in
+        // `prepareLoadedURL`, this only covers the direct asset — when
+        // the cache loader below takes over, the download goes through
+        // the loader's own session without these headers, so a cached
+        // QQ/Kugou playback that 403s needs the loader taught to carry
+        // them (follow-up, not this change).
+        if let headers = Self.playbackHeaders(for: currentUnblockSourceID) {
+            // Same literal-string key as in prepareLoadedURL: the
+            // AVURLAssetHTTPHeaderFieldsKey constant is not exposed to
+            // Swift by the iOS SDK (CI run #85).
+            asset = AVURLAsset(url: remote, options: ["AVURLAssetHTTPHeaderFieldsKey": headers])
+        }
         var resourceLoader: CachingAudioResourceLoader?
         if SettingsManager.shared.enableAudioCache, !isTrial {
             let cacheLimitMB = await SettingsManager.shared.effectiveAudioCacheSizeMB()
@@ -2252,17 +2299,23 @@ final class PlayerService: ObservableObject {
         }
     }
 
+    /// Global lyric timeline offset (Folia B12), seconds. 0 when the
+    /// Folia master switch is off (see SettingsManager).
+    private var lyricOffsetSeconds: TimeInterval {
+        TimeInterval(SettingsManager.shared.effectiveGlobalLyricTimelineOffsetMs) / 1000
+    }
+
     private func loadLyrics(for track: Track, generation: Int) async {
         let scope = offlineAccountScope
         if let scope, let saved = await OfflineMetadataStore.shared.lyrics(trackID: track.id, scope: scope) {
             guard generation == resolveGeneration else { return }
-            lyrics = LyricsParser.parse(saved)
+            lyrics = LyricsParser.parse(saved).applyingOffset(lyricOffsetSeconds)
             updateLyricsCursor(at: progress)
         }
         guard !usesOfflineQueue else { return }
         let response = await MusicAPI.lyric(for: track)
         guard generation == resolveGeneration, let response else { return }
-        lyrics = LyricsParser.parse(response)
+        lyrics = LyricsParser.parse(response).applyingOffset(lyricOffsetSeconds)
         updateLyricsCursor(at: progress)
         if let scope, SettingsManager.shared.enableAudioCache || DownloadManager.shared.isDownloaded(trackID: track.id) {
             await OfflineMetadataStore.shared.keepPlaybackData(track: track, lyrics: response, scope: scope)
@@ -2493,6 +2546,7 @@ final class PlayerService: ObservableObject {
     // MARK: - Scrobble
 
     private func scrobbleStartIfNeeded() {
+        guard SettingsManager.shared.effectiveNetEaseScrobbleEnabled else { return }
         guard let track = currentTrack, !startScrobbled else { return }
         startScrobbled = true
         let trackID = track.id
@@ -2503,6 +2557,7 @@ final class PlayerService: ObservableObject {
     }
 
     private func scrobbleIfNeeded(completed: Bool) {
+        guard SettingsManager.shared.effectiveNetEaseScrobbleEnabled else { return }
         guard let track = currentTrack, !scrobbled, progress > 1 else { return }
         scrobbled = true
         let seconds = completed ? Int(duration) : Int(progress)

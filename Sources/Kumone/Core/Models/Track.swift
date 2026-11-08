@@ -54,6 +54,13 @@ struct Track: Codable, Hashable, Identifiable {
     let isCloud: Bool
     /// Some endpoints (cloudsearch, FM) embed the privilege in the track itself.
     let embeddedPrivilege: TrackPrivilege?
+    /// Cross-platform origin (Beans QQ/Kugou search): which provider this
+    /// track came from. Nil for NetEase tracks. The unblock providers
+    /// short-circuit on this instead of searching by NetEase ID.
+    let platformSource: AudioSourceID?
+    /// Opaque per-provider song key (`songmid[|mediaMid]` for QQ,
+    /// `hash[|albumAudioId|albumId]` for Kugou). Nil for NetEase tracks.
+    let platformSongKey: String?
 
     var artistNames: String { artists.map(\.name).joined(separator: " / ") }
     var duration: TimeInterval { TimeInterval(durationMS) / 1000 }
@@ -66,6 +73,35 @@ struct Track: Codable, Hashable, Identifiable {
         case dt, duration
         case alia, alias
         case tns, fee, mv, no, cd, noCopyrightRcmd, pc, privilege
+        case platformSource, platformSongKey
+    }
+
+    /// Memberwise init (the custom `init(from:)` below suppresses the
+    /// synthesized one). The platform fields default to nil: NetEase
+    /// call sites never set them.
+    init(
+        id: Int, name: String, artists: [ArtistRef], album: AlbumRef,
+        durationMS: Int, alias: [String], transNames: [String], fee: Int,
+        mvID: Int, trackNo: Int, disc: String?, noCopyright: Bool,
+        isCloud: Bool, embeddedPrivilege: TrackPrivilege?,
+        platformSource: AudioSourceID? = nil, platformSongKey: String? = nil
+    ) {
+        self.id = id
+        self.name = name
+        self.artists = artists
+        self.album = album
+        self.durationMS = durationMS
+        self.alias = alias
+        self.transNames = transNames
+        self.fee = fee
+        self.mvID = mvID
+        self.trackNo = trackNo
+        self.disc = disc
+        self.noCopyright = noCopyright
+        self.isCloud = isCloud
+        self.embeddedPrivilege = embeddedPrivilege
+        self.platformSource = platformSource
+        self.platformSongKey = platformSongKey
     }
 
     init(from decoder: Decoder) throws {
@@ -90,6 +126,10 @@ struct Track: Codable, Hashable, Identifiable {
             && (try? c.decodeNil(forKey: .noCopyrightRcmd)) == false
         isCloud = c.contains(.pc) && (try? c.decodeNil(forKey: .pc)) == false
         embeddedPrivilege = try? c.decode(TrackPrivilege.self, forKey: .privilege)
+        // Cross-platform fields are absent in old archives (and in every
+        // NetEase payload); missing keys decode to nil, never fail.
+        platformSource = try? c.decode(AudioSourceID.self, forKey: .platformSource)
+        platformSongKey = try? c.decode(String.self, forKey: .platformSongKey)
     }
 
     func encode(to encoder: Encoder) throws {
@@ -108,6 +148,81 @@ struct Track: Codable, Hashable, Identifiable {
         if isCloud { try c.encode([String: String](), forKey: .pc) }
         if noCopyright { try c.encode([String: String](), forKey: .noCopyrightRcmd) }
         try c.encodeIfPresent(embeddedPrivilege, forKey: .privilege)
+        try c.encodeIfPresent(platformSource, forKey: .platformSource)
+        try c.encodeIfPresent(platformSongKey, forKey: .platformSongKey)
+    }
+}
+
+extension Track {
+    /// Builds a `Track` for a song that only exists on another platform
+    /// (Beans QQ/Kugou search). The ID is a stable negative hash of
+    /// source + song key: negative so it can never collide with a
+    /// NetEase ID (NetEase IDs are positive; the `id > 0` guards in the
+    /// lyric/download paths skip it gracefully), stable across launches
+    /// (FNV-1a, not Swift's seeded `Hasher`) so queue/cache entries
+    /// keyed by ID survive a restart, and never 0.
+    static func platform(
+        source: AudioSourceID, songKey: String, name: String,
+        artistNames: [String], albumName: String, albumPicURL: URL?,
+        durationMS: Int
+    ) -> Track {
+        Track(
+            id: stableNegativeID(source: source, songKey: songKey),
+            name: name,
+            artists: artistNames.map { ArtistRef(id: 0, name: $0) },
+            album: AlbumRef(id: 0, name: albumName, picUrl: albumPicURL?.absoluteString),
+            durationMS: durationMS,
+            alias: [], transNames: [], fee: 0, mvID: 0, trackNo: 0, disc: nil,
+            noCopyright: false, isCloud: false, embeddedPrivilege: nil,
+            platformSource: source, platformSongKey: songKey
+        )
+    }
+
+    /// Maps one QQ search/detail song to a platform `Track`. Same
+    /// mapping (guards, key construction, `Track.platform` call) as
+    /// `SearchViewModel.searchQQSongs` used to inline; moved here so
+    /// the platform detail pages share it exactly.
+    static func fromQQSong(_ song: QQMusicSong) -> Track? {
+        guard !song.title.isEmpty else { return nil }
+        let key: String
+        if let mediaMid = song.mediaMid, !mediaMid.isEmpty {
+            key = "\(song.songmid)|\(mediaMid)"
+        } else {
+            key = song.songmid
+        }
+        return Track.platform(
+            source: .qqmusic, songKey: key, name: song.title,
+            artistNames: song.artistNames, albumName: song.albumName,
+            albumPicURL: song.albumPicURL, durationMS: song.durationMS)
+    }
+
+    /// Maps one Kugou search/detail song to a platform `Track`. Same
+    /// mapping as `SearchViewModel.searchKugouSongs` used to inline.
+    static func fromKugouSong(_ song: KugouMusicSong) -> Track? {
+        guard !song.title.isEmpty, !song.hash.isEmpty else { return nil }
+        let key: String
+        if let audioId = song.albumAudioId, !audioId.isEmpty,
+           let albumId = song.albumId, !albumId.isEmpty {
+            key = "\(song.hash)|\(audioId)|\(albumId)"
+        } else {
+            key = song.hash
+        }
+        return Track.platform(
+            source: .kugou, songKey: key, name: song.title,
+            artistNames: song.artistNames, albumName: song.albumName,
+            albumPicURL: song.albumPicURL, durationMS: song.durationMS)
+    }
+
+    private static func stableNegativeID(source: AudioSourceID, songKey: String) -> Int {
+        var hash: UInt64 = 0xcbf2_9ce4_8422_2325
+        for byte in "\(source.rawValue)|\(songKey)".utf8 {
+            hash ^= UInt64(byte)
+            hash &*= 0x0000_0100_0000_01b3
+        }
+        let id = Int(bitPattern: UInt(hash))
+        if id == 0 { return -1 }
+        if id == Int.min { return Int.min + 1 }
+        return id < 0 ? id : -id
     }
 }
 

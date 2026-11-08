@@ -1,6 +1,6 @@
 import Foundation
 
-enum AudioSourceID: String, CaseIterable, Hashable {
+enum AudioSourceID: String, CaseIterable, Hashable, Codable {
     case pyncmd
     // Script-backend sources (native re-implementations of the resolve-url
     // endpoints used by LX Music custom-source scripts). NetEase-ID only:
@@ -9,6 +9,13 @@ enum AudioSourceID: String, CaseIterable, Hashable {
     case ikun
     case haitangw
     case xinghai
+    // Folia platform providers (added by the folia-full-ios-port):
+    // each has its own login session; they resolve by cross-platform
+    // search + match, not by NetEase ID. Appended at the end so the
+    // existing resolve order is untouched.
+    case qqmusic
+    case kugou
+    case fnmusic
 
     var displayName: String {
         switch self {
@@ -16,21 +23,26 @@ enum AudioSourceID: String, CaseIterable, Hashable {
         case .ikun: return String(localized: "酸甜贤")
         case .haitangw: return String(localized: "Golia2")
         case .xinghai: return String(localized: "Golia3")
+        case .qqmusic: return String(localized: "QQ音乐")
+        case .kugou: return String(localized: "酷狗")
+        case .fnmusic: return String(localized: "飞牛音乐")
         }
     }
 
     /// Presentation order in Settings (ikun first): display order only.
     /// Enum case order, storage keys and the UnblockService resolve order
     /// are all unchanged.
-    static var displayOrder: [AudioSourceID] = [.ikun, .pyncmd, .haitangw, .xinghai]
+    static var displayOrder: [AudioSourceID] = [.ikun, .pyncmd, .haitangw, .xinghai, .kugou, .qqmusic, .fnmusic]
 
-    /// Script-backend sources are off by default (see SettingsManager):
-    /// they call third-party endpoints that have not been verified on
-    /// device, so they must be opted into explicitly in Settings.
-    /// ikun is the preferred source and is on by default.
+    /// Unverified third-party sources are off by default (see
+    /// SettingsManager): they call third-party endpoints that have not
+    /// been verified on device, so they must be opted into explicitly in
+    /// Settings. ikun is the preferred source and is on by default.
+    /// This covers the script backends (haitangw/xinghai) and the Folia
+    /// platform providers (qqmusic/kugou/fnmusic) alike.
     var isScriptBackend: Bool {
         switch self {
-        case .haitangw, .xinghai: return true
+        case .haitangw, .xinghai, .qqmusic, .kugou, .fnmusic: return true
         case .pyncmd, .ikun: return false
         }
     }
