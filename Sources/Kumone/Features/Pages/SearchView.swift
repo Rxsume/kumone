@@ -60,10 +60,12 @@ final class SearchViewModel: ObservableObject {
             async let artistsTask = try? MusicAPI.search(trimmed, type: .artists, limit: 10)
             async let albumsTask = try? MusicAPI.search(trimmed, type: .albums, limit: 10)
             async let playlistsTask = try? MusicAPI.search(trimmed, type: .playlists, limit: 10)
-            let (songResult, artistResult, albumResult, playlistResult) =
-                await (songsTask, artistsTask, albumsTask, playlistsTask)
+            async let qqSongsTask = searchQQSongs(keyword: trimmed)
+            async let kgSongsTask = searchKugouSongs(keyword: trimmed)
+            let (songResult, artistResult, albumResult, playlistResult, qqSongs, kgSongs) =
+                await (songsTask, artistsTask, albumsTask, playlistsTask, qqSongsTask, kgSongsTask)
             guard generation == requestGeneration else { return }
-            songs = songResult?.songs ?? []
+            songs = mergePlatformSongs(netEase: songResult?.songs ?? [], qq: qqSongs, kugou: kgSongs)
             artists = artistResult?.artists ?? []
             albums = albumResult?.albums ?? []
             playlists = playlistResult?.playlists ?? []
@@ -71,9 +73,14 @@ final class SearchViewModel: ObservableObject {
                 loadedTabs.remove(tab)
             }
         case .songs:
-            let result = try? await MusicAPI.search(trimmed, type: .songs, limit: 100)
+            async let netEaseTask = try? MusicAPI.search(trimmed, type: .songs, limit: 100)
+            async let qqSongsTask = searchQQSongs(keyword: trimmed)
+            async let kgSongsTask = searchKugouSongs(keyword: trimmed)
+            let (result, qqSongs, kgSongs) = await (netEaseTask, qqSongsTask, kgSongsTask)
             guard generation == requestGeneration else { return }
-            if let result { songs = result.songs ?? songs } else { loadedTabs.remove(tab) }
+            if let result {
+                songs = mergePlatformSongs(netEase: result.songs ?? songs, qq: qqSongs, kugou: kgSongs)
+            } else { loadedTabs.remove(tab) }
         case .artists:
             let result = try? await MusicAPI.search(trimmed, type: .artists, limit: 50)
             guard generation == requestGeneration else { return }
@@ -87,6 +94,76 @@ final class SearchViewModel: ObservableObject {
             guard generation == requestGeneration else { return }
             if let result { playlists = result.playlists ?? playlists } else { loadedTabs.remove(tab) }
         }
+    }
+
+    // MARK: - Cross-platform song search (Beans QQ/Kugou, v1: songs only)
+
+    /// Artists/albums/playlists tabs stay NetEase-only: Golia's
+    /// artist/album detail pages are NetEase-ID-based, so a QQ/Kugou
+    /// artist or album card would navigate to a dead NetEase detail
+    /// page. Songs carry everything playback needs (platform + key),
+    /// so only songs go cross-platform in v1.
+    ///
+    /// Each search runs only when its source toggle is on
+    /// (`enabledAudioSourceIDs` — both are opt-in script backends, off
+    /// by default), and a platform failure returns [] instead of
+    /// throwing, so it can never fail the tab: NetEase results stand.
+
+    private func searchQQSongs(keyword: String) async -> [Track] {
+        guard SettingsManager.shared.enabledAudioSourceIDs.contains(.qqmusic) else { return [] }
+        guard let results = try? await QQMusicAPI.shared.searchSongs(keyword: keyword, limit: 30) else { return [] }
+        return results.compactMap { song in
+            guard !song.title.isEmpty else { return nil }
+            let key: String
+            if let mediaMid = song.mediaMid, !mediaMid.isEmpty {
+                key = "\(song.songmid)|\(mediaMid)"
+            } else {
+                key = song.songmid
+            }
+            return Track.platform(
+                source: .qqmusic, songKey: key, name: song.title,
+                artistNames: song.artistNames, albumName: song.albumName,
+                albumPicURL: song.albumPicURL, durationMS: song.durationMS)
+        }
+    }
+
+    private func searchKugouSongs(keyword: String) async -> [Track] {
+        guard SettingsManager.shared.enabledAudioSourceIDs.contains(.kugou) else { return [] }
+        guard let results = try? await KugouMusicAPI.shared.searchSongs(keyword: keyword, limit: 30) else { return [] }
+        return results.compactMap { song in
+            guard !song.title.isEmpty, !song.hash.isEmpty else { return nil }
+            let key: String
+            if let audioId = song.albumAudioId, !audioId.isEmpty,
+               let albumId = song.albumId, !albumId.isEmpty {
+                key = "\(song.hash)|\(audioId)|\(albumId)"
+            } else {
+                key = song.hash
+            }
+            return Track.platform(
+                source: .kugou, songKey: key, name: song.title,
+                artistNames: song.artistNames, albumName: song.albumName,
+                albumPicURL: song.albumPicURL, durationMS: song.durationMS)
+        }
+    }
+
+    /// Platform songs go after the NetEase songs, in QQ-then-Kugou
+    /// order, skipping any whose normalized (title + first artist)
+    /// already appears in the NetEase list (or earlier in the merge).
+    private func mergePlatformSongs(netEase: [Track], qq: [Track], kugou: [Track]) -> [Track] {
+        var seen = Set(netEase.map { normalizedSongKey(title: $0.name, artist: $0.artists.first?.name ?? "") })
+        var merged = netEase
+        for track in qq + kugou {
+            let key = normalizedSongKey(title: track.name, artist: track.artists.first?.name ?? "")
+            guard !seen.contains(key) else { continue }
+            seen.insert(key)
+            merged.append(track)
+        }
+        return merged
+    }
+
+    private func normalizedSongKey(title: String, artist: String) -> String {
+        let fold: (String) -> String = { $0.lowercased().filter { !$0.isWhitespace } }
+        return fold(title) + "|" + fold(artist)
     }
 }
 

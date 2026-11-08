@@ -11,6 +11,10 @@ struct SettingsView: View {
     @State private var loginProvider: ProviderLogin?
     @State private var accountsVersion = 0
     @StateObject private var spotifySession = SpotifyAuthSession.shared
+    // Beans-based QQ/Kugou logins: @Published isLoggedIn/nickname drive
+    // these rows, so logout in LoginSheet refreshes them with no bump.
+    @ObservedObject private var qqAuth = QQMusicAuth.shared
+    @ObservedObject private var kgAuth = KugouMusicAuth.shared
     #if os(macOS)
     @AppStorage(SettingsManager.Keys.menuBarPlayer) private var showMenuBarPlayer = false
     @State private var navigationPath: [SettingsPage] = []
@@ -435,53 +439,33 @@ struct SettingsView: View {
                 // Status is read at render time; `accountsVersion` is
                 // bumped after logout so the rows refresh.
                 Group {
-                    if QQMusicSession.shared.isLoggedIn {
-                        LabeledContent("QQ音乐", value: "已登录")
+                    if qqAuth.isLoggedIn {
+                        LabeledContent("QQ音乐", value: qqDisplayName)
                         Button("退出登录", role: .destructive) {
-                            Task {
-                                await QQMusicSession.shared.logout()
-                                accountsVersion += 1
-                            }
+                            qqAuth.logout()
+                            accountsVersion += 1
                         }
                     } else {
-                        LabeledContent("QQ音乐", value: QQMusicSettings.isConfigured ? "未登录" : "未配置后端")
+                        LabeledContent("QQ音乐", value: "未登录")
                         Button("登录 QQ音乐") { loginProvider = .qqmusic }
-                            .disabled(!QQMusicSettings.isConfigured)
                     }
-                    TextField("QQ音乐后端地址", text: $settings.qqMusicAPIBaseURL)
-                        #if os(iOS)
-                        .keyboardType(.URL)
-                        .textContentType(.URL)
-                        .autocapitalization(.none)
-                        .autocorrectionDisabled()
-                        #endif
-                    Text("QQ 音乐登录与播放需要自托管 qq-music-api 后端；登录会话经该后端中转，请只填自己信任的地址。留空则 QQ 音乐完全不可用。")
+                    Text("QQ 音乐直连官方登录，无需自托管后端。")
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }
 
                 Group {
-                    if KugouSession.shared.isLoggedIn {
-                        LabeledContent("酷狗", value: "已登录")
+                    if kgAuth.isLoggedIn {
+                        LabeledContent("酷狗", value: kgDisplayName)
                         Button("退出登录", role: .destructive) {
-                            Task {
-                                await KugouSession.shared.logout()
-                                accountsVersion += 1
-                            }
+                            kgAuth.logout()
+                            accountsVersion += 1
                         }
                     } else {
-                        LabeledContent("酷狗", value: KugouSettings.isConfigured ? "未登录" : "未配置后端")
+                        LabeledContent("酷狗", value: "未登录")
                         Button("登录酷狗") { loginProvider = .kugou }
-                            .disabled(!KugouSettings.isConfigured)
                     }
-                    TextField("酷狗后端地址", text: $settings.kugouApiBaseURL)
-                        #if os(iOS)
-                        .keyboardType(.URL)
-                        .textContentType(.URL)
-                        .autocapitalization(.none)
-                        .autocorrectionDisabled()
-                        #endif
-                    Text("自托管 KuGouMusicApi v1.6.0 后端地址；留空则酷狗登录不可用，仅匿名搜索可用。")
+                    Text("酷狗直连官方扫码登录，无需自托管后端。")
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }
@@ -665,6 +649,19 @@ struct SettingsView: View {
         #else
         return true
         #endif
+    }
+
+    /// Beans QQ login display name, with the VIP badge when present.
+    private var qqDisplayName: String {
+        let base = qqAuth.nickname.isEmpty ? "已登录" : qqAuth.nickname
+        if let badge = qqAuth.vipBadge, !badge.isEmpty { return "\(base) · \(badge)" }
+        return base
+    }
+
+    /// Beans Kugou login display name, with a VIP marker when applicable.
+    private var kgDisplayName: String {
+        let base = kgAuth.nickname.isEmpty ? "已登录" : kgAuth.nickname
+        return kgAuth.vipType > 0 ? "\(base) · VIP" : base
     }
 
     private var appVersion: String {
