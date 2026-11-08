@@ -22,6 +22,10 @@ struct KugouMusicSong: Hashable, Sendable {
 struct KugouMusicArtist: Hashable, Sendable {
     let name: String
     let picURL: URL?
+    /// Upstream author id (`author_id`), when the official author
+    /// search returned one. Nil for artists aggregated from song
+    /// search, which carries no author id.
+    let authorID: String?
 }
 
 /// A KuGou album from search.
@@ -29,6 +33,11 @@ struct KugouMusicAlbum: Hashable, Sendable {
     let name: String
     let artistName: String
     let picURL: URL?
+    /// Album id carried from the first song aggregated into this
+    /// album (`AlbumID` on the song row). Nil when the songs carried
+    /// none. There is no verified album-songs-by-id endpoint, so
+    /// detail pages match by name instead.
+    let albumId: String?
 }
 
 /// A KuGou user playlist (from `userPlaylists()`). Golia has no shared
@@ -91,8 +100,8 @@ enum KugouMusicAPIError: LocalizedError {
 ///
 /// Deliberately NOT ported from Beans: personalFM, everydayRecommend,
 /// topLists, rankSongs, recommendPlaylists, comments, lyric (lyric is
-/// PR #23's `KugouLyricProvider`), artist songs, playlist songs, and
-/// the VIP membership probe.
+/// PR #23's `KugouLyricProvider`), playlist songs, and the VIP
+/// membership probe. Artist songs are ported (detail pages need them).
 final class KugouMusicAPI: @unchecked Sendable {
     static let shared = KugouMusicAPI()
 
@@ -422,7 +431,7 @@ final class KugouMusicAPI: @unchecked Sendable {
         for song in songs {
             for name in song.artistNames {
                 guard !name.isEmpty, seen.insert(name).inserted else { continue }
-                result.append(KugouMusicArtist(name: name, picURL: song.albumPicURL))
+                result.append(KugouMusicArtist(name: name, picURL: song.albumPicURL, authorID: nil))
                 if result.count >= target { return result }
             }
         }
@@ -457,8 +466,12 @@ final class KugouMusicAPI: @unchecked Sendable {
                 Self.string(
                     item["avatar"] ?? item["pic"] ?? item["imgurl"] ?? item["img_url"] ?? item["author_pic"]
                 ).replacingOccurrences(of: "{size}", with: "400"))
+            let authorID = Self.string(
+                item["author_id"] ?? item["authorid"] ?? item["singerid"] ?? item["singer_id"] ?? item["id"])
             result.append(
-                KugouMusicArtist(name: name, coverURL: cover.isEmpty ? nil : URL(string: cover)))
+                KugouMusicArtist(
+                    name: name, picURL: cover.isEmpty ? nil : URL(string: cover),
+                    authorID: authorID.isEmpty ? nil : authorID))
             if result.count >= limit { return result }
         }
         return result
@@ -475,7 +488,209 @@ final class KugouMusicAPI: @unchecked Sendable {
             let key = "\(song.albumName)|\(artistName)"
             guard seen.insert(key).inserted else { continue }
             result.append(
-                KugouMusicAlbum(name: song.albumName, artistName: artistName, picURL: song.albumPicURL))
+                KugouMusicAlbum(
+                    name: song.albumName, artistName: artistName, picURL: song.albumPicURL,
+                    albumId: song.albumId))
+            if result.count >= target { return result }
+        }
+        return result
+    }
+
+    /// Artist songs, faithful port of Beans' `artistSongs` (page 1):
+    /// the upstream author endpoint first, then the official mobile
+    /// singer endpoint, then the legacy openapi POST. Tiers merge
+    /// until `limit` is reached; a failing tier contributes nothing
+    /// and never throws out of this method. `mobilecdn.kugou.com`
+    /// (tier 2) is unreachable from some networks — it is Beans'
+    /// shipped code ported as-is, not a verified endpoint here.
+    func artistSongs(authorID: String, limit: Int = 100) async throws -> [KugouMusicSong] {
+        let target = min(max(limit, 1), 100)
+        let page = 1
+        var songs: [KugouMusicSong] = []
+        var seen = Set<String>()
+
+        let upstream = (try? await upstreamArtistSongs(authorID: authorID, page: page, limit: target)) ?? []
+        for song in upstream where seen.insert(Self.dedupKey(for: song)).inserted {
+            songs.append(song)
+        }
+        if songs.count < target {
+            let official = (try? await officialArtistSongs(authorID: authorID, page: page, limit: target)) ?? []
+            for song in official where seen.insert(Self.dedupKey(for: song)).inserted {
+                songs.append(song)
+            }
+        }
+        if songs.count < target {
+            let legacy = (try? await legacyArtistSongs(authorID: authorID, page: page, limit: target)) ?? []
+            for song in legacy where seen.insert(Self.dedupKey(for: song)).inserted {
+                songs.append(song)
+            }
+        }
+        return Array(songs.prefix(target))
+    }
+
+    private func upstreamArtistSongs(authorID: String, page: Int, limit: Int) async throws -> [KugouMusicSong] {
+        let target = min(max(limit, 1), 100)
+        let response = try await upstreamRequest(
+            "/openapi/kmr/v2/audio_group/author",
+            params: [
+                "author_id": authorID,
+                "area_code": "all",
+                "sort": "1",
+                "page": "\(max(page, 1))",
+                "pagesize": "\(target)",
+                "replace_api_version": "1",
+                "mvdata_need": "1",
+                "show_audio_honor": "1",
+                "show_audio_tag": "1",
+                "replace_need": "1",
+            ],
+            headers: ["kg-tid": "36"]
+        )
+        let rows = Self.deepArrays(
+            response.json, names: ["songs", "songlist", "list", "info", "audio", "data"])
+        return rows.compactMap(Self.mapSong)
+    }
+
+    /// KuGou mobile singer songs, usually more complete than the
+    /// author endpoint. Straight port of Beans'
+    /// `officialArtistSongs`.
+    private func officialArtistSongs(authorID: String, page: Int, limit: Int) async throws -> [KugouMusicSong] {
+        let target = min(max(limit, 1), 100)
+        var components = URLComponents(string: "https://mobilecdn.kugou.com/api/v3/singer/song")!
+        components.queryItems = [
+            URLQueryItem(name: "format", value: "json"),
+            URLQueryItem(name: "singerid", value: authorID),
+            URLQueryItem(name: "page", value: "\(max(page, 1))"),
+            URLQueryItem(name: "pagesize", value: "\(target)"),
+            URLQueryItem(name: "sorttype", value: "2"),
+            URLQueryItem(name: "sort", value: "1"),
+            URLQueryItem(name: "with_res_tag", value: "1"),
+            URLQueryItem(name: "identity", value: "3"),
+            URLQueryItem(name: "plat", value: "0"),
+            URLQueryItem(name: "area_code", value: "1"),
+            URLQueryItem(name: "version", value: "9108"),
+        ]
+        guard let url = components.url else { return [] }
+        let json = try await getJSON(url, ua: Self.browserUA)
+        let rows = Self.deepArrays(json, names: ["info", "songs", "songlist", "list", "data"])
+        return rows.compactMap(Self.mapSong)
+    }
+
+    /// Legacy author-songs POST as the paging supplement (Beans'
+    /// `legacyArtistSongs`): the signed JSON body goes through the
+    /// file's `request(path:baseURL:...)` helper against
+    /// openapi.kugou.com, signed with the upstream Android signature.
+    private func legacyArtistSongs(authorID: String, page: Int, limit: Int) async throws -> [KugouMusicSong] {
+        let snapshot = await authSnapshot()
+        let clientTime = Int(Date().timeIntervalSince1970)
+        var data: [String: Any] = [
+            "appid": upstreamAppID,
+            "clientver": upstreamClientVersion,
+            "mid": snapshot.mid,
+            "clienttime": clientTime,
+            "key": upstreamParamsKey("\(clientTime)"),
+            "author_id": authorID,
+            "pagesize": min(max(limit, 1), 100),
+            "page": max(page, 1),
+            "sort": 1,
+            "area_code": "all",
+        ]
+        if !snapshot.userID.isEmpty {
+            data["userid"] = Int(snapshot.userID) ?? 0
+            data["kguid"] = Int(snapshot.userID) ?? 0
+        }
+        if !snapshot.token.isEmpty { data["token"] = snapshot.token }
+        let body = try JSONSerialization.data(withJSONObject: data)
+        let bodyString = String(data: body, encoding: .utf8) ?? ""
+        var params = upstreamBaseParams(snapshot: snapshot)
+        params["clienttime"] = "\(clientTime)"
+        params["signature"] = upstreamAndroidSignature(params: params, data: bodyString)
+        let response = try await request(
+            "/kmr/v1/audio_group/author",
+            baseURL: "https://openapi.kugou.com",
+            method: "POST",
+            params: params,
+            body: body,
+            headers: upstreamHeaders(
+                snapshot: snapshot,
+                extra: [
+                    "x-router": "openapi.kugou.com",
+                    "kg-tid": "220",
+                    "clienttime": "\(clientTime)",
+                    "Content-Type": "application/json",
+                ])
+        )
+        let rows = Self.deepArrays(
+            response.json, names: ["songs", "songlist", "list", "info", "audio", "data"])
+        return rows.compactMap(Self.mapSong)
+    }
+
+    /// Name fallback for artists without an author id: search by the
+    /// artist name and keep only songs whose artist list contains
+    /// exactly that name (after normalization).
+    func artistSongsByName(name: String, limit: Int = 100) async throws -> [KugouMusicSong] {
+        let target = min(max(limit, 1), 100)
+        let expected = Self.normalizedName(name)
+        guard !expected.isEmpty else { return [] }
+        let songs = try await searchSongs(keyword: name, limit: max(target, 30))
+        var result: [KugouMusicSong] = []
+        var seen = Set<String>()
+        for song in songs {
+            guard song.artistNames.contains(where: { Self.normalizedName($0) == expected }) else {
+                continue
+            }
+            guard seen.insert(Self.dedupHashKey(for: song)).inserted else { continue }
+            result.append(song)
+            if result.count >= target { break }
+        }
+        return result
+    }
+
+    /// Album songs by name matching (Beans' proven search fallback).
+    /// There is no verified album-songs-by-id endpoint, so none is
+    /// invented: each query keeps songs whose album name matches and
+    /// whose artist tokens intersect the expected artist's tokens.
+    /// Returns the first non-empty match set, else []. A query is
+    /// skipped entirely when the expected artist name normalizes to
+    /// empty — a wrong album is worse than an empty one.
+    func albumSongsByName(albumName: String, artistName: String, limit: Int = 100) async throws -> [KugouMusicSong] {
+        let target = min(max(limit, 1), 100)
+        let expectedAlbum = Self.normalizedName(albumName)
+        guard !expectedAlbum.isEmpty else { return [] }
+        let expectedArtists = Self.normalizedNameTokens(artistName)
+        guard !expectedArtists.isEmpty else { return [] }
+        let queries = ["\(artistName) \(albumName)", albumName]
+        for query in queries {
+            let songs = (try? await searchSongs(keyword: query, limit: 100)) ?? []
+            var result: [KugouMusicSong] = []
+            var seen = Set<String>()
+            for song in songs {
+                guard Self.normalizedName(song.albumName) == expectedAlbum else { continue }
+                let songArtists = Set(song.artistNames.map(Self.normalizedName).filter { !$0.isEmpty })
+                guard !songArtists.isDisjoint(with: expectedArtists) else { continue }
+                guard seen.insert(Self.dedupHashKey(for: song)).inserted else { continue }
+                result.append(song)
+                if result.count >= target { break }
+            }
+            if !result.isEmpty { return result }
+        }
+        return []
+    }
+
+    /// Albums aggregated from an artist's songs: deduped by
+    /// album + artists, carrying the first song's album id and cover.
+    static func albums(from songs: [KugouMusicSong], limit: Int = 30) -> [KugouMusicAlbum] {
+        let target = min(max(limit, 1), 100)
+        var result: [KugouMusicAlbum] = []
+        var seen = Set<String>()
+        for song in songs where !song.albumName.isEmpty {
+            let artistName = song.artistNames.joined(separator: " / ")
+            let key = "\(song.albumName)|\(artistName)"
+            guard seen.insert(key).inserted else { continue }
+            result.append(
+                KugouMusicAlbum(
+                    name: song.albumName, artistName: artistName, picURL: song.albumPicURL,
+                    albumId: song.albumId))
             if result.count >= target { return result }
         }
         return result
@@ -1166,6 +1381,38 @@ final class KugouMusicAPI: @unchecked Sendable {
         if !song.hash.isEmpty { return "hash:\(song.hash.lowercased())" }
         if let audioId = song.albumAudioId, !audioId.isEmpty { return "audio:\(audioId)" }
         return "meta:\(song.title.lowercased())|\(song.artistNames.joined(separator: "/").lowercased())"
+    }
+
+    /// Name comparison for artist/album matching: lowercase, drop
+    /// parenthetical content ("(Live)", "（翻唱）"), then drop all
+    /// whitespace and punctuation, so "周杰伦 (Live)" matches
+    /// "周杰伦" and "S.H.E" matches "SHE".
+    private static func normalizedName(_ value: String) -> String {
+        var text = value.lowercased()
+        text = text.replacingOccurrences(of: #"\([^)]*\)"#, with: "", options: .regularExpression)
+        text = text.replacingOccurrences(of: #"（[^）]*）"#, with: "", options: .regularExpression)
+        let stripped = text.unicodeScalars.filter {
+            !CharacterSet.whitespacesAndNewlines.contains($0)
+                && !CharacterSet.punctuationCharacters.contains($0)
+        }
+        return String(stripped)
+    }
+
+    /// Split an artist string ("A / B", "A&B") into normalized tokens.
+    private static func normalizedNameTokens(_ value: String) -> Set<String> {
+        Set(
+            value
+                .split(whereSeparator: { "/&、,，;；".contains($0) })
+                .map { normalizedName(String($0)) }
+                .filter { !$0.isEmpty }
+        )
+    }
+
+    /// Hash-first dedup for the name-fallback matchers: the FileHash
+    /// when present, otherwise the full `dedupKey` fallback.
+    private static func dedupHashKey(for song: KugouMusicSong) -> String {
+        if !song.hash.isEmpty { return "hash:\(song.hash.lowercased())" }
+        return dedupKey(for: song)
     }
 
     private static func vipTypeCandidates(_ vipType: Int, loggedIn: Bool) -> [Int] {
