@@ -1,6 +1,6 @@
 import Foundation
 
-enum AudioSourceID: String, CaseIterable, Hashable {
+enum AudioSourceID: String, CaseIterable, Hashable, Codable {
     case pyncmd
     // Script-backend sources (native re-implementations of the resolve-url
     // endpoints used by LX Music custom-source scripts). NetEase-ID only:
