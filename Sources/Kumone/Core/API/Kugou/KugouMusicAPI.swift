@@ -778,7 +778,9 @@ final class KugouMusicAPI: @unchecked Sendable {
         do {
             return try await operation()
         } catch KugouMusicAPIError.sessionExpired {
-            throw error
+            // NOTE: in a patterned `catch` the implicit `error` binding is
+            // not in scope, so rethrow the (payload-free) case directly.
+            throw KugouMusicAPIError.sessionExpired
         } catch {
             return nil
         }
