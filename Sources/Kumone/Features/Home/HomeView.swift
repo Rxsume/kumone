@@ -167,6 +167,14 @@ struct HomeView: View {
     @StateObject private var model = HomeViewModel.shared
     @ObservedObject private var settings = SettingsManager.shared
 
+    /// `.task(id:)` needs an `Equatable` id; tuples cannot conform to
+    /// `Equatable` in Swift, so the (loggedIn, platform) pair gets a
+    /// tiny struct instead.
+    private struct FeedTaskID: Equatable {
+        let loggedIn: Bool
+        let platform: HomePlatform
+    }
+
     var body: some View {
         ScrollView {
             switch model.state {
@@ -207,7 +215,7 @@ struct HomeView: View {
                 }
             }
         }
-        .task(id: (account.isLoggedIn, settings.homePlatform)) {
+        .task(id: FeedTaskID(loggedIn: account.isLoggedIn, platform: settings.homePlatform)) {
             await model.load(platform: settings.homePlatform, loggedIn: account.isLoggedIn)
         }
     }
