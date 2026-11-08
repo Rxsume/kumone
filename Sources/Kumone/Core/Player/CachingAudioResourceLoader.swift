@@ -118,6 +118,12 @@ final class CachingAudioResourceLoader: NSObject {
     private let source: AudioCacheSource
     private let maximumCacheSizeMB: Int
     private let cache: AudioCache
+    /// Extra headers for the loader's own downloads (e.g. the QQ/Kugou
+    /// platform login headers — UA/Referer + cookies — without which
+    /// their CDNs 403). The direct asset already gets these via
+    /// `AVURLAssetHTTPHeaderFieldsKey`; the loader's session did not,
+    /// so cached QQ/Kugou playback failed while direct playback worked.
+    private let additionalHeaders: [String: String]
     private let delegateQueue: OperationQueue
     private let resourceLoaderQueue: DispatchQueue
     private var session: URLSession!
@@ -220,7 +226,8 @@ final class CachingAudioResourceLoader: NSObject {
         source: AudioCacheSource,
         maximumCacheSizeMB: Int,
         cache: AudioCache = .shared,
-        sessionConfiguration: URLSessionConfiguration = .default
+        sessionConfiguration: URLSessionConfiguration = .default,
+        additionalHeaders: [String: String] = [:]
     ) throws {
         self.remoteURL = remoteURL
         self.trackID = trackID
@@ -229,6 +236,7 @@ final class CachingAudioResourceLoader: NSObject {
         self.source = source
         self.maximumCacheSizeMB = maximumCacheSizeMB
         self.cache = cache
+        self.additionalHeaders = additionalHeaders
 
         var components = URLComponents(url: remoteURL, resolvingAgainstBaseURL: false)
         components?.scheme = "kumone-cache"
@@ -357,6 +365,7 @@ final class CachingAudioResourceLoader: NSObject {
         }
         var request = URLRequest(url: remoteURL)
         request.cachePolicy = .reloadIgnoringLocalCacheData
+        applyAdditionalHeaders(to: &request)
         let rangeValue: String
         if pending.requestsAllDataToEnd {
             rangeValue = "bytes=\(pending.requestedOffset)-"
@@ -379,6 +388,15 @@ final class CachingAudioResourceLoader: NSObject {
         task.resume()
     }
 
+    /// Applies the extra headers (platform login headers) to a download
+    /// request. Range is set by the caller afterwards, so it can never
+    /// be overridden here.
+    private func applyAdditionalHeaders(to request: inout URLRequest) {
+        for (field, value) in additionalHeaders {
+            request.setValue(value, forHTTPHeaderField: field)
+        }
+    }
+
     private func startMissingNetworkRequests(in range: Range<Int64>) {
         for scheduledRange in rangePlanner.scheduleMissingRanges(in: range) {
             startNetworkRequest(for: scheduledRange)
@@ -388,6 +406,7 @@ final class CachingAudioResourceLoader: NSObject {
     private func startNetworkRequest(for scheduledRange: ByteRangePlanner.ScheduledRange) {
         var request = URLRequest(url: remoteURL)
         request.cachePolicy = .reloadIgnoringLocalCacheData
+        applyAdditionalHeaders(to: &request)
         request.setValue(
             "bytes=\(scheduledRange.range.lowerBound)-\(scheduledRange.range.upperBound - 1)",
             forHTTPHeaderField: "Range"
@@ -405,6 +424,7 @@ final class CachingAudioResourceLoader: NSObject {
         let range = pending.deliveredOffset..<pendingRange.upperBound
         var request = URLRequest(url: remoteURL)
         request.cachePolicy = .reloadIgnoringLocalCacheData
+        applyAdditionalHeaders(to: &request)
         request.setValue("bytes=\(range.lowerBound)-\(range.upperBound - 1)", forHTTPHeaderField: "Range")
         let task = session.dataTask(with: request)
         let networkTask = NetworkTask(range: range, directPendingRequestID: id)

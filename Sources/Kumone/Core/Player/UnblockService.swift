@@ -44,6 +44,23 @@ enum UnblockService {
     ) async -> Resolution {
         var newlyAttemptedSources = Set<AudioSourceID>()
         guard !Task.isCancelled else { return Resolution(source: nil, attemptedSources: []) }
+        // Platform tracks resolve through ikun FIRST: the user asked for
+        // 酸甜贤 as the default playback source for songs from all
+        // platforms ("搜索全平台歌曲播放音源酸甜贤"). Discovery stays
+        // cross-platform; only playback defaults to ikun. The track is
+        // matched to the same song on NetEase and resolved through
+        // ikun; only when ikun cannot match or resolve it does the flow
+        // fall through to the platform's own provider below. Background:
+        // QQ's vkey endpoint only issues playback URLs to logged-in
+        // sessions — live-probed 2026-11-09, anonymous vkey answers
+        // code 0 with an empty purl for every song and tier — so a
+        // logged-out QQ account gets no QQ URL at all. Deliberately not
+        // gated on the ikun toggle: this is the platform playback rule
+        // the user asked for.
+        if track.platformSource == .qqmusic || track.platformSource == .kugou,
+           let resolved = await platformTrackViaIkun(track) {
+            return Resolution(source: resolved, attemptedSources: newlyAttemptedSources)
+        }
         if enabledSources.contains(.ikun), !attemptedSources.contains(.ikun) {
             newlyAttemptedSources.insert(.ikun)
             do {
@@ -90,6 +107,29 @@ enum UnblockService {
             }
         }
         return Resolution(source: nil, attemptedSources: newlyAttemptedSources)
+    }
+
+    /// Matches a QQ/Kugou track to the same song on NetEase and resolves
+    /// it through ikun. Nil when there is no confident match or ikun
+    /// has no URL — the failure is surfaced, never a wrong song.
+    private static func platformTrackViaIkun(_ track: Track) async -> ResolvedAudioSource? {
+        let keyword = AudioSourceTrackMatcher.keyword(for: track)
+        guard !keyword.isEmpty else { return nil }
+        guard let result = try? await MusicAPI.search(keyword, type: .songs, limit: 10),
+              let candidates = result.songs,
+              let match = candidates.first(where: {
+                  AudioSourceTrackMatcher.matchesNetEase(
+                      track: track, title: $0.name,
+                      artist: $0.artists.map(\.name).joined(separator: "/"),
+                      durationMS: $0.durationMS)
+              }),
+              match.id > 0
+        else { return nil }
+        guard let resolved = try? await ikunProvider.resolve(track: match),
+              await isUsable(resolved, track: match)
+        else { return nil }
+        log.info("platform track via ikun: matched NetEase id=\(match.id, privacy: .public) for \"\(track.name, privacy: .public)\"")
+        return resolved
     }
 
     /// True unless the URL is known to point at a clip far shorter than

@@ -99,6 +99,59 @@ enum AudioSourceTrackMatcher {
         return artistNames(in: artist).contains(expectedArtist)
     }
 
+    /// Cross-platform match used when a platform track (QQ/Kugou) is
+    /// resolved through NetEase/ikun: same rules as `matches`, except
+    /// the title comparison tolerates a parenthetical suffix on either
+    /// side — one platform often lists the bare title while the other
+    /// appends a translation, e.g. QQ "내 이름을 불러줘 (Call My Name)"
+    /// vs NetEase "내 이름을 불러줘". Raw titles are never compared
+    /// for exact equality; the normalized core title is what must
+    /// match, together with the artist and the duration.
+    static func matchesNetEase(
+        track: Track,
+        title: String,
+        artist: String,
+        durationMS: Int
+    ) -> Bool {
+        guard track.durationMS > 0,
+              durationMS > 0,
+              abs(durationMS - track.durationMS) <= 5_000,
+              sameTitleLenient(track.name, title),
+              !hasVersionConflict(original: track.name, candidate: title)
+        else { return false }
+
+        let expectedArtist = normalized(track.artists.first?.name ?? "")
+        guard !expectedArtist.isEmpty else { return false }
+        return artistNames(in: artist).contains(expectedArtist)
+    }
+
+    /// True when the two titles are the same song title, ignoring a
+    /// parenthetical suffix on either side ("(Call My Name)",
+    /// "（翻唱）"). Compares normalized titles first; if they differ,
+    /// compares again with parenthetical groups stripped from both.
+    static func sameTitleLenient(_ a: String, _ b: String) -> Bool {
+        let normalizedA = normalized(a)
+        let normalizedB = normalized(b)
+        if normalizedA == normalizedB { return true }
+        let strippedA = normalized(strippingParentheticals(a))
+        let strippedB = normalized(strippingParentheticals(b))
+        guard !strippedA.isEmpty, !strippedB.isEmpty else { return false }
+        return strippedA == strippedB
+    }
+
+    /// Removes "(...)" and "（...）" groups from a title, innermost
+    /// first, so "내 이름을 불러줘 (Call My Name)" becomes
+    /// "내 이름을 불러줘".
+    private static func strippingParentheticals(_ value: String) -> String {
+        var result = value
+        while let range = result.range(
+            of: "\\([^()]*\\)|（[^（）]*）", options: .regularExpression
+        ) {
+            result.removeSubrange(range)
+        }
+        return result
+    }
+
     private static let versionMarkers = [
         "live", "remix", "伴奏", "dj", "cover", "翻唱", "instrumental", "karaoke"
     ]

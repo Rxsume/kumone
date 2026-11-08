@@ -1273,11 +1273,10 @@ final class PlayerService: ObservableObject {
         var asset = AVURLAsset(url: remote)
         // Beans pattern: a QQ/Kugou stream needs the platform login
         // headers (UA/Referer + cookies) on the asset or the host 403s.
-        // This only covers the direct asset: when the cache loader below
-        // takes over, `asset` is replaced by the loader's cached asset
-        // and the download goes through the loader's own session, which
-        // does not get these headers (see the note on `loadResolvedURL`).
-        if let headers = Self.playbackHeaders(for: unblockID) {
+        // Hoisted out of the `if let`: the same headers also go to the
+        // cache loader below, whose own session downloads the bytes.
+        let headers = Self.playbackHeaders(for: unblockID)
+        if let headers {
             // The AVURLAssetHTTPHeaderFieldsKey constant is not exposed
             // to Swift by the iOS SDK (CI run #85: "cannot find in
             // scope"), so the option key is spelled out as its literal
@@ -1296,7 +1295,8 @@ final class PlayerService: ObservableObject {
                     requestedQuality: SettingsManager.shared.audioQuality.rawValue,
                     servedQuality: servedQuality,
                     source: source,
-                    maximumCacheSizeMB: cacheLimitMB
+                    maximumCacheSizeMB: cacheLimitMB,
+                    additionalHeaders: headers ?? [:]
                 )
                 guard prepareEpoch == epoch else {
                     loader.cancel()
@@ -1971,13 +1971,11 @@ final class PlayerService: ObservableObject {
         // needs the platform login headers on the asset or the host
         // 403s. `loadResolvedURL` takes no source parameter; the caller
         // (`resolveAndLoadUnblocked`) records it in
-        // `currentUnblockSourceID` before calling here. As in
-        // `prepareLoadedURL`, this only covers the direct asset — when
-        // the cache loader below takes over, the download goes through
-        // the loader's own session without these headers, so a cached
-        // QQ/Kugou playback that 403s needs the loader taught to carry
-        // them (follow-up, not this change).
-        if let headers = Self.playbackHeaders(for: currentUnblockSourceID) {
+        // `currentUnblockSourceID` before calling here. Hoisted out of
+        // the `if let`: the same headers also go to the cache loader
+        // below, whose own session downloads the bytes.
+        let headers = Self.playbackHeaders(for: currentUnblockSourceID)
+        if let headers {
             // Same literal-string key as in prepareLoadedURL: the
             // AVURLAssetHTTPHeaderFieldsKey constant is not exposed to
             // Swift by the iOS SDK (CI run #85).
@@ -1995,7 +1993,8 @@ final class PlayerService: ObservableObject {
                     requestedQuality: SettingsManager.shared.audioQuality.rawValue,
                     servedQuality: servedQuality,
                     source: source,
-                    maximumCacheSizeMB: cacheLimitMB
+                    maximumCacheSizeMB: cacheLimitMB,
+                    additionalHeaders: headers ?? [:]
                 )
                 guard generation == resolveGeneration else {
                     loader.cancel()
