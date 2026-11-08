@@ -458,6 +458,21 @@ final class SettingsManager: ObservableObject {
         static let fmMode = "settings.fmMode"
         static let unblock = "settings.enableUnblock"
         static let unblockSources = "settings.enabledUnblockSources"
+        // Folia platform providers (folia-full-ios-port): backend URLs and
+        // user-supplied credentials. Empty means "not configured". The
+        // sessions read these keys straight from UserDefaults; the
+        // @Published properties below exist for Settings UI binding only.
+        static let qqMusicAPIBaseURL = "settings.qqMusicAPIBaseURL"
+        static let kugouApiBaseURL = "settings.kugouApiBaseURL"
+        static let fnmusicServerURL = "settings.fnmusicServerURL"
+        static let fnmusicUsername = "settings.fnmusicUsername"
+        static let spotifyClientID = "settings.spotifyClientID"
+        static let spotifyRedirectURI = "settings.spotifyRedirectURI"
+        static let appleMusicDeveloperToken = "settings.appleMusicDeveloperToken"
+        // Folia B12: global lyric timeline offset, milliseconds, ±2000.
+        static let globalLyricTimelineOffsetMs = "settings.globalLyricTimelineOffsetMs"
+        // Folia B18: report listening to NetEase (scrobble), default on.
+        static let neteaseScrobbleEnabled = "settings.neteaseScrobbleEnabled"
         static let autoCheckUpdates = "settings.autoCheckUpdates"
         static let desktopLyrics = "settings.showDesktopLyrics"
         #if os(macOS)
@@ -711,6 +726,51 @@ final class SettingsManager: ObservableObject {
     var canResolveUnblockedTracks: Bool {
         enableUnblock && !enabledAudioSourceIDs.isEmpty
     }
+
+    /// Folia platform provider configuration (folia-full-ios-port).
+    /// Self-hosted backend addresses (QQ/Kugou) and user-supplied
+    /// credentials (Spotify Client ID, Apple Music developer token) are
+    /// filled in by the user in Settings; empty means the platform is
+    /// not configured. Never write a backend address or a credential
+    /// here — there are no defaults for them.
+    @Published var qqMusicAPIBaseURL: String {
+        didSet { UserDefaults.standard.set(qqMusicAPIBaseURL, forKey: Keys.qqMusicAPIBaseURL) }
+    }
+
+    @Published var kugouApiBaseURL: String {
+        didSet { UserDefaults.standard.set(kugouApiBaseURL, forKey: Keys.kugouApiBaseURL) }
+    }
+
+    @Published var fnmusicServerURL: String {
+        didSet { UserDefaults.standard.set(fnmusicServerURL, forKey: Keys.fnmusicServerURL) }
+    }
+
+    @Published var fnmusicUsername: String {
+        didSet { UserDefaults.standard.set(fnmusicUsername, forKey: Keys.fnmusicUsername) }
+    }
+
+    @Published var spotifyClientID: String {
+        didSet { UserDefaults.standard.set(spotifyClientID, forKey: Keys.spotifyClientID) }
+    }
+
+    @Published var spotifyRedirectURI: String {
+        didSet { UserDefaults.standard.set(spotifyRedirectURI, forKey: Keys.spotifyRedirectURI) }
+    }
+
+    @Published var appleMusicDeveloperToken: String {
+        didSet { UserDefaults.standard.set(appleMusicDeveloperToken, forKey: Keys.appleMusicDeveloperToken) }
+    }
+
+    /// Report listening to NetEase (scrobble), Folia B18. On by default,
+    /// matching the historical always-on behaviour; off means no
+    /// `scrobbleStart`/`scrobbleFinish` calls at all.
+    @Published var neteaseScrobbleEnabled: Bool {
+        didSet { UserDefaults.standard.set(neteaseScrobbleEnabled, forKey: Keys.neteaseScrobbleEnabled) }
+    }
+
+    /// Scrobble is NetEase account behaviour, not a Folia visual setting,
+    /// so it is not gated by the Folia master switch.
+    var effectiveNetEaseScrobbleEnabled: Bool { neteaseScrobbleEnabled }
 
     /// Floating desktop lyrics window (LyricsX-style).
     @Published var showDesktopLyrics: Bool {
@@ -2100,6 +2160,19 @@ final class SettingsManager: ObservableObject {
         foliaEnabled ? lyricsFontScale : Self.defaultLyricsFontScale
     }
 
+    /// Global lyric timeline offset in milliseconds, ±2000 (Folia B12):
+    /// shifts every lyric line/word timestamp for songs whose lyrics
+    /// run off-beat. 0 means off. Applied in `loadLyrics`/`applyLyrics`
+    /// right after `LyricsParser.parse`.
+    @Published var globalLyricTimelineOffsetMs: Int {
+        didSet { UserDefaults.standard.set(globalLyricTimelineOffsetMs, forKey: Keys.globalLyricTimelineOffsetMs) }
+    }
+
+    /// Offset with the master switch off: 0, the pre-folia behaviour.
+    var effectiveGlobalLyricTimelineOffsetMs: Int {
+        foliaEnabled ? globalLyricTimelineOffsetMs : 0
+    }
+
     /// Lyric font weight (100–900) when auto weight is off; `nil` means
     /// automatic (the visualizer's own default weight, 700 for luminous).
     @Published var lyricsFontWeight: Double? {
@@ -2371,6 +2444,7 @@ final class SettingsManager: ObservableObject {
         lyricsFontStyle = Self.defaultLyricsFontStyle
         lyricsFontScale = Self.defaultLyricsFontScale
         lyricsFontWeight = nil
+        globalLyricTimelineOffsetMs = 0
         lyricsCustomFont = nil
         visualizerOpacity = Self.defaultVisualizerOpacity
         subtitleFontScale = Self.defaultSubtitleFontScale
@@ -2422,6 +2496,14 @@ final class SettingsManager: ObservableObject {
             )
         }
         autoCheckUpdates = defaults.object(forKey: Keys.autoCheckUpdates) as? Bool ?? true
+        qqMusicAPIBaseURL = defaults.string(forKey: Keys.qqMusicAPIBaseURL) ?? ""
+        kugouApiBaseURL = defaults.string(forKey: Keys.kugouApiBaseURL) ?? ""
+        fnmusicServerURL = defaults.string(forKey: Keys.fnmusicServerURL) ?? ""
+        fnmusicUsername = defaults.string(forKey: Keys.fnmusicUsername) ?? ""
+        spotifyClientID = defaults.string(forKey: Keys.spotifyClientID) ?? ""
+        spotifyRedirectURI = defaults.string(forKey: Keys.spotifyRedirectURI) ?? ""
+        appleMusicDeveloperToken = defaults.string(forKey: Keys.appleMusicDeveloperToken) ?? ""
+        neteaseScrobbleEnabled = defaults.object(forKey: Keys.neteaseScrobbleEnabled) as? Bool ?? true
         showDesktopLyrics = defaults.object(forKey: Keys.desktopLyrics) as? Bool ?? false
         #if os(macOS)
         automixEnabled = defaults.object(forKey: Keys.automix) as? Bool ?? false
@@ -2752,6 +2834,9 @@ final class SettingsManager: ObservableObject {
                 ?? Self.defaultLyricsFontScale,
             to: Self.lyricsFontScaleRange
         )
+        globalLyricTimelineOffsetMs = min(max(
+            defaults.object(forKey: Keys.globalLyricTimelineOffsetMs) as? Int ?? 0,
+            -2000), 2000)
         if let storedWeight = defaults.object(forKey: Keys.lyricsFontWeight) as? Double {
             lyricsFontWeight = Self.clamped(storedWeight, to: Self.lyricsFontWeightRange)
         } else {
