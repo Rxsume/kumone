@@ -1278,7 +1278,11 @@ final class PlayerService: ObservableObject {
         // and the download goes through the loader's own session, which
         // does not get these headers (see the note on `loadResolvedURL`).
         if let headers = Self.playbackHeaders(for: unblockID) {
-            asset = AVURLAsset(url: remote, options: [AVURLAssetHTTPHeaderFieldsKey: headers])
+            // The AVURLAssetHTTPHeaderFieldsKey constant is not exposed
+            // to Swift by the iOS SDK (CI run #85: "cannot find in
+            // scope"), so the option key is spelled out as its literal
+            // string — the same value, and the standard workaround.
+            asset = AVURLAsset(url: remote, options: ["AVURLAssetHTTPHeaderFieldsKey": headers])
         }
         var resourceLoader: CachingAudioResourceLoader?
         if SettingsManager.shared.enableAudioCache, !isTrial {
@@ -1974,7 +1978,10 @@ final class PlayerService: ObservableObject {
         // QQ/Kugou playback that 403s needs the loader taught to carry
         // them (follow-up, not this change).
         if let headers = Self.playbackHeaders(for: currentUnblockSourceID) {
-            asset = AVURLAsset(url: remote, options: [AVURLAssetHTTPHeaderFieldsKey: headers])
+            // Same literal-string key as in prepareLoadedURL: the
+            // AVURLAssetHTTPHeaderFieldsKey constant is not exposed to
+            // Swift by the iOS SDK (CI run #85).
+            asset = AVURLAsset(url: remote, options: ["AVURLAssetHTTPHeaderFieldsKey": headers])
         }
         var resourceLoader: CachingAudioResourceLoader?
         if SettingsManager.shared.enableAudioCache, !isTrial {
