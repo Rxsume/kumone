@@ -12,6 +12,15 @@ import Foundation
 /// Every fork build shares one dotted version and differs only in its
 /// CFBundleVersion build number, so "is there an update" must compare
 /// builds too, not just versions.
+///
+/// Mirror fallback (ported from Folia 0.7.27, `electron/updateCheckMirrors.cjs`):
+/// when GitHub itself cannot be read (common on mainland China networks),
+/// the version check falls back to public GitHub proxies, racing all four
+/// at once; the first that answers with a plausible tag wins. The proxy is
+/// trusted for the *version only*: a mirror-discovered release carries no
+/// IPA URL, so the updater falls back to opening the releases page instead
+/// of downloading a file a proxy handed over — a misbehaving proxy can at
+/// worst report a wrong version, never hand over a file to install.
 enum ReleaseChecker {
     struct Release {
         let version: String
@@ -57,7 +66,26 @@ enum ReleaseChecker {
     }
 
     static func latest() async throws -> Release {
-        var request = URLRequest(url: latestAPI)
+        // Direct GitHub first, exactly as before.
+        do {
+            return try await fetchRelease(from: latestAPI)
+        } catch {
+            // GitHub unreadable: ask the mirrors for the version only.
+            // If no mirror answers either, throw GitHub's original error
+            // (Folia's `discoverUpdateVersion` does the same).
+            if let mirrored = await fetchTagViaMirrors() {
+                return Release(version: mirrored.version, build: mirrored.build,
+                              url: releasesPage, ipaURL: nil)
+            }
+            throw error
+        }
+    }
+
+    /// Fetch a full release (tag + page URL + IPA asset URL) from a
+    /// GitHub API endpoint. Used for the direct check, where the response
+    /// is trusted; mirror responses never come through here.
+    private static func fetchRelease(from apiURL: URL) async throws -> Release {
+        var request = URLRequest(url: apiURL)
         request.setValue("application/vnd.github+json", forHTTPHeaderField: "Accept")
         request.timeoutInterval = 15
         let (data, response) = try await URLSession.shared.data(for: request)
@@ -77,6 +105,75 @@ enum ReleaseChecker {
         let ipa = assets.first { ($0["name"] as? String)?.lowercased().hasSuffix(".ipa") == true }
         let ipaURL = (ipa?["browser_download_url"] as? String).flatMap(URL.init)
         return Release(version: version, build: build, url: url, ipaURL: ipaURL)
+    }
+
+    /// Public GitHub proxies the version check falls back to (Folia 0.7.27,
+    /// `UPDATE_CHECK_MIRROR_PREFIXES`). Each takes the full GitHub API URL
+    /// after its own address. `ghfast.top` refuses requests from outside
+    /// mainland China; the others answer from anywhere — racing all four
+    /// means one refusing simply loses.
+    private static let mirrorPrefixes = [
+        "https://ghfast.top/",
+        "https://edgeone.gh-proxy.com/",
+        "https://gh-proxy.com/",
+        "https://ghproxy.net/",
+    ]
+
+    /// Race the mirrors for the latest tag; first plausible answer wins,
+    /// nil when none answers. Only the tag is read from a mirror — never
+    /// an asset URL (see the `latest()` invariant above).
+    private static func fetchTagViaMirrors() async -> (version: String, build: Int?)? {
+        let mirrorURLs = mirrorPrefixes.compactMap { URL(string: $0 + latestAPI.absoluteString) }
+        guard !mirrorURLs.isEmpty else { return nil }
+        return await withTaskGroup(of: (version: String, build: Int?)?.self) { group in
+            for url in mirrorURLs {
+                group.addTask { await fetchTag(from: url) }
+            }
+            while let result = await group.next() {
+                if let result {
+                    group.cancelAll()
+                    return result
+                }
+            }
+            return nil
+        }
+    }
+
+    /// One mirror attempt: fetch, require 2xx, read `tag_name`, and only
+    /// accept it when it looks like a real fork release tag. Any failure
+    /// (network, status, decode, implausible tag) is nil — the race just
+    /// waits for another mirror instead of failing on the first one.
+    private static func fetchTag(from mirrorURL: URL) async -> (version: String, build: Int?)? {
+        var request = URLRequest(url: mirrorURL)
+        request.setValue("application/vnd.github+json", forHTTPHeaderField: "Accept")
+        request.timeoutInterval = 10
+        do {
+            let (data, response) = try await URLSession.shared.data(for: request)
+            guard let http = response as? HTTPURLResponse, (200..<300).contains(http.statusCode),
+                  let obj = try JSONSerialization.jsonObject(with: data) as? [String: Any],
+                  let tag = obj["tag_name"] as? String,
+                  isPlausibleReleaseTag(tag)
+            else { return nil }
+            return parseTag(tag)
+        } catch {
+            return nil
+        }
+    }
+
+    /// Strict tag check for mirror answers only (the direct path stays
+    /// lenient, as before): after stripping an optional `v` and the
+    /// `Golia-`/`Rumxs-` release-name prefix, the tag must be a dotted
+    /// numeric version (`0.3.29`), optionally with `-build-<n>`. Anything
+    /// else a proxy answers is not treated as a release.
+    private static func isPlausibleReleaseTag(_ tag: String) -> Bool {
+        var stripped = tag.hasPrefix("v") ? String(tag.dropFirst()) : tag
+        stripped = stripReleaseNamePrefix(stripped)
+        let parts = stripped.split(separator: "-build-", omittingEmptySubsequences: false)
+        guard parts.count <= 2 else { return false }
+        let numbers = parts[0].split(separator: ".")
+        guard numbers.count == 3, numbers.allSatisfy({ Int($0) != nil }) else { return false }
+        if parts.count == 2 { guard Int(parts[1]) != nil else { return false } }
+        return true
     }
 
     /// Parse a release tag into (version, build). Fork tags look like
