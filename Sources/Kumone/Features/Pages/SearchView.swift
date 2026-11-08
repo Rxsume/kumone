@@ -18,9 +18,9 @@ final class SearchViewModel: ObservableObject {
     @Published var artists: [ArtistSummary] = []
     @Published var albums: [AlbumSummary] = []
     @Published var playlists: [PlaylistSummary] = []
-    /// QQ/Kugou artist/album hits for the same query. Empty unless the
-    /// user enabled the source toggle; rendered after the NetEase
-    /// cards and opening the platform detail pages.
+    /// QQ/Kugou artist/album hits for the same query, always searched
+    /// alongside NetEase; rendered after the NetEase cards and
+    /// opening the platform detail pages.
     @Published var platformArtists: [PlatformArtistSummary] = []
     @Published var platformAlbums: [PlatformAlbumSummary] = []
     @Published var loadedTabs: Set<Tab> = []
@@ -128,25 +128,22 @@ final class SearchViewModel: ObservableObject {
     /// the playlists tab stays NetEase-only — there is no platform
     /// playlist detail page.
     ///
-    /// Each search runs only when its source toggle is on
-    /// (`enabledAudioSourceIDs` — both are opt-in script backends, off
-    /// by default), and a platform failure returns [] instead of
-    /// throwing, so it can never fail the tab: NetEase results stand.
+    /// Search always queries all three platforms (NetEase + QQ +
+    /// Kugou) — the 音源 toggles no longer gate search; they control
+    /// playback fallback only. A platform failure returns [] instead
+    /// of throwing, so it can never fail the tab: NetEase results stand.
 
     private func searchQQSongs(keyword: String) async -> [Track] {
-        guard SettingsManager.shared.enabledAudioSourceIDs.contains(.qqmusic) else { return [] }
         guard let results = try? await QQMusicAPI.shared.searchSongs(keyword: keyword, limit: 30) else { return [] }
         return results.compactMap(Track.fromQQSong)
     }
 
     private func searchKugouSongs(keyword: String) async -> [Track] {
-        guard SettingsManager.shared.enabledAudioSourceIDs.contains(.kugou) else { return [] }
         guard let results = try? await KugouMusicAPI.shared.searchSongs(keyword: keyword, limit: 30) else { return [] }
         return results.compactMap(Track.fromKugouSong)
     }
 
     private func searchQQArtists(keyword: String, limit: Int) async -> [PlatformArtistSummary] {
-        guard SettingsManager.shared.enabledAudioSourceIDs.contains(.qqmusic) else { return [] }
         guard let results = try? await QQMusicAPI.shared.searchArtists(keyword: keyword, limit: limit) else { return [] }
         return results.map {
             PlatformArtistSummary(source: .qqmusic, name: $0.name, picURL: $0.picURL, platformID: $0.mid)
@@ -154,7 +151,6 @@ final class SearchViewModel: ObservableObject {
     }
 
     private func searchKugouArtists(keyword: String, limit: Int) async -> [PlatformArtistSummary] {
-        guard SettingsManager.shared.enabledAudioSourceIDs.contains(.kugou) else { return [] }
         guard let results = try? await KugouMusicAPI.shared.searchArtists(keyword: keyword, limit: limit) else { return [] }
         return results.map {
             PlatformArtistSummary(source: .kugou, name: $0.name, picURL: $0.picURL, platformID: $0.authorID)
@@ -162,7 +158,6 @@ final class SearchViewModel: ObservableObject {
     }
 
     private func searchQQAlbums(keyword: String, limit: Int) async -> [PlatformAlbumSummary] {
-        guard SettingsManager.shared.enabledAudioSourceIDs.contains(.qqmusic) else { return [] }
         guard let results = try? await QQMusicAPI.shared.searchAlbums(keyword: keyword, limit: limit) else { return [] }
         return results.map {
             PlatformAlbumSummary(source: .qqmusic, name: $0.name, artistName: $0.artistName,
@@ -171,7 +166,6 @@ final class SearchViewModel: ObservableObject {
     }
 
     private func searchKugouAlbums(keyword: String, limit: Int) async -> [PlatformAlbumSummary] {
-        guard SettingsManager.shared.enabledAudioSourceIDs.contains(.kugou) else { return [] }
         guard let results = try? await KugouMusicAPI.shared.searchAlbums(keyword: keyword, limit: limit) else { return [] }
         return results.map {
             PlatformAlbumSummary(source: .kugou, name: $0.name, artistName: $0.artistName,
