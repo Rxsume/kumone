@@ -53,6 +53,9 @@ struct QQMusicSong: Hashable, Identifiable, Sendable {
 struct QQMusicArtist: Hashable, Identifiable, Sendable {
     let name: String
     let picURL: URL?
+    /// Platform singer MID (from `singerMID` / `mid` in search
+    /// responses). Nil when the source did not carry one.
+    let mid: String? = nil
 
     var id: String { name }
 }
@@ -62,8 +65,25 @@ struct QQMusicAlbum: Hashable, Identifiable, Sendable {
     let name: String
     let artistName: String
     let picURL: URL?
+    /// Platform album MID (from `mid` / `albummid` / `albumMID` in
+    /// search responses). Nil when the source did not carry one.
+    let mid: String? = nil
 
     var id: String { "\(artistName)-\(name)" }
+}
+
+/// Full QQ Music album detail, from `fcg_v8_album_info_cp.fcg`.
+struct QQMusicAlbumDetail: Hashable, Sendable {
+    let mid: String
+    let name: String
+    let artistName: String
+    let artistMid: String?
+    let picURL: URL?
+    let publishDate: String?
+    let description: String?
+    let genre: String?
+    let totalSongs: Int
+    let songs: [QQMusicSong]
 }
 
 /// One of the logged-in user's QQ Music playlists.
@@ -156,7 +176,7 @@ final class QQMusicAPI: Sendable {
                 let name = item["singerName"] as? String ?? (item["name"] as? String ?? (item["title"] as? String ?? ""))
                 guard !name.isEmpty else { continue }
                 let mid = item["singerMID"] as? String ?? (item["mid"] as? String)
-                artists.append(QQMusicArtist(name: name, picURL: Self.singerPhotoURL(mid)))
+                artists.append(QQMusicArtist(name: name, picURL: Self.singerPhotoURL(mid), mid: mid))
             }
             if !artists.isEmpty { return Array(artists.prefix(limit)) }
         }
@@ -173,7 +193,8 @@ final class QQMusicAPI: Sendable {
                 let mid = item["mid"] as? String
                 artists.append(QQMusicArtist(
                     name: name,
-                    picURL: Self.normalizedQQImageURL(item["pic"]) ?? Self.singerPhotoURL(mid)))
+                    picURL: Self.normalizedQQImageURL(item["pic"]) ?? Self.singerPhotoURL(mid),
+                    mid: mid))
             }
             if !artists.isEmpty { return artists }
         }
@@ -211,6 +232,151 @@ final class QQMusicAPI: Sendable {
         let data = json["data"] as? [String: Any] ?? [:]
         let hots = data["hotkey"] as? [[String: Any]] ?? []
         return hots.compactMap { $0["k"] as? String }.prefix(limit).map { $0 }
+    }
+
+    // MARK: - Artist / album detail
+
+    /// Songs by one artist, via song search: no live dedicated
+    /// artist-songs endpoint exists (the `fcg_v8_singer_track_cp`,
+    /// `GetSingerSongList` and `GetHomepageSongList` routes are all
+    /// dead), so the artist name is searched and only songs whose
+    /// artist list contains that exact name — after normalization —
+    /// are kept. `mid` is accepted for API symmetry / future use; the
+    /// search path does not need it.
+    func artistSongs(name: String, mid: String?, limit: Int = 60) async throws -> [QQMusicSong] {
+        // `mid` is intentionally unused: see the doc comment above.
+        _ = mid
+        let expected = Self.normalizedArtistName(name)
+        guard !expected.isEmpty else { return [] }
+        let songs = try await searchSongs(keyword: name, limit: max(limit, 30))
+        var seen = Set<String>()
+        var result: [QQMusicSong] = []
+        for song in songs {
+            guard result.count < limit else { break }
+            guard song.artistNames.contains(where: { Self.normalizedArtistName($0) == expected }) else { continue }
+            guard seen.insert(song.songmid).inserted else { continue }
+            result.append(song)
+        }
+        return result
+    }
+
+    /// Albums by one artist, via album search: no live dedicated
+    /// artist-albums endpoint exists (the `fcg_v8_singer_album*` and
+    /// `GetSingerAlbum` routes are all dead), so the artist name is
+    /// searched and only albums whose artist tokens intersect the
+    /// expected artist tokens are kept. `mid` is accepted for API
+    /// symmetry / future use; the search path does not need it.
+    func artistAlbums(name: String, mid: String?, limit: Int = 30) async throws -> [QQMusicAlbum] {
+        // `mid` is intentionally unused: see the doc comment above.
+        _ = mid
+        let expectedTokens = Self.artistNameTokens(name)
+        guard !expectedTokens.isEmpty else { return [] }
+        let albums = try await searchAlbums(keyword: name, limit: max(limit, 30))
+        var seen = Set<String>()
+        var result: [QQMusicAlbum] = []
+        for album in albums {
+            guard result.count < limit else { break }
+            guard !Self.artistNameTokens(album.artistName).isDisjoint(with: expectedTokens) else { continue }
+            let key = (album.mid?.isEmpty == false ? album.mid : nil) ?? album.name
+            guard seen.insert(key).inserted else { continue }
+            result.append(album)
+        }
+        return result
+    }
+
+    /// Full album detail via the live `fcg_v8_album_info_cp.fcg`
+    /// endpoint, paginated 30 songs at a time (capped at ~100 songs).
+    /// Song rows are parsed with the shared `song(from:)`; their
+    /// `mediaMid` is usually nil here and playback fills it in via
+    /// `resolveMediaMid`.
+    func albumDetail(mid: String) async throws -> QQMusicAlbumDetail {
+        guard !mid.isEmpty else { throw QQMusicError.invalidResponse }
+        let pageSize = 30
+        let cap = 100
+        var songs: [QQMusicSong] = []
+        var seenSongMids = Set<String>()
+        var begin = 0
+        var albumName = ""
+        var artistName = ""
+        var artistMid: String?
+        var publishDate: String?
+        var albumDescription: String?
+        var genre: String?
+        var totalSongs = 0
+        var isFirstPage = true
+        while songs.count < cap {
+            var comps = URLComponents(string: "https://c.y.qq.com/v8/fcg-bin/fcg_v8_album_info_cp.fcg")
+            comps?.queryItems = [
+                URLQueryItem(name: "albummid", value: mid),
+                URLQueryItem(name: "song_begin", value: "\(begin)"),
+                URLQueryItem(name: "song_num", value: "\(pageSize)"),
+                URLQueryItem(name: "format", value: "json"),
+            ]
+            guard let url = comps?.url else { throw QQMusicError.invalidURL }
+            let json = try await get(url.absoluteString)
+            guard (json["code"] as? Int) == 0,
+                  let data = json["data"] as? [String: Any] else {
+                throw QQMusicError.invalidResponse
+            }
+            if isFirstPage {
+                albumName = data["name"] as? String ?? ""
+                guard !albumName.isEmpty else { throw QQMusicError.invalidResponse }
+                artistName = data["singername"] as? String ?? (data["singerName"] as? String ?? "")
+                artistMid = data["singermid"] as? String ?? (data["singerMID"] as? String)
+                publishDate = data["aDate"] as? String
+                albumDescription = data["desc"] as? String
+                genre = data["genre"] as? String
+                totalSongs = Self.integerValue(data["total"] ?? data["total_song_num"])
+                isFirstPage = false
+            }
+            let list = data["list"] as? [[String: Any]] ?? []
+            for song in list.compactMap({ song(from: $0) }) {
+                guard seenSongMids.insert(song.songmid).inserted else { continue }
+                songs.append(song)
+                if songs.count >= cap { break }
+            }
+            if list.count < pageSize { break }
+            if totalSongs > 0, songs.count >= min(totalSongs, cap) { break }
+            begin += pageSize
+        }
+        return QQMusicAlbumDetail(
+            mid: mid,
+            name: albumName,
+            artistName: artistName,
+            artistMid: artistMid,
+            picURL: Self.photoURL(mid),
+            publishDate: publishDate,
+            description: albumDescription,
+            genre: genre,
+            totalSongs: totalSongs > 0 ? totalSongs : songs.count,
+            songs: songs)
+    }
+
+    /// Normalizes an artist name for comparison: lowercased, with
+    /// parenthetical "(...)" / "（...)" content and all whitespace /
+    /// punctuation stripped, so "周杰伦 (Jay Chou)" matches "周杰伦".
+    private static func normalizedArtistName(_ name: String) -> String {
+        var text = name.lowercased()
+        for (open, close) in [(Character("("), Character(")")), (Character("（"), Character("）"))] {
+            while let start = text.firstIndex(of: open),
+                  let end = text[start...].firstIndex(of: close) {
+                text.removeSubrange(start...end)
+            }
+            // Unmatched opener: drop it and everything after it.
+            if let start = text.firstIndex(of: open) {
+                text.removeSubrange(start...)
+            }
+        }
+        return text.filter { $0.isLetter || $0.isNumber }
+    }
+
+    /// Artist-name tokens: split on common multi-artist separators,
+    /// then normalize each token.
+    private static func artistNameTokens(_ name: String) -> Set<String> {
+        let separators = CharacterSet(charactersIn: "/、,，&;；")
+        return Set(name.components(separatedBy: separators)
+            .map { normalizedArtistName($0) }
+            .filter { !$0.isEmpty })
     }
 
     // MARK: - Liked songs / like
@@ -852,7 +1018,7 @@ final class QQMusicAPI: Sendable {
             var artistName = singer.compactMap { $0["name"] as? String }.joined(separator: " / ")
             if artistName.isEmpty { artistName = item["singerName"] as? String ?? "" }
             albums.append(QQMusicAlbum(
-                name: name, artistName: artistName, coverURL: Self.photoURL(mid)))
+                name: name, artistName: artistName, picURL: Self.photoURL(mid), mid: mid))
         }
         return albums
     }
