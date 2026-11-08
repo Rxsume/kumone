@@ -1271,6 +1271,15 @@ final class PlayerService: ObservableObject {
     ) async {
         let remote = CDNHost.preferred(for: url)
         var asset = AVURLAsset(url: remote)
+        // Beans pattern: a QQ/Kugou stream needs the platform login
+        // headers (UA/Referer + cookies) on the asset or the host 403s.
+        // This only covers the direct asset: when the cache loader below
+        // takes over, `asset` is replaced by the loader's cached asset
+        // and the download goes through the loader's own session, which
+        // does not get these headers (see the note on `loadResolvedURL`).
+        if let headers = Self.playbackHeaders(for: unblockID) {
+            asset = AVURLAsset(url: remote, options: [AVURLAssetHTTPHeaderFieldsKey: headers])
+        }
         var resourceLoader: CachingAudioResourceLoader?
         if SettingsManager.shared.enableAudioCache, !isTrial {
             let cacheLimitMB = await SettingsManager.shared.effectiveAudioCacheSizeMB()
@@ -1925,6 +1934,24 @@ final class PlayerService: ObservableObject {
         advanceToNext(userInitiated: false)
     }
 
+    /// Playback headers for a resolved third-party URL (Beans
+    /// `PlayerManager` pattern: QQ gets a Firefox UA + y.qq.com Referer
+    /// + login Cookie; Kugou gets its Android UA + kugou.com Referer +
+    /// login Cookie). Nil for NetEase and every other source, and nil
+    /// when the platform reports no headers at all.
+    private static func playbackHeaders(for source: AudioSourceID?) -> [String: String]? {
+        switch source {
+        case .qqmusic:
+            let headers = QQMusicAuth.shared.playbackHeaders
+            return headers.isEmpty ? nil : headers
+        case .kugou:
+            let headers = KugouMusicAuth.shared.playbackHeaders
+            return headers.isEmpty ? nil : headers
+        default:
+            return nil
+        }
+    }
+
     private func loadResolvedURL(
         _ track: Track,
         url: URL,
@@ -1936,6 +1963,19 @@ final class PlayerService: ObservableObject {
         let remote = CDNHost.preferred(for: url)
 
         var asset = AVURLAsset(url: remote)
+        // Beans pattern (see `prepareLoadedURL`): a QQ/Kugou stream
+        // needs the platform login headers on the asset or the host
+        // 403s. `loadResolvedURL` takes no source parameter; the caller
+        // (`resolveAndLoadUnblocked`) records it in
+        // `currentUnblockSourceID` before calling here. As in
+        // `prepareLoadedURL`, this only covers the direct asset — when
+        // the cache loader below takes over, the download goes through
+        // the loader's own session without these headers, so a cached
+        // QQ/Kugou playback that 403s needs the loader taught to carry
+        // them (follow-up, not this change).
+        if let headers = Self.playbackHeaders(for: currentUnblockSourceID) {
+            asset = AVURLAsset(url: remote, options: [AVURLAssetHTTPHeaderFieldsKey: headers])
+        }
         var resourceLoader: CachingAudioResourceLoader?
         if SettingsManager.shared.enableAudioCache, !isTrial {
             let cacheLimitMB = await SettingsManager.shared.effectiveAudioCacheSizeMB()

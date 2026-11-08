@@ -4,10 +4,12 @@ import os.log
 
 /// Resolves gray tracks, trying sources in this order: ikun first (the
 /// preferred source), then the direct pyncmd source, then the remaining
-/// script-backend providers (Haitangw / Xinghai), which resolve by
-/// NetEase ID directly, with no search step.
+/// providers (Haitangw / Xinghai, which resolve by NetEase ID directly
+/// with no search step, then the Beans platform providers Kugou / QQ /
+/// FNMusic, which resolve by cross-platform search + match and
+/// short-circuit when `track.platformSource` is their own ID).
 ///
-/// Kugou and Kuwo were removed: Kuwo's unauthenticated convert_url
+/// Kuwo was removed: Kuwo's unauthenticated convert_url
 /// endpoint answers VIP tracks with a ~11s spoken prompt clip ("use the
 /// latest Kuwo app") instead of the song, and the clip is playable, so
 /// it used to be returned as if it were the track. Every resolved URL
