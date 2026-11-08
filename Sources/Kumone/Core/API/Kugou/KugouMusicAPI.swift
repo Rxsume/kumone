@@ -49,6 +49,15 @@ struct KugouMusicPlaylist: Hashable, Sendable, Identifiable {
     let trackCount: Int
 }
 
+/// One Kugou chart, from `/ocean/v6/rank/list` or the m.kugou.com
+/// rank JSON.
+struct KugouTopInfo: Hashable, Sendable {
+    let id: Int
+    let name: String
+    let updateFrequency: String
+    let coverURL: URL?
+}
+
 /// Playback quality for `/v5/url`. Raw values are the quality strings
 /// the endpoint expects (`flac` / `high` / `320` / `128`).
 enum KugouAudioQuality: String, Sendable, CaseIterable {
@@ -99,9 +108,11 @@ enum KugouMusicAPIError: LocalizedError {
 /// through the anonymous tiers while the session is cleared once.
 ///
 /// Deliberately NOT ported from Beans: personalFM, everydayRecommend,
-/// topLists, rankSongs, recommendPlaylists, comments, lyric (lyric is
-/// PR #23's `KugouLyricProvider`), playlist songs, and the VIP
-/// membership probe. Artist songs are ported (detail pages need them).
+/// comments, lyric (lyric is PR #23's `KugouLyricProvider`),
+/// login-gated user-playlist songs, and the VIP membership probe.
+/// Home-feed endpoints (topLists, rankSongs, recommendPlaylists,
+/// public playlist songs) ARE ported — see "Home feed" below.
+/// Artist songs are ported (detail pages need them).
 final class KugouMusicAPI: @unchecked Sendable {
     static let shared = KugouMusicAPI()
 
@@ -704,6 +715,256 @@ final class KugouMusicAPI: @unchecked Sendable {
             "周杰伦", "林俊杰", "陈奕迅", "薛之谦", "邓紫棋",
             "凤凰传奇", "五月天", "毛不易", "告五人", "热门歌曲",
         ]
+    }
+
+    // MARK: - Home feed (anonymous)
+
+    /// Kugou charts. Tier 1 is the signed upstream `/ocean/v6/rank/list`;
+    /// tier 2 (the official-web HTML scrape in Beans) is skipped — HTML
+    /// parsing breaks on every redesign. Tier 3 is the plain
+    /// `m.kugou.com/rank/list?json=true` JSON.
+    func topLists(limit: Int = 10) async throws -> [KugouTopInfo] {
+        if let upstream = try? await upstreamTopLists(limit: limit), !upstream.isEmpty {
+            return upstream
+        }
+        guard let url = URL(string: "https://m.kugou.com/rank/list?json=true") else {
+            throw KugouMusicAPIError.invalidURL
+        }
+        let json = try await getJSON(url, ua: Self.browserUA)
+        let list = (json["rank"] as? [String: Any])?["list"] as? [[String: Any]] ?? []
+        return list.prefix(limit).compactMap { item in
+            let id = Self.int(item["rankid"] ?? item["id"])
+            guard id > 0 else { return nil }
+            let name = Self.clean(Self.string(item["rankname"] ?? item["name"]))
+            guard !name.isEmpty else { return nil }
+            let cover = Self.normalizeURL(
+                Self.string(item["album_img_9"] ?? item["img_9"] ?? item["imgurl"])
+                    .replacingOccurrences(of: "{size}", with: "400"))
+            return KugouTopInfo(
+                id: id, name: name,
+                updateFrequency: Self.clean(Self.string(item["update_frequency"] ?? item["updateFrequency"])),
+                coverURL: cover.isEmpty ? nil : URL(string: cover))
+        }
+    }
+
+    private func upstreamTopLists(limit: Int) async throws -> [KugouTopInfo] {
+        let response = try await upstreamRequest(
+            "/ocean/v6/rank/list",
+            params: ["plat": "2", "withsong": "1", "parentid": "0"])
+        let rows = Self.deepArrays(response.json, names: ["rank", "list", "ranklist", "data", "info"])
+        var seen = Set<Int>()
+        return rows.compactMap { item in
+            let id = Self.int(item["rankid"] ?? item["rank_id"] ?? item["id"])
+            let name = Self.clean(Self.string(item["rankname"] ?? item["rank_name"] ?? item["name"] ?? item["title"]))
+            guard id > 0, !name.isEmpty, seen.insert(id).inserted else { return nil }
+            let cover = Self.normalizeURL(
+                Self.string(item["imgurl"] ?? item["img_url"] ?? item["img_9"] ?? item["album_img_9"] ?? item["cover"])
+                    .replacingOccurrences(of: "{size}", with: "400"))
+            return KugouTopInfo(
+                id: id, name: name,
+                updateFrequency: Self.clean(Self.string(item["update_frequency"] ?? item["updateFrequency"])),
+                coverURL: cover.isEmpty ? nil : URL(string: cover))
+        }.prefix(max(limit, 1)).map { $0 }
+    }
+
+    /// Songs of one chart. Tier 1 is the signed KMR
+    /// `/openapi/kmr/v2/rank/audio`; tier 3 is the plain
+    /// `m.kugou.com/rank/info?json=true` JSON. The HTML-scrape tier is
+    /// skipped. The KMR rows win; the mobile rows only fill gaps.
+    func rankSongs(rankID: Int, limit: Int = 100) async throws -> [KugouMusicSong] {
+        let target = max(limit, 1)
+        var merged = (try? await upstreamRankSongs(rankID: rankID, limit: target)) ?? []
+        if merged.count < target,
+           let mobile = try? await mobileRankSongs(rankID: rankID, limit: target),
+           !mobile.isEmpty {
+            merged = Self.mergeRankSongs(primary: merged, fallback: mobile, limit: target)
+        }
+        return Array(merged.prefix(target))
+    }
+
+    private func upstreamRankSongs(rankID: Int, limit: Int) async throws -> [KugouMusicSong] {
+        let target = max(limit, 1)
+        let pageSize = min(max(target, 1), 100)
+        let pageCount = max(1, min(50, Int(ceil(Double(target) / 30.0)) + 2))
+        var songs: [KugouMusicSong] = []
+        var seen = Set<String>()
+        for page in 1...pageCount {
+            let response = try await upstreamRequest(
+                "/openapi/kmr/v2/rank/audio",
+                method: "POST",
+                data: [
+                    "show_portrait_mv": 1, "show_type_total": 1,
+                    "filter_original_remarks": 1, "area_code": 1,
+                    "pagesize": pageSize, "rank_cid": 0,
+                    "type": 1, "page": page, "rank_id": rankID,
+                ],
+                headers: ["kg-tid": "369"])
+            let rows = Self.deepArrays(response.json, names: ["songs", "songlist", "list", "info", "data", "audio"])
+            let batch = rows.compactMap(Self.mapSong)
+            if batch.isEmpty { break }
+            let before = songs.count
+            for song in batch where seen.insert(Self.dedupKey(for: song)).inserted {
+                songs.append(song)
+                if songs.count >= target { return Array(songs.prefix(target)) }
+            }
+            if songs.count == before { break }
+        }
+        return Array(songs.prefix(target))
+    }
+
+    private func mobileRankSongs(rankID: Int, limit: Int) async throws -> [KugouMusicSong] {
+        let target = max(limit, 1)
+        let pageSize = min(max(target, 1), 100)
+        let pageCount = max(1, min(50, Int(ceil(Double(target) / 20.0)) + 2))
+        var songs: [KugouMusicSong] = []
+        var seen = Set<String>()
+        for page in 1...pageCount {
+            var components = URLComponents(string: "https://m.kugou.com/rank/info")!
+            components.queryItems = [
+                URLQueryItem(name: "rankid", value: "\(rankID)"),
+                URLQueryItem(name: "page", value: "\(page)"),
+                URLQueryItem(name: "pagesize", value: "\(pageSize)"),
+                URLQueryItem(name: "json", value: "true"),
+            ]
+            guard let url = components.url else { throw KugouMusicAPIError.invalidURL }
+            let json = try await getJSON(url, ua: Self.browserUA)
+            let rows = (json["songs"] as? [String: Any])?["list"] as? [[String: Any]] ?? []
+            let batch = rows.compactMap(Self.mapSong)
+            if batch.isEmpty { break }
+            let before = songs.count
+            for song in batch where seen.insert(Self.dedupKey(for: song)).inserted {
+                songs.append(song)
+                if songs.count >= target { return Array(songs.prefix(target)) }
+            }
+            if songs.count == before { break }
+        }
+        return Array(songs.prefix(target))
+    }
+
+    private static func mergeRankSongs(primary: [KugouMusicSong], fallback: [KugouMusicSong], limit: Int) -> [KugouMusicSong] {
+        var seen = Set(primary.map { Self.dedupKey(for: $0) })
+        var merged = primary
+        for song in fallback where seen.insert(Self.dedupKey(for: song)).inserted {
+            merged.append(song)
+            if merged.count >= limit { break }
+        }
+        return merged
+    }
+
+    /// Recommended playlists. Tier 1 is the signed upstream
+    /// `/v2/special_recommend`; tier 3 is the plain
+    /// `m.kugou.com/plist/index?json=true` JSON. The HTML-scrape tier
+    /// is skipped.
+    func recommendPlaylists(limit: Int = 12) async throws -> [KugouMusicPlaylist] {
+        if let upstream = try? await upstreamRecommendPlaylists(limit: limit), !upstream.isEmpty {
+            return upstream
+        }
+        guard let url = URL(string: "https://m.kugou.com/plist/index?json=true&page=1") else {
+            throw KugouMusicAPIError.invalidURL
+        }
+        let json = try await getJSON(url, ua: Self.browserUA)
+        let rows = (((json["plist"] as? [String: Any])?["list"] as? [String: Any])?["info"] as? [[String: Any]]) ?? []
+        return rows.prefix(limit).compactMap(Self.mapPlaylist)
+    }
+
+    private func upstreamRecommendPlaylists(limit: Int) async throws -> [KugouMusicPlaylist] {
+        let snapshot = await authSnapshot()
+        let clientTime = Int(Date().timeIntervalSince1970)
+        let specialRecommend: [String: Any] = [
+            "withtag": 1, "withsong": 1, "sort": 1, "ugc": 1,
+            "is_selected": 0, "withrecommend": 1, "area_code": 1, "categoryid": 0,
+        ]
+        let response = try await upstreamRequest(
+            "/v2/special_recommend",
+            method: "POST",
+            data: [
+                "appid": upstreamAppID,
+                "mid": snapshot.mid,
+                "clientver": upstreamClientVersion,
+                "platform": "android",
+                "clienttime": clientTime,
+                "userid": Int(snapshot.userID) ?? 0,
+                "module_id": 1, "page": 1,
+                "pagesize": min(max(limit, 1), 30),
+                "key": upstreamParamsKey("\(clientTime)"),
+                "special_recommend": specialRecommend,
+                "req_multi": 1, "retrun_min": 5, "return_special_falg": 1,
+            ],
+            headers: ["x-router": "specialrec.service.kugou.com"])
+        let rows = Self.deepArrays(response.json, names: ["special_recommend", "playlists", "playlist", "list", "info", "data"])
+        var seen = Set<Int>()
+        return rows.compactMap { item in
+            guard let playlist = Self.mapPlaylist(item), seen.insert(playlist.id).inserted else { return nil }
+            return playlist
+        }.prefix(max(limit, 1)).map { $0 }
+    }
+
+    /// Songs of one public square playlist (`specialid`). The only
+    /// anonymous path is the official page's embedded `data` JS array
+    /// (`www.kugou.com/yy/special/single/{id}.html`) — an HTML scrape,
+    /// so it can break on a redesign; callers treat [] as "no songs".
+    /// Login-gated user playlists (specialid < 1000) are not served here.
+    func playlistSongs(listID: Int) async throws -> [KugouMusicSong] {
+        guard listID >= 1000 else { return [] }
+        guard let url = URL(string: "https://www.kugou.com/yy/special/single/\(listID).html") else {
+            throw KugouMusicAPIError.invalidURL
+        }
+        let html = try await getString(url, ua: Self.browserUA)
+        guard let rows = Self.javascriptArray(named: "data", in: html) else { return [] }
+        return rows.compactMap(Self.mapSong)
+    }
+
+    private func getString(_ url: URL, ua: String) async throws -> String {
+        var request = URLRequest(url: url)
+        request.setValue(ua, forHTTPHeaderField: "User-Agent")
+        request.setValue("https://www.kugou.com/", forHTTPHeaderField: "Referer")
+        let (data, response) = try await session.data(for: request)
+        guard (response as? HTTPURLResponse)?.statusCode == 200,
+              let text = String(data: data, encoding: .utf8) else {
+            throw KugouMusicAPIError.network
+        }
+        return text
+    }
+
+    /// Extracts a JS array literal `name = [...]` from HTML, matching
+    /// brackets while respecting string literals. Returns the parsed
+    /// rows, or nil when the page no longer embeds the array.
+    private static func javascriptArray(named name: String, in html: String) -> [[String: Any]]? {
+        guard let startRange = html.range(of: "\(name) = [") ?? html.range(of: "\(name)=[") else { return nil }
+        guard let openIndex = html[startRange.lowerBound...].firstIndex(of: "[") else { return nil }
+        var depth = 0
+        var inString = false
+        var escaped = false
+        var endIndex: String.Index?
+        var index = openIndex
+        while index < html.endIndex {
+            let char = html[index]
+            if inString {
+                if escaped {
+                    escaped = false
+                } else if char == "\\" {
+                    escaped = true
+                } else if char == "\"" {
+                    inString = false
+                }
+            } else if char == "\"" {
+                inString = true
+            } else if char == "[" {
+                depth += 1
+            } else if char == "]" {
+                depth -= 1
+                if depth == 0 {
+                    endIndex = html.index(after: index)
+                    break
+                }
+            }
+            index = html.index(after: index)
+        }
+        guard let endIndex else { return nil }
+        let jsonText = String(html[openIndex..<endIndex])
+        guard let data = jsonText.data(using: .utf8),
+              let rows = try? JSONSerialization.jsonObject(with: data) as? [[String: Any]] else { return nil }
+        return rows
     }
 
     // MARK: - Playback URLs
