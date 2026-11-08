@@ -44,21 +44,23 @@ enum UnblockService {
     ) async -> Resolution {
         var newlyAttemptedSources = Set<AudioSourceID>()
         guard !Task.isCancelled else { return Resolution(source: nil, attemptedSources: []) }
-        // Platform tracks resolve through ikun FIRST: the user asked for
-        // 酸甜贤 as the default playback source for songs from all
-        // platforms ("搜索全平台歌曲播放音源酸甜贤"). Discovery stays
-        // cross-platform; only playback defaults to ikun. The track is
-        // matched to the same song on NetEase and resolved through
-        // ikun; only when ikun cannot match or resolve it does the flow
-        // fall through to the platform's own provider below. Background:
-        // QQ's vkey endpoint only issues playback URLs to logged-in
-        // sessions — live-probed 2026-11-09, anonymous vkey answers
-        // code 0 with an empty purl for every song and tier — so a
-        // logged-out QQ account gets no QQ URL at all. Deliberately not
-        // gated on the ikun toggle: this is the platform playback rule
-        // the user asked for.
+        // Platform tracks resolve through the NetEase ladder FIRST:
+        // the user asked for 酸甜贤 as the default playback source for
+        // songs from all platforms ("搜索全平台歌曲播放音源酸甜贤").
+        // Discovery stays cross-platform; only playback defaults to
+        // ikun. The track is matched to the same song on NetEase and
+        // resolved through ikun, then the rest of the NetEase ladder
+        // (pyncmd, Haitangw, Xinghai), then the other platform's
+        // provider (Kugou for QQ tracks, QQ for Kugou tracks); only
+        // when none of those can resolve it does the flow fall through
+        // to the generic chain below. Background: QQ's vkey endpoint
+        // only issues playback URLs to logged-in sessions — live-probed
+        // 2026-11-09, anonymous vkey answers code 0 with an empty purl
+        // for every song and tier — so a logged-out QQ account gets no
+        // QQ URL at all. Deliberately not gated on the ikun toggle:
+        // this is the platform playback rule the user asked for.
         if track.platformSource == .qqmusic || track.platformSource == .kugou,
-           let resolved = await platformTrackViaIkun(track) {
+           let resolved = await platformTrackViaFallbacks(track) {
             return Resolution(source: resolved, attemptedSources: newlyAttemptedSources)
         }
         if enabledSources.contains(.ikun), !attemptedSources.contains(.ikun) {
@@ -110,9 +112,24 @@ enum UnblockService {
     }
 
     /// Matches a QQ/Kugou track to the same song on NetEase and resolves
-    /// it through ikun. Nil when there is no confident match or ikun
-    /// has no URL — the failure is surfaced, never a wrong song.
-    private static func platformTrackViaIkun(_ track: Track) async -> ResolvedAudioSource? {
+    /// it through the NetEase ladder (ikun, pyncmd, Haitangw, Xinghai),
+    /// then through the other platform's provider (Kugou for QQ tracks,
+    /// QQ for Kugou tracks). Nil when nothing resolves — the failure is
+    /// surfaced, never a wrong song.
+    ///
+    /// The ladder matters: before this change only ikun was tried for
+    /// the matched NetEase track, and the generic chain below retried
+    /// the same providers with the platform track's own
+    /// (negative-hash) id, which can never resolve — so any song ikun
+    /// alone refused was unplayable even when another NetEase source
+    /// had it. The cross-platform step matters for VIP songs: the four
+    /// NetEase sources all refuse Jay Chou's catalog (ikun: url empty;
+    /// pyncmd: empty; Haitangw: APP_UPGRADE_REQUIRED; Xinghai: 502 —
+    /// live-probed 2026-11-09 for 晴天, NetEase id 186016), while
+    /// Kugou's anonymous search returns the studio recording first
+    /// (269s, 叶惠美）. A logged-in QQ session stays the sure path for
+    /// VIP songs when the other platform cannot resolve them either.
+    private static func platformTrackViaFallbacks(_ track: Track) async -> ResolvedAudioSource? {
         let keyword = AudioSourceTrackMatcher.keyword(for: track)
         guard !keyword.isEmpty else { return nil }
         guard let result = try? await MusicAPI.search(keyword, type: .songs, limit: 10),
@@ -125,11 +142,37 @@ enum UnblockService {
               }),
               match.id > 0
         else { return nil }
-        guard let resolved = try? await ikunProvider.resolve(track: match),
-              await isUsable(resolved, track: match)
-        else { return nil }
-        log.info("platform track via ikun: matched NetEase id=\(match.id, privacy: .public) for \"\(track.name, privacy: .public)\"")
-        return resolved
+        // NetEase ladder on the matched track, ikun first.
+        if let resolved = try? await ikunProvider.resolve(track: match),
+           await isUsable(resolved, track: match) {
+            log.info("platform track via ikun: matched NetEase id=\(match.id, privacy: .public) for \"\(track.name, privacy: .public)\"")
+            return resolved
+        }
+        if let resolved = try? await pyncmd(match),
+           await isUsable(resolved, track: match) {
+            log.info("platform track via pyncmd: matched NetEase id=\(match.id, privacy: .public) for \"\(track.name, privacy: .public)\"")
+            return resolved
+        }
+        for provider in [HaitangwAudioSourceProvider(), XinghaiAudioSourceProvider()] as [any AudioSourceProvider] {
+            guard !Task.isCancelled else { break }
+            if let resolved = try? await provider.resolve(track: match),
+               await isUsable(resolved, track: match) {
+                log.info("platform track via \(provider.id.rawValue, privacy: .public): matched NetEase id=\(match.id, privacy: .public) for \"\(track.name, privacy: .public)\"")
+                return resolved
+            }
+        }
+        // The other platform's provider: Kugou's anonymous search can
+        // match + resolve songs the NetEase ladder refuses. For a
+        // Kugou track the QQ provider is the symmetric fallback (its
+        // vkey needs a QQ login, like any QQ direct resolve).
+        let otherProvider: any AudioSourceProvider =
+            track.platformSource == .qqmusic ? KugouAudioSourceProvider() : QQMusicAudioSourceProvider()
+        if let resolved = try? await otherProvider.resolve(track: track),
+           await isUsable(resolved, track: track) {
+            log.info("platform track via \(otherProvider.id.rawValue, privacy: .public): cross-platform match for \"\(track.name, privacy: .public)\"")
+            return resolved
+        }
+        return nil
     }
 
     /// True unless the URL is known to point at a clip far shorter than
