@@ -2862,7 +2862,7 @@ final class PlayerService: ObservableObject {
             applyLyrics(saved)
         }
         guard !Task.isCancelled, generation == resolveGeneration, !usesOfflineQueue else { return }
-        let response = try? await MusicAPI.lyric(id: track.id)
+        let response = await MusicAPI.lyric(for: track)
         guard !Task.isCancelled, generation == resolveGeneration, let response else { return }
         applyLyrics(response)
         // The engine caches every song it streams, so each one may play offline.

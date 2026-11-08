@@ -477,6 +477,7 @@ final class SettingsManager: ObservableObject {
         static let audioCacheSizeMB = "settings.audioCacheSizeMB"
         static let audioCacheAutomatic = "settings.audioCacheAutomatic"
         static let lyricAnimationStyle = "settings.lyricAnimationStyle"
+        static let preferredLyricSource = "settings.preferredLyricSource"
         static let themePreset = "settings.themePreset"
         static let customTheme = "settings.customTheme"
         static let preferCustomTheme = "settings.preferCustomTheme"
@@ -964,6 +965,18 @@ final class SettingsManager: ObservableObject {
     /// word wipe (verbatim word-by-word alphas) is the `.fade` style.
     var effectiveLyricAnimationStyle: LyricAnimationStyle {
         foliaEnabled ? lyricAnimationStyle : .fade
+    }
+
+    /// Preferred lyric source for the multi-source lookup (Folia auto-match).
+    /// NetEase first by default, which preserves today's behaviour.
+    @Published var preferredLyricSource: LyricSource {
+        didSet { UserDefaults.standard.set(preferredLyricSource.rawValue, forKey: Keys.preferredLyricSource) }
+    }
+
+    /// Preferred lyric source with the master switch off: NetEase only, i.e.
+    /// the pre-Folia single-source lookup.
+    var effectivePreferredLyricSource: LyricSource {
+        foliaEnabled ? preferredLyricSource : .netease
     }
 
     /// Built-in colour theme preset id; "default" follows the system light/dark
@@ -2436,6 +2449,8 @@ final class SettingsManager: ObservableObject {
         foliaEnabled = defaults.object(forKey: Keys.foliaEnabled) as? Bool ?? true
         lyricAnimationStyle = defaults.string(forKey: Keys.lyricAnimationStyle)
             .flatMap(LyricAnimationStyle.init) ?? .fade
+        preferredLyricSource = defaults.string(forKey: Keys.preferredLyricSource)
+            .flatMap(LyricSource.init) ?? .netease
         themePresetID = defaults.string(forKey: Keys.themePreset) ?? "default"
         customThemeJSON = defaults.string(forKey: Keys.customTheme) ?? ""
         preferCustomTheme = defaults.object(forKey: Keys.preferCustomTheme) as? Bool ?? false

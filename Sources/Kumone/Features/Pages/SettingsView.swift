@@ -190,6 +190,11 @@ struct SettingsView: View {
                 Toggle("点击封面打开专辑", isOn: $settings.openAlbumOnArtworkClick)
                 Toggle("显示歌词翻译", isOn: $settings.showLyricsTranslation)
                 Toggle("逐字歌词（卡拉OK）", isOn: $settings.verbatimLyrics)
+                Picker("首选歌词源", selection: $settings.preferredLyricSource) {
+                    ForEach(LyricSource.allCases) { source in
+                        Text(source.displayName).tag(source)
+                    }
+                }
                 Picker("日文歌词读音", selection: $settings.lyricsAnnotation) {
                     ForEach(LyricsAnnotation.allCases) { annotation in
                         Text(annotation.displayName).tag(annotation)

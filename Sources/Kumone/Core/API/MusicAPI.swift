@@ -478,6 +478,15 @@ enum MusicAPI {
                               ["id": id, "lv": -1, "kv": -1, "tv": -1, "rv": -1])
     }
 
+    /// Multi-source lyric lookup (Folia auto-match): tries each lyric source
+    /// in turn — preferred source first — and returns the best match, or nil
+    /// when no source has usable lyrics. Never throws, so callers keep
+    /// today's `try?` behaviour: no error UI when lyrics are missing.
+    static func lyric(for track: Track) async -> LyricResponse? {
+        let preferred = await SettingsManager.shared.effectivePreferredLyricSource
+        return await LyricMultiSource.fetch(for: track, preferred: preferred)
+    }
+
     struct FMResponse: Decodable {
         let data: [Track]?
     }

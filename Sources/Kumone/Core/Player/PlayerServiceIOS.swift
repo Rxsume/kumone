@@ -2260,7 +2260,7 @@ final class PlayerService: ObservableObject {
             updateLyricsCursor(at: progress)
         }
         guard !usesOfflineQueue else { return }
-        let response = try? await MusicAPI.lyric(id: track.id)
+        let response = await MusicAPI.lyric(for: track)
         guard generation == resolveGeneration, let response else { return }
         lyrics = LyricsParser.parse(response)
         updateLyricsCursor(at: progress)
