@@ -41,6 +41,30 @@ struct ParsedLyrics: Hashable {
 
     var isEmpty: Bool { lines.isEmpty }
 
+    /// Shifts every line/word timestamp by `seconds` (Folia B12: the
+    /// global lyric timeline offset, ±2000 ms, for songs whose lyrics
+    /// run off-beat). Negative results clamp at zero so the first line
+    /// never lands before the track starts.
+    func applyingOffset(_ seconds: TimeInterval) -> ParsedLyrics {
+        guard seconds != 0, !lines.isEmpty else { return self }
+        var copy = self
+        copy.lines = lines.map { line in
+            LyricLine(
+                id: line.id,
+                time: max(0, line.time + seconds),
+                end: max(0, line.end + seconds),
+                text: line.text,
+                translation: line.translation,
+                romaji: line.romaji,
+                furigana: line.furigana,
+                words: line.words?.map { word in
+                    LyricWord(text: word.text, start: max(0, word.start + seconds), duration: word.duration)
+                }
+            )
+        }
+        return copy
+    }
+
     /// Index of the active line for a playback position.
     func activeIndex(at time: TimeInterval) -> Int? {
         guard !lines.isEmpty else { return nil }
