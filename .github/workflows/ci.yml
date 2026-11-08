@@ -21,7 +21,7 @@ jobs:
       - name: Build
         run: swift build
 
-      # Split in two on purpose. The two playback suites below are the only
+      # Split in three on purpose. The two playback suites below are the only
       # ones driving AVAudioEngine through runWithWatchdog, and on the
       # 3-thread CI runner the whole target oversubscribes Swift's
       # cooperative pool (upstream 9e24dc1 documents the same starvation:
@@ -30,14 +30,24 @@ jobs:
       # outgoingDeckStaysSilentAfterTransition's stereo case, then, once
       # that case was dropped, in the last test of the same suite — with no
       # watchdog timeout ever printing, i.e. the test task never got a pool
-      # thread to start on. Running the playback suites in their own
-      # invocation gives them the pool to themselves and keeps them out of
-      # contention with the other ~120 suites. The 60-minute job cap above
-      # is headroom for the split's extra startup, not a fix for the hang:
-      # a stalled run is silent indefinitely, so a higher cap alone would
-      # only burn more minutes.
+      # thread to start on. Splitting the playback suites out did not fix
+      # it: run 42528891289 stalled again at the 60-minute cap, this time
+      # in the first group, with the whole runner frozen 41s in (935 tests
+      # passed) at AccountIsolationTests'
+      # lateResponseCannotRestoreLoggedOutCredentials — a victim of the
+      # starvation, not its cause (its own logic completes on the happy
+      # path; the log went silent for all 120 suites at once). So the
+      # account-isolation suite gets its own invocation too: if it hangs
+      # alone, it is a real test bug; if it passes alone, the stall is
+      # load-dependent and the remaining group gets split further. The
+      # 60-minute job cap above is headroom for the split's extra startup,
+      # not a fix for the hang: a stalled run is silent indefinitely, so a
+      # higher cap alone would only burn more minutes.
+      - name: Test (account isolation)
+        run: swift test --filter 'AccountIsolationTests'
+
       - name: Test
-        run: swift test --skip 'PlaybackEngineSmokeTests|TransitionSegmentTests'
+        run: swift test --skip 'PlaybackEngineSmokeTests|TransitionSegmentTests|AccountIsolationTests'
 
       - name: Test (playback suites)
         run: swift test --filter 'PlaybackEngineSmokeTests|TransitionSegmentTests'
