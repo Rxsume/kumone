@@ -179,18 +179,20 @@ final class SearchViewModel: ObservableObject {
         }
     }
 
-    /// Platform artists go after the NetEase artists, in QQ-then-Kugou
-    /// order, skipping any whose normalized name already appears in
-    /// the NetEase list (or earlier in the merge). `cap` bounds the
-    /// merged platform list (the .all tab caps at 10); the dedicated
-    /// tab takes everything the searches returned.
+    /// Platform artists go after the NetEase artists, skipping any
+    /// whose normalized name already appears in the NetEase list (or
+    /// earlier in the merge). Within the platform hits, the home
+    /// platform's artists come first (QQ-then-Kugou by default).
+    /// `cap` bounds the merged platform list (the .all tab caps at
+    /// 10); the dedicated tab takes everything the searches returned.
     private func mergePlatformArtists(
         netEase: [ArtistSummary], qq: [PlatformArtistSummary], kugou: [PlatformArtistSummary],
         cap: Int? = nil
     ) -> [PlatformArtistSummary] {
         var seen = Set(netEase.map { normalizedName($0.name) })
         var merged: [PlatformArtistSummary] = []
-        for artist in qq + kugou {
+        let ordered = SettingsManager.shared.homePlatform == .kugou ? kugou + qq : qq + kugou
+        for artist in ordered {
             let key = normalizedName(artist.name)
             guard !seen.contains(key) else { continue }
             seen.insert(key)
@@ -202,13 +204,15 @@ final class SearchViewModel: ObservableObject {
 
     /// Same append-after + dedup for albums, keyed on normalized
     /// "album|artist" so a same-name album by another artist survives.
+    /// The home platform's albums come first within the platform hits.
     private func mergePlatformAlbums(
         netEase: [AlbumSummary], qq: [PlatformAlbumSummary], kugou: [PlatformAlbumSummary],
         cap: Int? = nil
     ) -> [PlatformAlbumSummary] {
         var seen = Set(netEase.map { normalizedAlbumKey(name: $0.name, artist: $0.artistName) })
         var merged: [PlatformAlbumSummary] = []
-        for album in qq + kugou {
+        let ordered = SettingsManager.shared.homePlatform == .kugou ? kugou + qq : qq + kugou
+        for album in ordered {
             let key = normalizedAlbumKey(name: album.name, artist: album.artistName)
             guard !seen.contains(key) else { continue }
             seen.insert(key)
@@ -226,17 +230,26 @@ final class SearchViewModel: ObservableObject {
         normalizedName(name) + "|" + normalizedName(artist)
     }
 
-    /// Platform songs go after the NetEase songs, in QQ-then-Kugou
-    /// order, skipping any whose normalized (title + first artist)
-    /// already appears in the NetEase list (or earlier in the merge).
+    /// Merged songs, deduped on normalized (title + first artist).
+    /// The home platform's songs come first: NetEase → QQ → Kugou by
+    /// default, QQ → NetEase → Kugou when QQ is the home platform,
+    /// Kugou → NetEase → QQ when Kugou is.
     private func mergePlatformSongs(netEase: [Track], qq: [Track], kugou: [Track]) -> [Track] {
-        var seen = Set(netEase.map { normalizedSongKey(title: $0.name, artist: $0.artists.first?.name ?? "") })
-        var merged = netEase
-        for track in qq + kugou {
-            let key = normalizedSongKey(title: track.name, artist: track.artists.first?.name ?? "")
-            guard !seen.contains(key) else { continue }
-            seen.insert(key)
-            merged.append(track)
+        let ordered: [[Track]]
+        switch SettingsManager.shared.homePlatform {
+        case .netease: ordered = [netEase, qq, kugou]
+        case .qqmusic: ordered = [qq, netEase, kugou]
+        case .kugou: ordered = [kugou, netEase, qq]
+        }
+        var seen = Set<String>()
+        var merged: [Track] = []
+        for list in ordered {
+            for track in list {
+                let key = normalizedSongKey(title: track.name, artist: track.artists.first?.name ?? "")
+                guard !seen.contains(key) else { continue }
+                seen.insert(key)
+                merged.append(track)
+            }
         }
         return merged
     }
@@ -250,6 +263,13 @@ final class SearchViewModel: ObservableObject {
 struct SearchView: View {
     @StateObject private var model: SearchViewModel
     @State private var searchText: String = ""
+    @ObservedObject private var settings = SettingsManager.shared
+
+    /// Platform cards go before the NetEase cards when the home
+    /// platform is QQ/Kugou; NetEase first is the default.
+    private var platformCardsFirst: Bool {
+        settings.homePlatform != .netease
+    }
 
     init(query: String) {
         _model = StateObject(wrappedValue: SearchViewModel(query: query))
@@ -391,14 +411,24 @@ struct SearchView: View {
             }
             if !model.artists.isEmpty || !model.platformArtists.isEmpty {
                 Shelf(title: "歌手", seeAll: { model.tab = .artists }) {
-                    artistCards(model.artists.prefix(8))
-                    platformArtistCards(model.platformArtists)
+                    if platformCardsFirst {
+                        platformArtistCards(model.platformArtists)
+                        artistCards(model.artists.prefix(8))
+                    } else {
+                        artistCards(model.artists.prefix(8))
+                        platformArtistCards(model.platformArtists)
+                    }
                 }
             }
             if !model.albums.isEmpty || !model.platformAlbums.isEmpty {
                 Shelf(title: "专辑", seeAll: { model.tab = .albums }) {
-                    albumCards(model.albums.prefix(8))
-                    platformAlbumCards(model.platformAlbums)
+                    if platformCardsFirst {
+                        platformAlbumCards(model.platformAlbums)
+                        albumCards(model.albums.prefix(8))
+                    } else {
+                        albumCards(model.albums.prefix(8))
+                        platformAlbumCards(model.platformAlbums)
+                    }
                 }
             }
             if !model.playlists.isEmpty {
@@ -415,14 +445,24 @@ struct SearchView: View {
                 .padding(.horizontal, Theme.Layout.contentInset - 10)
         case .artists:
             CardGrid(minWidth: 140) {
-                artistCards(model.artists)
-                platformArtistCards(model.platformArtists)
+                if platformCardsFirst {
+                    platformArtistCards(model.platformArtists)
+                    artistCards(model.artists)
+                } else {
+                    artistCards(model.artists)
+                    platformArtistCards(model.platformArtists)
+                }
             }
             .padding(.horizontal, Theme.Layout.contentInset)
         case .albums:
             CardGrid {
-                albumCards(model.albums)
-                platformAlbumCards(model.platformAlbums)
+                if platformCardsFirst {
+                    platformAlbumCards(model.platformAlbums)
+                    albumCards(model.albums)
+                } else {
+                    albumCards(model.albums)
+                    platformAlbumCards(model.platformAlbums)
+                }
             }
             .padding(.horizontal, Theme.Layout.contentInset)
         case .playlists:
