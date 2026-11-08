@@ -447,6 +447,8 @@ struct SettingsView: View {
                 }
             }
 
+            SettingsBackupSection()
+
             Section {
                 VStack(spacing: 2) {
                     Text("Golia")

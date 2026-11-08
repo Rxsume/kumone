@@ -28,6 +28,11 @@ final class IOSUpdater: NSObject, ObservableObject {
     @Published var phase: Phase = .idle
     @Published var showSheet = false
 
+    /// Host of the mirror the current accelerated download is trying
+    /// (e.g. "gh-proxy.com"), shown in the progress view; nil for a
+    /// direct GitHub download.
+    @Published var downloadMirrorHost: String?
+
     /// UserDefaults key remembering the release the user dismissed with
     /// "稍后", as its `Release.identifier` ("0.3.28-565"). The launch check
     /// stays silent for that exact build; a newer build re-prompts.
@@ -119,6 +124,7 @@ final class IOSUpdater: NSObject, ObservableObject {
             openReleasePage(release)
             return
         }
+        downloadMirrorHost = nil
         pendingDownloadFilename = release.build.map { "Golia-\(release.version)-build-\($0).ipa" }
             ?? "Golia-\(release.version).ipa"
         phase = .downloading(0)
@@ -130,6 +136,42 @@ final class IOSUpdater: NSObject, ObservableObject {
             } catch {
                 phase = .failed(error.localizedDescription)
             }
+        }
+    }
+
+    /// Accelerated download: same flow as `download(_:)`, but the IPA
+    /// URL is prefixed with a public GitHub proxy, tried in order until
+    /// one serves the file. Explicit user choice only — the button is
+    /// labelled as a proxy mirror and this is never the default. The
+    /// proxy only ever carries the IPA bytes for this one download;
+    /// nothing about the release (version, identity) is trusted from it.
+    func downloadAccelerated(_ release: ReleaseChecker.Release) {
+        guard let ipaURL = release.ipaURL else {
+            openReleasePage(release)
+            return
+        }
+        pendingDownloadFilename = release.build.map { "Golia-\(release.version)-build-\($0).ipa" }
+            ?? "Golia-\(release.version).ipa"
+        phase = .downloading(0)
+        Task {
+            var lastError: Error?
+            for prefix in ReleaseChecker.downloadMirrorPrefixes {
+                guard let mirrorURL = URL(string: prefix + ipaURL.absoluteString) else { continue }
+                downloadMirrorHost = URL(string: prefix)?.host ?? prefix
+                do {
+                    let localURL = try await downloadIPA(from: mirrorURL)
+                    downloadMirrorHost = nil
+                    phase = .readyToInstall(localURL)
+                    share(localURL)
+                    return
+                } catch {
+                    lastError = error
+                    continue
+                }
+            }
+            downloadMirrorHost = nil
+            phase = .failed(lastError?.localizedDescription
+                ?? String(localized: "加速镜像均不可用，请改用直接下载"))
         }
     }
 
@@ -249,12 +291,24 @@ struct IOSUpdaterSheet: View {
                     .buttonStyle(.plain)
                     .font(.system(size: 13, weight: .medium))
                     .foregroundStyle(Theme.accent)
+                Button("加速下载 IPA（代理镜像）") { updater.downloadAccelerated(release) }
+                    .buttonStyle(.plain)
+                    .font(.system(size: 13, weight: .medium))
+                    .foregroundStyle(Theme.accent)
+                Text("直连下载慢可用「加速下载」，走第三方代理镜像（ghfast.top 等），仅本次下载用，不做默认")
+                    .font(.caption).foregroundStyle(.secondary)
+                    .multilineTextAlignment(.center)
                 laterButton(release)
 
             case .downloading(let progress):
                 ProgressRing(progress: progress)
-                Text("正在下载 \(Int(progress * 100))%")
-                    .font(.headline).monospacedDigit()
+                if let host = updater.downloadMirrorHost {
+                    Text("正在通过 \(host) 加速下载 \(Int(progress * 100))%")
+                        .font(.headline).monospacedDigit()
+                } else {
+                    Text("正在下载 \(Int(progress * 100))%")
+                        .font(.headline).monospacedDigit()
+                }
 
             case .readyToInstall(let url):
                 Image(systemName: "square.and.arrow.down.fill")
