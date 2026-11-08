@@ -110,13 +110,37 @@ enum ReleaseChecker {
     /// Public GitHub proxies the version check falls back to (Folia 0.7.27,
     /// `UPDATE_CHECK_MIRROR_PREFIXES`). Each takes the full GitHub API URL
     /// after its own address. `ghfast.top` refuses requests from outside
-    /// mainland China; the others answer from anywhere — racing all four
-    /// means one refusing simply loses.
+    /// mainland China; the others answer from anywhere — racing all of
+    /// them means one refusing simply loses. `gh.ddlc.top` is an extra
+    /// documented public proxy (listed by moretools.app); it answers 429
+    /// from this VM's egress, so it is unverified for the API path — it
+    /// fails fast and the race just moves on.
     private static let mirrorPrefixes = [
         "https://ghfast.top/",
         "https://edgeone.gh-proxy.com/",
         "https://gh-proxy.com/",
         "https://ghproxy.net/",
+        "https://gh.ddlc.top/",
+    ]
+
+    /// Mirrors used ONLY for the explicit "加速下载 IPA（代理镜像）"
+    /// button — never for the version check and never silently. Each
+    /// one was verified 2026-11-08 to serve the real Golia IPA asset
+    /// (HTTP 206 + ZIP magic on a ranged GET of the release file).
+    /// They are a different set from `mirrorPrefixes` on purpose:
+    /// several of them do not proxy api.github.com at all (githubproxy.cc
+    /// answers the API URL with an HTML page, cors.isteed.cc 403s it),
+    /// while `ghfast.top` refuses the API from outside mainland China
+    /// yet serves release assets fine. `ghfast.top` is first because it
+    /// is CN-optimized — the user's network — and refuses elsewhere,
+    /// which is exactly the audience for the accelerated button.
+    static let downloadMirrorPrefixes = [
+        "https://ghfast.top/",
+        "https://gh-proxy.com/",
+        "https://edgeone.gh-proxy.com/",
+        "https://ghproxy.net/",
+        "https://githubproxy.cc/",
+        "https://cors.isteed.cc/",
     ]
 
     /// Race the mirrors for the latest tag; first plausible answer wins,
