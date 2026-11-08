@@ -37,11 +37,20 @@ final class HomeViewModel: ObservableObject {
     /// QQ/Kugou home feed for the active platform; empty on NetEase.
     @Published var platformPlaylists: [PlatformPlaylistSummary] = []
     @Published var platformToplists: [PlatformToplistItem] = []
+    /// QQ-only home sections (radar songs, hot chart songs, hot
+    /// artists); empty on NetEase/Kugou.
+    @Published var platformRecommendSongs: [Track] = []
+    @Published var platformHotSongs: [Track] = []
+    @Published var platformHotArtists: [PlatformArtistSummary] = []
 
     func load(platform: HomePlatform, loggedIn: Bool) async {
         if case .loaded = state, platform == currentPlatform { return }
         state = .loading
         currentPlatform = platform
+        // QQ-only sections never survive a platform switch.
+        platformRecommendSongs = []
+        platformHotSongs = []
+        platformHotArtists = []
 
         if platform == .netease {
             async let playlistsTask = fetchRecommendPlaylists(loggedIn: loggedIn)
@@ -69,15 +78,27 @@ final class HomeViewModel: ObservableObject {
             return
         }
 
-        // QQ/Kugou: recommended playlists + charts only. New albums,
-        // top artists, radar and the login feature cards are
-        // NetEase-only — neither platform has a usable endpoint for
-        // them, so those sections are hidden instead of faked.
+        // QQ: recommended songs (radar) + recommended playlists +
+        // hot songs + charts + hot artists. Kugou: recommended
+        // playlists + charts only — it has no verified endpoint for
+        // the other three, so those sections stay hidden instead of
+        // faked. New albums / NetEase radar playlists / feature cards
+        // are NetEase-only.
         async let playlistsTask = fetchPlatformPlaylists(platform: platform)
         async let toplistsTask = fetchPlatformToplists(platform: platform)
+        if platform == .qqmusic {
+            async let recommendTask = fetchPlatformRecommendSongs()
+            async let hotSongsTask = fetchPlatformHotSongs()
+            async let hotArtistsTask = fetchPlatformHotArtists()
+            platformRecommendSongs = await recommendTask
+            platformHotSongs = await hotSongsTask
+            platformHotArtists = await hotArtistsTask
+        }
         platformPlaylists = await playlistsTask
         platformToplists = await toplistsTask
         state = platformPlaylists.isEmpty && platformToplists.isEmpty
+            && platformRecommendSongs.isEmpty && platformHotSongs.isEmpty
+            && platformHotArtists.isEmpty
             ? .error(String(localized: "网络连接失败")) : .loaded
     }
 
@@ -123,6 +144,25 @@ final class HomeViewModel: ObservableObject {
                     subtitle: $0.updateFrequency.isEmpty ? nil : $0.updateFrequency)
             } ?? []
         }
+    }
+
+    /// QQ-only: recommended songs from the radar feed. `Track`
+    /// carries `platformSource` (.qqmusic), so tapping a row plays
+    /// through the PR #29 ikun fallback like any other QQ track.
+    private func fetchPlatformRecommendSongs() async -> [Track] {
+        (try? await QQMusicAPI.shared.radarSongs(limit: 20))?.compactMap(Track.fromQQSong) ?? []
+    }
+
+    /// QQ-only: hot songs — the top of the 巅峰榜·热歌 chart.
+    private func fetchPlatformHotSongs() async -> [Track] {
+        (try? await QQMusicAPI.shared.hotSongs(limit: 15))?.compactMap(Track.fromQQSong) ?? []
+    }
+
+    /// QQ-only: hot artists from the popularity-ordered singer list.
+    private func fetchPlatformHotArtists() async -> [PlatformArtistSummary] {
+        (try? await QQMusicAPI.shared.hotArtists(limit: 12))?.map {
+            PlatformArtistSummary(source: .qqmusic, name: $0.name, picURL: $0.picURL, platformID: $0.mid)
+        } ?? []
     }
 
     private func loadRadarPlaylists() async {
@@ -356,12 +396,18 @@ struct HomeView: View {
         }
     }
 
-    /// QQ/Kugou feed: recommended playlists + charts only. There is no
-    /// platform playlist/chart detail page, so tapping a card plays
-    /// its songs directly. New albums / top artists / radar / feature
-    /// cards are NetEase-only and hidden here.
+    /// QQ home feed, in order: 推荐 / 推荐歌单 / 热门歌曲 / 排行榜 /
+    /// 热门歌手. Kugou keeps only 推荐歌单 + 排行榜. Song rows play
+    /// through the normal queue (PR #29 ikun fallback); playlist and
+    /// chart cards play their songs directly, as before — there is no
+    /// platform playlist/chart detail page. A section whose fetch
+    /// failed is hidden, never faked.
     private var platformSections: some View {
         Group {
+            if model.currentPlatform == .qqmusic, !model.platformRecommendSongs.isEmpty {
+                platformSongListSection(title: "推荐", tracks: model.platformRecommendSongs)
+            }
+
             if !model.platformPlaylists.isEmpty {
                 Shelf(title: "推荐歌单", rowHeight: Theme.Layout.coverShelfHeight) {
                     ForEach(Array(model.platformPlaylists.prefix(12).enumerated()), id: \.element.id) { index, playlist in
@@ -371,6 +417,10 @@ struct HomeView: View {
                 }
             }
 
+            if model.currentPlatform == .qqmusic, !model.platformHotSongs.isEmpty {
+                platformSongListSection(title: "热门歌曲", tracks: model.platformHotSongs)
+            }
+
             if !model.platformToplists.isEmpty {
                 Shelf(title: "排行榜", seeAll: nil, rowHeight: Theme.Layout.coverShelfHeight) {
                     ForEach(model.platformToplists) { toplist in
@@ -378,7 +428,49 @@ struct HomeView: View {
                     }
                 }
             }
+
+            if model.currentPlatform == .qqmusic, !model.platformHotArtists.isEmpty {
+                Shelf(title: "热门歌手", rowHeight: Theme.Layout.artistShelfHeight) {
+                    ForEach(model.platformHotArtists) { artist in
+                        platformArtistCard(artist)
+                    }
+                }
+            }
         }
+    }
+
+    /// QQ-only song rows ("推荐" / "热门歌曲"): compact `TrackListView`
+    /// rows, same shape as artist hot songs — artwork, title, artist,
+    /// no album column. Tapping plays the row through the normal queue.
+    private func platformSongListSection(title: LocalizedStringKey, tracks: [Track]) -> some View {
+        VStack(alignment: .leading, spacing: Theme.Layout.sectionHeaderSpacing) {
+            SectionHeader(title: title)
+                .padding(.horizontal, Theme.Layout.contentInset)
+            TrackListView(tracks: tracks, style: .compact)
+                .padding(.horizontal, Theme.Layout.contentInset - 10)
+        }
+    }
+
+    /// QQ-only artist circles ("热门歌手"), mirroring SearchView's
+    /// `platformArtistCards`: opens `PlatformArtistDetailView`, never
+    /// the NetEase artist page.
+    private func platformArtistCard(_ artist: PlatformArtistSummary) -> some View {
+        NavigationLink {
+            PlatformArtistDetailView(artist: artist)
+        } label: {
+            VStack(spacing: 10) {
+                CachedAsyncImage(url: artist.picURL)
+                    .frame(width: 128, height: 128)
+                    .clipShape(Circle())
+                    .overlay(Circle().strokeBorder(.primary.opacity(0.08), lineWidth: 0.5))
+                Text(artist.name)
+                    .font(.system(size: 13, weight: .medium))
+                    .foregroundStyle(.primary)
+                    .lineLimit(1)
+            }
+            .frame(width: 140)
+        }
+        .buttonStyle(.plain)
     }
 
     // MARK: - Feature cards
