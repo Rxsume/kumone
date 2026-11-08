@@ -840,7 +840,10 @@ struct LyricStyleSettingsView: View {
             }
             #endif
 
-            Section("时间轴偏移") {
+            // NOTE: there is no Section(title:content:footer:) overload —
+            // a string title with a footer does not compile, so the title
+            // goes in header: like the font Section above.
+            Section {
                 Slider(value: Binding(
                     get: { Double(settings.globalLyricTimelineOffsetMs) },
                     set: { settings.globalLyricTimelineOffsetMs = Int($0) }
@@ -862,6 +865,8 @@ struct LyricStyleSettingsView: View {
                     .tint(settings.globalLyricTimelineOffsetMs == 0 ? .secondary : .accentColor)
                     .disabled(settings.globalLyricTimelineOffsetMs == 0)
                 }
+            } header: {
+                Text("时间轴偏移")
             } footer: {
                 Text("歌词整体提前或延后，解决某首歌词对不上拍的问题；仅在 Folia 总开关开启时生效。")
             }
