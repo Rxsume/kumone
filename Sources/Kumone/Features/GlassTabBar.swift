@@ -26,6 +26,10 @@ struct GlassTabBar: View {
     var onReselect: (IOSTab) -> Void = { _ in }
 
     @Environment(\.colorScheme) private var colorScheme
+    /// Tab-label visibility + floating-bar geometry (Beans'
+    /// `appearanceSection`, P3 3/3). The bar observes settings so a
+    /// change in Settings re-renders it live.
+    @ObservedObject private var settings = SettingsManager.shared
 
     /// Finger x (in content space) while actively dragging the pill; nil at rest.
     @State private var dragX: CGFloat?
@@ -62,14 +66,27 @@ struct GlassTabBar: View {
         }
         .frame(height: contentHeight)
         .padding(innerInset)
-        .background { Capsule().fill(.regularMaterial) }
+        // Floating-bar geometry from Settings → 主题模式 (Beans'
+        // "低系统悬浮底栏" sliders, P3 3/3). The shape is a rounded
+        // rect, not a Capsule, so the corner-radius slider can move
+        // it; radius 32 (the default) is half the 64pt bar height,
+        // i.e. exactly the old capsule look. Width caps at the
+        // slider value (default 420 = today's full-width look);
+        // offset nudges the whole bar.
+        .background { barShape.fill(.regularMaterial) }
         .overlay {
-            Capsule().strokeBorder(.white.opacity(colorScheme == .dark ? 0.08 : 0.22),
-                                   lineWidth: 0.5)
+            barShape.strokeBorder(.white.opacity(colorScheme == .dark ? 0.08 : 0.22),
+                                  lineWidth: 0.5)
         }
-        .clipShape(Capsule())
+        .clipShape(barShape)
         .shadow(color: .black.opacity(colorScheme == .dark ? 0.28 : 0.10), radius: 12, y: 4)
         .padding(.horizontal, 12)
+        .frame(maxWidth: settings.legacyTabBarWidth)
+        .offset(x: settings.legacyTabBarOffsetX, y: settings.legacyTabBarOffsetY)
+    }
+
+    private var barShape: RoundedRectangle {
+        RoundedRectangle(cornerRadius: settings.legacyTabBarCornerRadius, style: .continuous)
     }
 
     private func itemLabel(_ item: GlassTabBar.Item) -> some View {
@@ -78,8 +95,10 @@ struct GlassTabBar: View {
             Image(systemName: item.icon)
                 .font(.system(size: 23, weight: .semibold))
                 .symbolVariant(.fill)
-            Text(item.title)
-                .font(.system(size: 10, weight: .semibold))
+            if settings.tabLabelsVisible {
+                Text(item.title)
+                    .font(.system(size: 10, weight: .semibold))
+            }
         }
         .foregroundStyle(isSelected
                          ? AnyShapeStyle(Theme.accent)

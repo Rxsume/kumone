@@ -257,6 +257,16 @@ struct HomeView: View {
                 loadedBody
             }
         }
+        // Wallpaper background (Beans `appearanceSection`, P3 3/3):
+        // only when "同步到搜索 / 音乐库 / 我的" is OFF — when it is
+        // on, `IOSMainWindow` paints the same layer behind all tabs.
+        #if os(iOS)
+        .background {
+            if !settings.backgroundSyncAll {
+                WallpaperBackgroundView()
+            }
+        }
+        #endif
         .navigationTitle("推荐")
         .toolbar {
             ToolbarItem(placement: platformSwitcherPlacement) {

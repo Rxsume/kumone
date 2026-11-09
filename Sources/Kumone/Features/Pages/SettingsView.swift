@@ -1,4 +1,5 @@
 import SwiftUI
+import UniformTypeIdentifiers
 #if os(macOS)
 import Combine
 #endif
@@ -14,6 +15,13 @@ struct SettingsView: View {
     @State private var themeExpanded = false
     @State private var platformExpanded = false
     @State private var playbackExpanded = false
+    // P3 3/3 深层外观：壁纸选择器、字体导入器、壁纸作用的外观。
+    #if os(iOS)
+    @State private var showWallpaperPicker = false
+    @State private var wallpaperAppearanceTarget = WallpaperAppearanceTarget.light
+    #endif
+    @State private var showFontImporter = false
+    @State private var installedFontName = FontManager.installedFontName
     @ObservedObject private var customSources = CustomAudioSourceStore.shared
     #if os(macOS)
     @AppStorage(SettingsManager.Keys.menuBarPlayer) private var showMenuBarPlayer = false
@@ -76,13 +84,21 @@ struct SettingsView: View {
                 }
             }
 
-            // Beans 主题模式组（`ProfileView.themeSection`）：可展开的
-            // 主题行；展开后是主题模式分段选择器。Beans 的其余三行无
-            // Golia 等价物，不加死开关：沉浸详情界面是 Beans 的详情
-            // 页头功能、语言需要整套本地化基建、关闭液态模式需要一
-            // 个液态玻璃总闸——三者都不是 Golia 的 `staticMode`，
-            // 不得与之合并；深层外观定制（漂浮特效/壁纸/字体等）是
-            // 后续 P3 子项。
+            // Beans 主题模式组（`ProfileView.themeSection` + 深层外观
+            // `appearanceSection`，P3 1/3 + 3/3）：可展开的主题行；
+            // 展开后是主题模式分段选择器与深层外观定制（强调色、
+            // 底栏文字、悬浮底栏几何、主页背景/壁纸、全局字体）。
+            // Beans 其余行无 Golia 等价物，不加死开关：沉浸详情界面
+            // 是 Beans 的详情页头功能、语言需要整套本地化基建、关
+            // 闭液态模式需要一个液态玻璃总闸——三者都不是 Golia 的
+            // `staticMode`，不得与之合并；全局 UI 样式是 Beans 玻璃
+            // 容器风格（Golia 的玻璃样式按系统版本固定在 compatGlass
+            // 里）；注释/主文字颜色是 Beans 的全局文字色（Golia 用
+            // 系统语义色，没有单一改写点）；问候定制在 Beans 里已是
+            // 死代码（`if false`）；隐藏用户名/排序按钮/平台列表/
+            // 刷新按钮/VIP 图标在 Golia 首页都没有对应 UI（首页没有
+            // 用户名、排序与刷新按钮，平台切换器是唯一的切换入口，
+            // 歌曲行不画 VIP 徽标）。
             Section {
                 Button {
                     withAnimation(.easeInOut(duration: 0.22)) {
@@ -111,8 +127,216 @@ struct SettingsView: View {
                         }
                     }
                     .pickerStyle(.segmented)
+
+                    Divider()
+
+                    // 自定义强调色：写 `settings.customAccentHex`，
+                    // `Theme.accent` / `accentDeep` / `accentGradient`
+                    // 直接读这个 key，全 App 即时换色。
+                    HStack {
+                        Text("自定义强调色")
+                        Spacer()
+                        ColorPicker("", selection: Binding(
+                            get: { Color(hex: settings.customAccentHex) ?? Theme.accent },
+                            set: { settings.customAccentHex = $0.rgbHexString }
+                        ))
+                        .labelsHidden()
+                    }
+                    HStack {
+                        Button("恢复预设") {
+                            settings.customAccentHex = ""
+                        }
+                        .buttonStyle(.plain)
+                        .foregroundStyle(Theme.accent)
+                        Spacer()
+                        Text(settings.customAccentHex.isEmpty ? "使用预设主题" : "已自定义")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+
+                    #if os(iOS)
+                    Divider()
+
+                    Toggle("底栏显示文字", isOn: $settings.tabLabelsVisible)
+                    Text("关闭后悬浮底栏只显示图标")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+
+                    Divider()
+
+                    // 悬浮底栏几何：Beans 的“低系统悬浮底栏”滑杆，
+                    // 作用于 Golia 的 GlassTabBar（它在所有 iOS 版本
+                    // 都是悬浮底栏；Beans 只在 iOS 26 以下用自己的悬
+                    // 浮底栏，所以那边加了 `#unavailable(iOS 26)` 门，
+                    // Golia 不加）。
+                    HStack {
+                        Text("悬浮底栏")
+                            .font(.headline)
+                        Spacer()
+                        Button("默认") {
+                            settings.legacyTabBarCornerRadius = 32
+                            settings.legacyTabBarWidth = 420
+                            settings.legacyTabBarOffsetX = 0
+                            settings.legacyTabBarOffsetY = 0
+                        }
+                        .buttonStyle(.plain)
+                        .foregroundStyle(Theme.accent)
+                    }
+                    appearanceSlider(
+                        title: "圆润度",
+                        valueText: "\(Int(settings.legacyTabBarCornerRadius))",
+                        value: $settings.legacyTabBarCornerRadius,
+                        range: SettingsManager.legacyTabBarCornerRadiusRange
+                    )
+                    appearanceSlider(
+                        title: "长度",
+                        valueText: "\(Int(settings.legacyTabBarWidth))",
+                        value: $settings.legacyTabBarWidth,
+                        range: SettingsManager.legacyTabBarWidthRange
+                    )
+                    appearanceSlider(
+                        title: "X 位置",
+                        valueText: signedIntText(settings.legacyTabBarOffsetX),
+                        value: $settings.legacyTabBarOffsetX,
+                        range: SettingsManager.legacyTabBarOffsetXRange
+                    )
+                    appearanceSlider(
+                        title: "Y 位置",
+                        valueText: signedIntText(settings.legacyTabBarOffsetY),
+                        value: $settings.legacyTabBarOffsetY,
+                        range: SettingsManager.legacyTabBarOffsetYRange
+                    )
+
+                    Divider()
+
+                    // 主页背景：背景模式（浅色/深色）+ 背景颜色 +
+                    // 上传壁纸 + 壁纸库 + 模糊度。壁纸只作用于首页
+                    // 之外的页面时看“同步”开关。
+                    Picker("背景模式", selection: $wallpaperAppearanceTarget) {
+                        ForEach(WallpaperAppearanceTarget.allCases) { target in
+                            Text(target.rawValue).tag(target)
+                        }
+                    }
+                    .pickerStyle(.segmented)
+                    HStack {
+                        Text("背景颜色")
+                        Spacer()
+                        ColorPicker("", selection: Binding(
+                            get: { wallpaperBackgroundColor },
+                            set: { setWallpaperBackgroundColor($0) }
+                        ))
+                        .labelsHidden()
+                    }
+                    HStack {
+                        Button {
+                            showWallpaperPicker = true
+                        } label: {
+                            HStack {
+                                Text("上传壁纸（可多张）")
+                                Spacer()
+                                Image(systemName: "plus.circle.fill")
+                                    .font(.system(size: 22))
+                                    .foregroundStyle(Theme.accent)
+                            }
+                        }
+                        .buttonStyle(.plain)
+                    }
+                    if !settings.wallpaperPaths.isEmpty {
+                        LazyVGrid(
+                            columns: Array(repeating: GridItem(.flexible(), spacing: 10), count: 3),
+                            spacing: 10
+                        ) {
+                            ForEach(settings.wallpaperPaths, id: \.self) { path in
+                                wallpaperCell(path: path)
+                            }
+                        }
+                    } else {
+                        Text("还没有壁纸，上传后会显示在这里")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                    HStack {
+                        if !wallpaperActiveImagePath.isEmpty {
+                            Button("清除当前背景") {
+                                clearWallpaperBackgroundImage()
+                            }
+                            .buttonStyle(.plain)
+                            .foregroundStyle(.red)
+                        }
+                        Spacer()
+                        Text(wallpaperActiveImagePath.isEmpty ? "当前：默认背景" : "当前：已应用壁纸")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                    Toggle("同步到搜索 / 音乐库 / 我的", isOn: $settings.backgroundSyncAll)
+                    HStack {
+                        Button("恢复默认背景") {
+                            settings.backgroundHexLight = ""
+                            settings.backgroundHexDark = ""
+                            settings.backgroundImagePathLight = ""
+                            settings.backgroundImagePathDark = ""
+                        }
+                        .buttonStyle(.plain)
+                        .foregroundStyle(Theme.accent)
+                        Spacer()
+                    }
+                    HStack {
+                        Text("主页壁纸模糊度")
+                        Spacer()
+                        Text("\(Int(settings.homeWallpaperBlur))")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                    Slider(value: $settings.homeWallpaperBlur, in: 0...30, step: 1)
+                        .tint(Theme.accent)
+                    #endif
+
+                    Divider()
+
+                    // 全局字体：上传 ttf/otf 安装并注册（`FontManager`），
+                    // 恢复默认清除。已安装字体会出现在歌词字体选择器
+                    // （系统字体选择器列出已注册字体）里；Golia 没有
+                    // Beans 那种全 App 字体入口（`BeansFont.appFont`），
+                    // 全 App 换字要另立项逐处接线，这里只做安装/注册。
+                    HStack {
+                        Text("全局字体")
+                        Spacer()
+                        Text(installedFontName ?? "系统默认")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                    HStack {
+                        Button("上传字体") {
+                            showFontImporter = true
+                        }
+                        .buttonStyle(.plain)
+                        .foregroundStyle(Theme.accent)
+                        Button("恢复默认字体") {
+                            FontManager.clear()
+                            installedFontName = nil
+                            ToastCenter.shared.show("已恢复系统默认字体")
+                        }
+                        .buttonStyle(.plain)
+                        .foregroundStyle(Theme.accent)
+                        Spacer()
+                    }
                 }
             }
+            .fileImporter(
+                isPresented: $showFontImporter,
+                allowedContentTypes: [.font]
+            ) { result in
+                importFontFile(result)
+            }
+            #if os(iOS)
+            .sheet(isPresented: $showWallpaperPicker) {
+                WallpaperPhotoPicker { data in
+                    if let path = WallpaperStore.addWallpaper(data: data) {
+                        settings.wallpaperPaths.append(path)
+                    }
+                }
+            }
+            #endif
 
             // Beans 平台显示组（`ProfileView.platformSection`）：可展开
             // 的平台行；展开后是各平台显示/隐藏开关，只控制首页切换
@@ -644,6 +868,163 @@ struct SettingsView: View {
             get: { customSources.sources.first?.quality ?? "320k" },
             set: { customSources.updateQualityForAll($0) }
         )
+    }
+
+    // MARK: - P3 3/3 深层外观 helpers
+
+    /// "+12" / "-5" / "0" for the floating tab bar offset sliders
+    /// (Beans' `signedIntText`).
+    private func signedIntText(_ value: Double) -> String {
+        let intValue = Int(value.rounded())
+        if intValue == 0 { return "0" }
+        return intValue > 0 ? "+\(intValue)" : "\(intValue)"
+    }
+
+    /// Label + value + slider row (Beans' `settingsSlider`).
+    private func appearanceSlider(
+        title: String,
+        valueText: String,
+        value: Binding<Double>,
+        range: ClosedRange<Double>
+    ) -> some View {
+        VStack(alignment: .leading, spacing: 4) {
+            HStack {
+                Text(title)
+                Spacer()
+                Text(valueText)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+            Slider(value: value, in: range, step: 1)
+                .tint(Theme.accent)
+        }
+    }
+
+    #if os(iOS)
+    /// Stored background colour for the selected appearance target,
+    /// as a `Color` for the picker (unset reads as the system
+    /// background, like Beans' fallback to its default background).
+    private var wallpaperBackgroundColor: Color {
+        let hex = wallpaperAppearanceTarget == .light
+            ? settings.backgroundHexLight : settings.backgroundHexDark
+        return Color(hex: hex) ?? Color(UIColor.systemBackground)
+    }
+
+    private func setWallpaperBackgroundColor(_ color: Color) {
+        let hex = color.rgbHexString
+        if wallpaperAppearanceTarget == .light {
+            settings.backgroundHexLight = hex
+        } else {
+            settings.backgroundHexDark = hex
+        }
+    }
+
+    /// Active wallpaper path for the selected appearance target.
+    private var wallpaperActiveImagePath: String {
+        wallpaperAppearanceTarget == .light
+            ? settings.backgroundImagePathLight : settings.backgroundImagePathDark
+    }
+
+    private func clearWallpaperBackgroundImage() {
+        if wallpaperAppearanceTarget == .light {
+            settings.backgroundImagePathLight = ""
+        } else {
+            settings.backgroundImagePathDark = ""
+        }
+    }
+
+    /// Wallpaper library cell (Beans' `wallpaperCell`): tap applies
+    /// the wallpaper to the selected appearance; the active one gets
+    /// an accent border + checkmark; the × button deletes the file
+    /// and drops it from the library (and from the active slot if it
+    /// was active).
+    private func wallpaperCell(path: String) -> some View {
+        let isActive = path == wallpaperActiveImagePath
+        return ZStack(alignment: .topTrailing) {
+            Button {
+                if wallpaperAppearanceTarget == .light {
+                    settings.backgroundImagePathLight = path
+                } else {
+                    settings.backgroundImagePathDark = path
+                }
+            } label: {
+                Group {
+                    if let img = WallpaperStore.image(at: path) {
+                        Image(uiImage: img)
+                            .resizable()
+                            .scaledToFill()
+                    } else {
+                        Color.secondary.opacity(0.2)
+                    }
+                }
+                .frame(height: 108)
+                .frame(maxWidth: .infinity)
+                .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+                .overlay {
+                    RoundedRectangle(cornerRadius: 14, style: .continuous)
+                        .strokeBorder(isActive ? Theme.accent : Color.clear, lineWidth: 2)
+                }
+                .overlay(alignment: .bottomTrailing) {
+                    if isActive {
+                        Image(systemName: "checkmark.circle.fill")
+                            .font(.system(size: 18))
+                            .foregroundStyle(Theme.accent)
+                            .background { Circle().fill(Color(UIColor.systemBackground)) }
+                            .padding(5)
+                    }
+                }
+            }
+            .buttonStyle(.plain)
+
+            Button {
+                WallpaperStore.deleteWallpaper(at: path)
+                settings.wallpaperPaths.removeAll { $0 == path }
+                if settings.backgroundImagePathLight == path {
+                    settings.backgroundImagePathLight = ""
+                }
+                if settings.backgroundImagePathDark == path {
+                    settings.backgroundImagePathDark = ""
+                }
+            } label: {
+                Image(systemName: "xmark.circle.fill")
+                    .font(.system(size: 16, weight: .semibold))
+                    .foregroundStyle(.secondary)
+                    .frame(width: 28, height: 28)
+                    .background { Circle().fill(Color(UIColor.systemBackground)) }
+                    .clipShape(Circle())
+                    .contentShape(Circle())
+                    .padding(6)
+            }
+            .buttonStyle(.plain)
+            .zIndex(2)
+        }
+    }
+    #endif
+
+    /// Install a user-picked font file (`.fileImporter` hands over a
+    /// security-scoped URL, same pattern as the custom-source
+    /// importer). Shows the installed name or a failure toast.
+    private func importFontFile(_ result: Result<URL, Error>) {
+        switch result {
+        case .failure(let error):
+            ToastCenter.shared.show("字体导入失败：\(error.localizedDescription)")
+        case .success(let url):
+            let accessing = url.startAccessingSecurityScopedResource()
+            defer { if accessing { url.stopAccessingSecurityScopedResource() } }
+            guard url.pathExtension.lowercased() == "ttf"
+                    || url.pathExtension.lowercased() == "otf"
+                    || url.pathExtension.lowercased() == "ttc"
+            else {
+                ToastCenter.shared.show("请选择 ttf / otf 字体文件")
+                return
+            }
+            if let name = FontManager.install(from: url) {
+                installedFontName = name
+                ToastCenter.shared.show("字体已应用：\(name)")
+            } else {
+                ToastCenter.shared.show("字体安装失败，请使用 ttf / otf 文件")
+            }
+        }
     }
 
     private var appVersion: String {

@@ -225,11 +225,23 @@ public struct IOSMainWindow: View {
     }
 
     @ViewBuilder
+    /// Wallpaper background (Beans `appearanceSection`, P3 3/3): when
+    /// "同步到搜索 / 音乐库 / 我的" is on, the home wallpaper /
+    /// background colour paints behind every tab; when off, only
+    /// `HomeView` paints it (see there). The layer draws nothing
+    /// when no wallpaper / colour is set.
     private var tabInterface: some View {
-        if #available(iOS 26.0, *) {
-            iOS26TabInterface
-        } else {
-            customTabInterface
+        Group {
+            if #available(iOS 26.0, *) {
+                iOS26TabInterface
+            } else {
+                customTabInterface
+            }
+        }
+        .background {
+            if settings.backgroundSyncAll {
+                WallpaperBackgroundView()
+            }
         }
     }
 

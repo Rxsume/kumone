@@ -507,6 +507,27 @@ final class SettingsManager: ObservableObject {
         static let mixWithOtherAudio = "settings.mixWithOtherAudio"
         static let autoResumeLastPlayback = "settings.autoResumeLastPlayback"
         static let showThirdPartySourceNotice = "settings.showThirdPartySourceNotice"
+        // Beans `appearanceSection` (P3 3/3): deep appearance
+        // customization. All `settings.*` (Golia namespace, never
+        // `beans.*`); the file I/O lives in `WallpaperStore` /
+        // `FontManager`, the state lives here like P3a/P3b.
+        static let customAccentHex = "settings.customAccentHex"
+        static let tabLabelsVisible = "settings.tabLabelsVisible"
+        static let legacyTabBarCornerRadius = "settings.legacyTabBarCornerRadius"
+        static let legacyTabBarWidth = "settings.legacyTabBarWidth"
+        static let legacyTabBarOffsetX = "settings.legacyTabBarOffsetX"
+        static let legacyTabBarOffsetY = "settings.legacyTabBarOffsetY"
+        static let homeWallpaperBlur = "settings.homeWallpaperBlur"
+        static let backgroundSyncAll = "settings.backgroundSyncAll"
+        static let backgroundHexLight = "settings.backgroundHexLight"
+        static let backgroundHexDark = "settings.backgroundHexDark"
+        static let backgroundImagePathLight = "settings.backgroundImagePathLight"
+        static let backgroundImagePathDark = "settings.backgroundImagePathDark"
+        static let wallpaperPaths = "settings.wallpaperPaths"
+        // Installed global font (PostScript name), managed by
+        // `FontManager`. Not a settings row's key — the font rows read
+        // it through `FontManager.installedFontName`.
+        static let customFontName = "settings.customFontName"
         static let playbackEntryView = "settings.playbackEntryView"
         static let playerPageTintIntensity = "settings.playerPageTintIntensity"
         static let hidePlayerProgressBar = "settings.hidePlayerProgressBar"
@@ -1211,6 +1232,86 @@ final class SettingsManager: ObservableObject {
     /// source plays a VIP song. Not Folia-gated.
     @Published var showThirdPartySourceNotice: Bool {
         didSet { UserDefaults.standard.set(showThirdPartySourceNotice, forKey: Keys.showThirdPartySourceNotice) }
+    }
+
+    // MARK: - Beans `appearanceSection` (P3 3/3)
+
+    /// Custom accent colour as "#RRGGBB"; empty means the default
+    /// brand red. Read by `Theme.accent` (via UserDefaults, not via
+    /// this property — `Theme` is nonisolated and this class is
+    /// @MainActor). Not Folia-gated.
+    @Published var customAccentHex: String {
+        didSet { UserDefaults.standard.set(customAccentHex, forKey: Keys.customAccentHex) }
+    }
+
+    /// Show the text label under each GlassTabBar icon. Not
+    /// Folia-gated.
+    @Published var tabLabelsVisible: Bool {
+        didSet { UserDefaults.standard.set(tabLabelsVisible, forKey: Keys.tabLabelsVisible) }
+    }
+
+    static let legacyTabBarCornerRadiusRange = 18.0...42.0
+    static let legacyTabBarWidthRange = 300.0...420.0
+    static let legacyTabBarOffsetXRange = -40.0...40.0
+    static let legacyTabBarOffsetYRange = -36.0...36.0
+
+    /// Floating tab bar geometry (Beans' "低系统悬浮底栏" sliders,
+    /// ported to Golia's `GlassTabBar`, which is the floating bar on
+    /// every iOS version here — Beans gates them to iOS <26 because
+    /// iOS 26+ uses the system bar). Width default 420 (not Beans'
+    /// 356): 420 is the slider max, i.e. today's full-width look.
+    @Published var legacyTabBarCornerRadius: Double {
+        didSet { UserDefaults.standard.set(legacyTabBarCornerRadius, forKey: Keys.legacyTabBarCornerRadius) }
+    }
+
+    @Published var legacyTabBarWidth: Double {
+        didSet { UserDefaults.standard.set(legacyTabBarWidth, forKey: Keys.legacyTabBarWidth) }
+    }
+
+    @Published var legacyTabBarOffsetX: Double {
+        didSet { UserDefaults.standard.set(legacyTabBarOffsetX, forKey: Keys.legacyTabBarOffsetX) }
+    }
+
+    @Published var legacyTabBarOffsetY: Double {
+        didSet { UserDefaults.standard.set(legacyTabBarOffsetY, forKey: Keys.legacyTabBarOffsetY) }
+    }
+
+    /// Home wallpaper blur radius (0...30pt). Only visible when a
+    /// wallpaper image is applied. Not Folia-gated.
+    @Published var homeWallpaperBlur: Double {
+        didSet { UserDefaults.standard.set(homeWallpaperBlur, forKey: Keys.homeWallpaperBlur) }
+    }
+
+    /// Apply the home background (colour / wallpaper) to search,
+    /// library and 我的 as well. Off = home only. Not Folia-gated.
+    @Published var backgroundSyncAll: Bool {
+        didSet { UserDefaults.standard.set(backgroundSyncAll, forKey: Keys.backgroundSyncAll) }
+    }
+
+    /// Custom home background colour ("#RRGGBB", empty = unset) for
+    /// the light / dark appearance. Not Folia-gated.
+    @Published var backgroundHexLight: String {
+        didSet { UserDefaults.standard.set(backgroundHexLight, forKey: Keys.backgroundHexLight) }
+    }
+
+    @Published var backgroundHexDark: String {
+        didSet { UserDefaults.standard.set(backgroundHexDark, forKey: Keys.backgroundHexDark) }
+    }
+
+    /// Active wallpaper file path ("", unset) for the light / dark
+    /// appearance. Paths live under Documents/Wallpapers; the files
+    /// are managed by `WallpaperStore`. Not Folia-gated.
+    @Published var backgroundImagePathLight: String {
+        didSet { UserDefaults.standard.set(backgroundImagePathLight, forKey: Keys.backgroundImagePathLight) }
+    }
+
+    @Published var backgroundImagePathDark: String {
+        didSet { UserDefaults.standard.set(backgroundImagePathDark, forKey: Keys.backgroundImagePathDark) }
+    }
+
+    /// Wallpaper library: all uploaded wallpaper file paths.
+    @Published var wallpaperPaths: [String] {
+        didSet { UserDefaults.standard.set(wallpaperPaths, forKey: Keys.wallpaperPaths) }
     }
 
     /// Which view opens when playback starts from a list.
@@ -2536,6 +2637,28 @@ final class SettingsManager: ObservableObject {
         mixWithOtherAudio = defaults.object(forKey: Keys.mixWithOtherAudio) as? Bool ?? false
         autoResumeLastPlayback = defaults.object(forKey: Keys.autoResumeLastPlayback) as? Bool ?? false
         showThirdPartySourceNotice = defaults.object(forKey: Keys.showThirdPartySourceNotice) as? Bool ?? true
+        // Beans `appearanceSection` (P3 3/3).
+        customAccentHex = defaults.string(forKey: Keys.customAccentHex) ?? ""
+        tabLabelsVisible = defaults.object(forKey: Keys.tabLabelsVisible) as? Bool ?? true
+        legacyTabBarCornerRadius = Self.clamped(
+            defaults.object(forKey: Keys.legacyTabBarCornerRadius) as? Double ?? 32,
+            to: Self.legacyTabBarCornerRadiusRange)
+        legacyTabBarWidth = Self.clamped(
+            defaults.object(forKey: Keys.legacyTabBarWidth) as? Double ?? 420,
+            to: Self.legacyTabBarWidthRange)
+        legacyTabBarOffsetX = Self.clamped(
+            defaults.object(forKey: Keys.legacyTabBarOffsetX) as? Double ?? 0,
+            to: Self.legacyTabBarOffsetXRange)
+        legacyTabBarOffsetY = Self.clamped(
+            defaults.object(forKey: Keys.legacyTabBarOffsetY) as? Double ?? 0,
+            to: Self.legacyTabBarOffsetYRange)
+        homeWallpaperBlur = min(max(defaults.object(forKey: Keys.homeWallpaperBlur) as? Double ?? 0, 0), 30)
+        backgroundSyncAll = defaults.object(forKey: Keys.backgroundSyncAll) as? Bool ?? true
+        backgroundHexLight = defaults.string(forKey: Keys.backgroundHexLight) ?? ""
+        backgroundHexDark = defaults.string(forKey: Keys.backgroundHexDark) ?? ""
+        backgroundImagePathLight = defaults.string(forKey: Keys.backgroundImagePathLight) ?? ""
+        backgroundImagePathDark = defaults.string(forKey: Keys.backgroundImagePathDark) ?? ""
+        wallpaperPaths = defaults.stringArray(forKey: Keys.wallpaperPaths) ?? []
         playbackEntryView = defaults.string(forKey: Keys.playbackEntryView)
             .flatMap(PlaybackEntryView.init) ?? .nowPlaying
         let storedTintIntensity = defaults.object(forKey: Keys.playerPageTintIntensity) as? Double ?? 1

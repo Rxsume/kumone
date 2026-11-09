@@ -4,6 +4,25 @@ import KumoneIOSFeature
 @main
 struct KumoneIOSApp: App {
     @UIApplicationDelegateAdaptor(DownloadAppDelegate.self) private var downloadDelegate
+
+    init() {
+        // Re-register user-installed fonts (Beans `appearanceSection`,
+        // P3 3/3) and prune wallpaper entries whose files are gone.
+        Task { @MainActor in
+            FontManager.reinstallIfNeeded()
+            let settings = SettingsManager.shared
+            settings.wallpaperPaths = WallpaperStore.prunedPaths(settings.wallpaperPaths)
+            if !settings.backgroundImagePathLight.isEmpty,
+               WallpaperStore.image(at: settings.backgroundImagePathLight) == nil {
+                settings.backgroundImagePathLight = ""
+            }
+            if !settings.backgroundImagePathDark.isEmpty,
+               WallpaperStore.image(at: settings.backgroundImagePathDark) == nil {
+                settings.backgroundImagePathDark = ""
+            }
+        }
+    }
+
     var body: some Scene {
         WindowGroup {
             IOSMainWindow()
