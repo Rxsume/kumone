@@ -26,7 +26,7 @@ struct BeansCoverPaletteTests {
 
     /// Luminance of a SwiftUI colour, resolved through the platform colour.
     private func luminance(of color: Color) -> Double? {
-        guard let components = PlatformColor(color).cgColor?.components,
+        guard let components = PlatformColor(color).cgColor.components,
               components.count >= 3 else { return nil }
         return 0.2126 * Double(components[0])
             + 0.7152 * Double(components[1])
