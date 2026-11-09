@@ -27,8 +27,8 @@ let package = Package(
         .target(
             name: "CiliCiliKit",
             path: ".",
-            sources: ["Sources", "Integration"],
             exclude: ["Sources/App/JKBiliApp.swift"],
+            sources: ["Sources", "Integration"],
             swiftSettings: [
                 .swiftLanguageMode(.v5),
                 .defaultIsolation(MainActor.self),
