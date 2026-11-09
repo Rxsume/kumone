@@ -68,7 +68,9 @@ struct CustomAudioSourcesView: View {
                             .frame(minHeight: 140)
                     case .link:
                         TextField("https://…", text: $importURL)
+                            #if os(iOS)
                             .textInputAutocapitalization(.never)
+                            #endif
                             .autocorrectionDisabled()
                     case .file:
                         Text("选择本地的 JSON / JS / TXT 文件。")
@@ -315,7 +317,9 @@ private struct SourceEditorSheet: View {
                 if !draft.template.isEmpty {
                     Section("URL 模板") {
                         TextField("模板", text: $draft.template)
+                            #if os(iOS)
                             .textInputAutocapitalization(.never)
+                            #endif
                             .autocorrectionDisabled()
                     }
                 }
