@@ -56,6 +56,22 @@ public struct IOSMainWindow: View {
             .environment(\.openDestination, openDestination)
             .modifier(PlaybackLifecycle())
             .task {
+                // Re-register user-installed fonts (Beans `appearanceSection`,
+                // P3 3/3) and prune wallpaper entries whose files are gone.
+                // Lives here, not in KumoneIOSApp.init: FontManager,
+                // SettingsManager and WallpaperStore are internal to
+                // KumoneCore, and the app target only sees its public API
+                // through KumoneIOSFeature's re-export.
+                FontManager.reinstallIfNeeded()
+                settings.wallpaperPaths = WallpaperStore.prunedPaths(settings.wallpaperPaths)
+                if !settings.backgroundImagePathLight.isEmpty,
+                   WallpaperStore.image(at: settings.backgroundImagePathLight) == nil {
+                    settings.backgroundImagePathLight = ""
+                }
+                if !settings.backgroundImagePathDark.isEmpty,
+                   WallpaperStore.image(at: settings.backgroundImagePathDark) == nil {
+                    settings.backgroundImagePathDark = ""
+                }
                 await DownloadManager.shared.start()
                 await account.bootstrap()
                 if settings.autoCheckUpdates, DistributionChannel.current.allowsSelfUpdate {
