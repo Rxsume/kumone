@@ -26,6 +26,19 @@ final class PlatformPreferenceStore: ObservableObject {
     @Published var orderedRaw: [String]
 
     private init() {
+        loadFromUserDefaults()
+    }
+
+    /// Re-read the platform preferences after a settings restore
+    /// (see `SettingsBackup.apply`); mirrors `init()`. The store only
+    /// reads these keys in `init()` otherwise, so without this a
+    /// restore would not take effect until relaunch.
+    func reloadFromUserDefaults() {
+        loadFromUserDefaults()
+        objectWillChange.send()
+    }
+
+    private func loadFromUserDefaults() {
         let saved = UserDefaults.standard.stringArray(forKey: Self.enabledKey) ?? []
         let seen = Set(UserDefaults.standard.stringArray(forKey: Self.seenKey) ?? [])
         let all = Set(HomePlatform.allCases.map(\.rawValue))

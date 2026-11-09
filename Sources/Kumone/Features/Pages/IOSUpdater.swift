@@ -28,6 +28,11 @@ final class IOSUpdater: NSObject, ObservableObject {
     @Published var phase: Phase = .idle
     @Published var showSheet = false
 
+    /// Host of the mirror the current accelerated download is trying
+    /// (e.g. "gh-proxy.com"), shown in the progress view; nil for a
+    /// direct GitHub download.
+    @Published var downloadMirrorHost: String?
+
     /// UserDefaults key remembering the release the user dismissed with
     /// "稍后", as its `Release.identifier` ("0.3.28-565"). The launch check
     /// stays silent for that exact build; a newer build re-prompts.
@@ -114,6 +119,11 @@ final class IOSUpdater: NSObject, ObservableObject {
     /// Non-TrollStore path: download the IPA into Documents (findable in the
     /// Files app under On My iPhone ▸ Golia), then open the share sheet so the
     /// user can Save to Files or hand it straight to a signing app.
+    ///
+    /// Auto-select (no-VPN rule): before downloading, probe the direct
+    /// GitHub URL (HEAD, 5 s). It answers → direct download, as before.
+    /// It fails or times out (mainland network without a VPN) → the
+    /// domestic mirrors are tried in order, first success wins.
     func download(_ release: ReleaseChecker.Release) {
         guard let ipaURL = release.ipaURL else {
             openReleasePage(release)
@@ -124,13 +134,66 @@ final class IOSUpdater: NSObject, ObservableObject {
         phase = .downloading(0)
         Task {
             do {
-                let localURL = try await downloadIPA(from: ipaURL)
+                // Clear any stale mirror host from a previous download while
+                // the probe runs; the candidate loop sets it per attempt.
+                downloadMirrorHost = nil
+                let direct = await ReleaseChecker.isDirectReachable(ipaURL)
+                let candidates = ReleaseChecker.downloadCandidates(for: ipaURL, directReachable: direct)
+                let localURL = try await downloadFirstSuccess(from: candidates)
                 phase = .readyToInstall(localURL)
                 share(localURL)
             } catch {
                 phase = .failed(error.localizedDescription)
             }
         }
+    }
+
+    /// Accelerated download: same flow as `download(_:)`, but the IPA
+    /// URL is prefixed with a public GitHub proxy, tried in order until
+    /// one serves the file. Explicit user choice only — the button is
+    /// labelled as a proxy mirror and this is never the default. The
+    /// proxy only ever carries the IPA bytes for this one download;
+    /// nothing about the release (version, identity) is trusted from it.
+    func downloadAccelerated(_ release: ReleaseChecker.Release) {
+        guard let ipaURL = release.ipaURL else {
+            openReleasePage(release)
+            return
+        }
+        pendingDownloadFilename = release.build.map { "Golia-\(release.version)-build-\($0).ipa" }
+            ?? "Golia-\(release.version).ipa"
+        phase = .downloading(0)
+        Task {
+            do {
+                // Explicit override: straight to the mirrors, no probe.
+                let candidates = ReleaseChecker.downloadCandidates(for: ipaURL, directReachable: false)
+                let localURL = try await downloadFirstSuccess(from: candidates)
+                phase = .readyToInstall(localURL)
+                share(localURL)
+            } catch {
+                phase = .failed(error.localizedDescription)
+            }
+        }
+    }
+
+    /// Try each candidate URL in order until one downloads. While a mirror
+    /// candidate is being tried, `downloadMirrorHost` names it in the
+    /// progress view; cleared on success or when every candidate fails.
+    private func downloadFirstSuccess(from candidates: [ReleaseChecker.DownloadCandidate]) async throws -> URL {
+        var lastError: Error?
+        for candidate in candidates {
+            downloadMirrorHost = candidate.mirrorHost
+            do {
+                let localURL = try await downloadIPA(from: candidate.url)
+                downloadMirrorHost = nil
+                return localURL
+            } catch {
+                lastError = error
+                continue
+            }
+        }
+        downloadMirrorHost = nil
+        if let lastError { throw lastError }
+        throw UpdaterDownloadError.noCandidates
     }
 
     func openReleasePage(_ release: ReleaseChecker.Release) {
@@ -171,6 +234,20 @@ final class IOSUpdater: NSObject, ObservableObject {
             pop.permittedArrowDirections = []
         }
         presenter.present(activity, animated: true)
+    }
+}
+
+/// Errors from the updater's own candidate loop (not from the network):
+/// `noCandidates` is the empty-list case, which keeps the accelerated
+/// button's old "all mirrors unavailable" message.
+private enum UpdaterDownloadError: LocalizedError {
+    case noCandidates
+
+    var errorDescription: String? {
+        switch self {
+        case .noCandidates:
+            return String(localized: "加速镜像均不可用，请改用直接下载")
+        }
     }
 }
 
@@ -249,12 +326,24 @@ struct IOSUpdaterSheet: View {
                     .buttonStyle(.plain)
                     .font(.system(size: 13, weight: .medium))
                     .foregroundStyle(Theme.accent)
+                Button("加速下载 IPA（代理镜像）") { updater.downloadAccelerated(release) }
+                    .buttonStyle(.plain)
+                    .font(.system(size: 13, weight: .medium))
+                    .foregroundStyle(Theme.accent)
+                Text("「下载 IPA」会先探测 GitHub 直连：能直连就直连，不通时自动改走国内加速镜像；「加速下载」是直接走镜像")
+                    .font(.caption).foregroundStyle(.secondary)
+                    .multilineTextAlignment(.center)
                 laterButton(release)
 
             case .downloading(let progress):
                 ProgressRing(progress: progress)
-                Text("正在下载 \(Int(progress * 100))%")
-                    .font(.headline).monospacedDigit()
+                if let host = updater.downloadMirrorHost {
+                    Text("正在通过 \(host) 加速下载 \(Int(progress * 100))%")
+                        .font(.headline).monospacedDigit()
+                } else {
+                    Text("正在下载 \(Int(progress * 100))%")
+                        .font(.headline).monospacedDigit()
+                }
 
             case .readyToInstall(let url):
                 Image(systemName: "square.and.arrow.down.fill")
