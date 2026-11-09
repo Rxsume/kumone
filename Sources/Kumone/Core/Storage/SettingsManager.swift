@@ -2463,7 +2463,7 @@ final class SettingsManager: ObservableObject {
         autoUseBestLyric = defaults.object(forKey: Keys.autoUseBestLyric) as? Bool ?? true
         preferredLyricSource = defaults.string(forKey: Keys.preferredLyricSource)
             .flatMap(LyricSource.init) ?? .netease
-        lyricLineRules = LyricFilterSettings.decodeRules(defaults.string(forKey: Keys.lyricLineRules))
+        lyricLineRules = LyricFilterSettings.decodeRules(from: defaults.string(forKey: Keys.lyricLineRules))
         lyricStaffPolicy = defaults.string(forKey: Keys.lyricStaffPolicy)
             .flatMap(LyricStaffPolicy.init) ?? .smart
         lyricStaffMinDwellSeconds = LyricFilterSettings.clampedDwell(

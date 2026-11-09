@@ -79,7 +79,9 @@ struct LyricFilterSettingsView: View {
         }
         .navigationTitle("歌词过滤")
         .toolbar {
+            #if os(iOS)
             EditButton()
+            #endif
         }
         .sheet(item: $draftRule) { rule in
             LyricRuleEditorView(
