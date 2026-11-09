@@ -85,10 +85,10 @@ final class NowPlayingManager {
     #endif
 
     /// - Parameter players: the iOS players backing playback. When supplied,
-    ///   the Now Playing session is bound to all of them so the system can
-    ///   identify the app behind the session — with the dual-deck crossfade
-    ///   engine both decks are bound, and the session survives the deck swap
-    ///   at the overlap because it never belonged to one player.
+    ///   the Now Playing session is bound to them so the system can identify
+    ///   the app behind the session. The single engine is always passed
+    ///   (post-rollback there is one `AVPlayer`); without players no
+    ///   `MPNowPlayingSession` is created at all.
     func attach(to player: PlayerService, players: [AVPlayer]? = nil) {
         self.player = player
         #if os(iOS)

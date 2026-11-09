@@ -142,11 +142,7 @@ final class PlayerService: ObservableObject {
     @Published private(set) var shuffleEnabled = false
     @Published var volume: Float = 1 {
         didSet {
-            // While an overlap ramp runs, the ramp owns both decks' volumes;
-            // a mid-ramp change lands at the next track instead of stomping the fade.
-            if transitionTask == nil {
-                engine.volume = effectiveVolume
-            }
+            engine.volume = effectiveVolume
             UserDefaults.standard.set(volume, forKey: "player.volume")
         }
     }
@@ -173,105 +169,21 @@ final class PlayerService: ObservableObject {
 
     // MARK: - Engine
 
-    /// The two decks. `deckA` starts active; the standby deck preloads the
-    /// next track and takes over at the overlap, so playback never stops for
-    /// a hand-over. Everything else in this class keeps addressing the active
-    /// deck through `engine`, exactly as before.
-    private let deckA = AVPlayer()
-    private let deckB = AVPlayer()
-    private var activeDeckIsA = true
-    /// The deck currently driving playback; all existing `engine.xxx` call sites keep working through this.
-    private var engine: AVPlayer { activeDeckIsA ? deckA : deckB }
-    /// The other deck: preloading the next track, or fading the old one out mid-overlap.
-    private var standbyEngine: AVPlayer { activeDeckIsA ? deckB : deckA }
+    /// The single player driving playback (pre-Folia, one `AVPlayer`).
+    private let engine = AVPlayer()
 
-    /// Per-deck observations, installed once in `init` by `wireDeck(_:)`.
+    /// Observations for the engine, installed once in `init` by `wireDeck()`.
     private struct DeckWiring {
         var timeObserver: Any?
         var statusObservation: NSKeyValueObservation?
     }
-    private var wiringA = DeckWiring()
-    private var wiringB = DeckWiring()
+    private var wiring = DeckWiring()
 
-    // iOS crossfade state (Folia P2/P3) — the implementation lives in the
-    // section below, after `handleItemEnded`.
-
-    /// The next track's prepared item, living on the standby deck until the overlap starts.
-    private var preparedNext: PreparedNext?
-    /// The standby item's status observation (ready/failed); separate from the active item's, so a failed preload never touches the playing track.
-    private var preparedItemStatusObservation: NSKeyValueObservation?
-    /// Prepare work in flight; cancelled whenever the queue or track changes.
-    private var prepareTask: Task<Void, Never>?
-    /// The queue candidate an in-flight preparation is resolving, so a
-    /// manual advance onto exactly that track can wait for it instead of
-    /// discarding it and re-resolving from scratch.
-    private var preparingCandidate: PlaybackQueueCandidate?
-    /// A manual advance that is waiting on an in-flight preparation: the
-    /// track it is waiting for. Cleared when the wait resolves or a newer
-    /// advance supersedes it, so a stale retry can never stomp a newer track.
-    private var deferredAdvanceTrackID: Int?
-    /// Bumped whenever a prepared item stops being valid (track change, user action), so stale async prepare work gives up instead of installing.
-    private var prepareEpoch = 0
-    /// The item the active deck is playing for `currentTrack`, set when it is installed and cleared when a new track starts resolving. The overlap may only start from it — never from a stale item left on the deck while the next track is still resolving.
-    private weak var installedItem: AVPlayerItem?
-    /// The overlap ramp in flight, if any.
-    private var transitionTask: Task<Void, Never>?
-    /// The post-overlap glide of the incoming deck back to unity rate (beat-matched plans only).
-    private var rateRestoreTask: Task<Void, Never>?
-    /// True from the overlap starting until the retiring deck is stopped.
+    /// True while a hand-over is sounding. The iOS player no longer overlaps
+    /// tracks, so this stays false; it is kept because the now-playing page
+    /// reads it through the shared `PlayerService` type (the macOS engine
+    /// still drives its own copy for AutoMix).
     @Published private(set) var transitionInProgress = false
-    /// Resources feeding the retiring deck during an overlap; released when the overlap ends.
-    private var retiringResourceLoader: CachingAudioResourceLoader?
-    private var retiringCacheLease: UUID?
-    private var retiringOfflineLease: OfflinePlaybackLease?
-
-    /// Everything the standby deck holds for the next track until the overlap starts.
-    private final class PreparedNext {
-        let track: Track
-        let candidate: PlaybackQueueCandidate
-        let item: AVPlayerItem
-        let assetURL: URL
-        let resourceLoader: CachingAudioResourceLoader?
-        let cacheLease: UUID?
-        let offlineLease: OfflinePlaybackLease?
-        let durationMS: Int?
-        let servedQuality: String?
-        let unblockSourceID: AudioSourceID?
-        let unblockSourceName: String?
-        let isTrial: Bool
-        /// Set by the standby item's status observation; the overlap only starts from a ready item.
-        var isReady = false
-
-        init(track: Track, candidate: PlaybackQueueCandidate, item: AVPlayerItem, assetURL: URL,
-             resourceLoader: CachingAudioResourceLoader? = nil, cacheLease: UUID? = nil,
-             offlineLease: OfflinePlaybackLease? = nil, durationMS: Int? = nil,
-             servedQuality: String? = nil, unblockSourceID: AudioSourceID? = nil,
-             unblockSourceName: String? = nil, isTrial: Bool = false) {
-            self.track = track
-            self.candidate = candidate
-            self.item = item
-            self.assetURL = assetURL
-            self.resourceLoader = resourceLoader
-            self.cacheLease = cacheLease
-            self.offlineLease = offlineLease
-            self.durationMS = durationMS
-            self.servedQuality = servedQuality
-            self.unblockSourceID = unblockSourceID
-            self.unblockSourceName = unblockSourceName
-            self.isTrial = isTrial
-        }
-    }
-
-    /// One hand-over, decided by `planTransition`: how long the decks overlap, when it starts on the outgoing track, where the incoming deck enters, and what rates the decks run at.
-    private struct ActiveTransition {
-        let duration: TimeInterval
-        let outPoint: TimeInterval
-        let inPoint: TimeInterval
-        let outgoingRate: Float
-        let incomingRate: Float
-        let rateReleaseSeconds: TimeInterval
-        let isBeatMatched: Bool
-    }
 
     private var lastPlaybackCheckpoint = ContinuousClock.now
     /// The fade ramp in flight, if any; a new play/pause cancels it so ramps
@@ -321,12 +233,12 @@ final class PlayerService: ObservableObject {
     }
 
     /// Re-derive the trim for the loaded track from the in-session analysis
-    /// and push it to the engine — unless a C1 fade or an overlap ramp is
-    /// running, in which case the ramp owns `engine.volume` until it lands
-    /// and the trim is picked up at the next play/pause.
+    /// and push it to the engine — unless a C1 fade is running, in which
+    /// case the ramp owns `engine.volume` until it lands and the trim is
+    /// picked up at the next play/pause.
     private func applyLoudnessTrim(for track: Track) {
         currentLoudnessTrimDB = loudnessTrimDB(for: analysisByTrackID[track.id])
-        if fadeTask == nil, transitionTask == nil {
+        if fadeTask == nil {
             engine.volume = effectiveVolume
         }
     }
@@ -412,9 +324,7 @@ final class PlayerService: ObservableObject {
     }
 
     private init() {
-        wiringA = wireDeck(deckA)
-        wiringB = wireDeck(deckB)
-        deckB.volume = 0
+        wiring = wireDeck()
         sleepTimer.onDeadlineReached = { [weak self] in
             self?.pause()
         }
@@ -455,7 +365,7 @@ final class PlayerService: ObservableObject {
         }
         #endif
 
-        NowPlayingManager.shared.attach(to: self, players: [deckA, deckB])
+        NowPlayingManager.shared.attach(to: self, players: [engine])
         offlineActivatedScope = AccountStore.shared.offlineScope
         networkObservation = DownloadManager.shared.$network.removeDuplicates().sink { [weak self] network in
             self?.networkState = network
@@ -642,7 +552,6 @@ final class PlayerService: ObservableObject {
     }
 
     func pause() {
-        settleDeckBeforeTakeover()
         cancelFade()
         // Fade out only when there is something loaded and audible;
         // otherwise pause at once, exactly as before.
@@ -746,7 +655,6 @@ final class PlayerService: ObservableObject {
     }
 
     func seek(to seconds: TimeInterval, completion: (@MainActor () -> Void)? = nil) {
-        settleDeckBeforeTakeover()
         progress = seconds
         updateLyricsCursor(at: seconds)
         engine.seek(to: CMTime(seconds: seconds, preferredTimescale: 600),
@@ -928,7 +836,6 @@ final class PlayerService: ObservableObject {
     // MARK: - Advancing
 
     private func advanceToNext(userInitiated: Bool) {
-        settleDeckBeforeTakeover()
         if usesOfflineQueue, !nextCandidates().isEmpty {
             pendingAutoAdvance = !userInitiated
             advanceOffline()
@@ -963,12 +870,7 @@ final class PlayerService: ObservableObject {
         startPlaying(activeQueue[idx])
     }
 
-    private func handleItemEnded(for item: AVPlayerItem) {
-        // A queued end notification for the outgoing track must not fire
-        // after a crossfade swapped decks: the item on the deck is a
-        // different one now.
-        guard engine.currentItem === item else { return }
-        settleDeckBeforeTakeover()
+    private func handleItemEnded() {
         scrobbleIfNeeded(completed: true)
 
         if sleepTimer.consumeEndOfCurrentTrack() {
@@ -992,23 +894,18 @@ final class PlayerService: ObservableObject {
         advanceToNext(userInitiated: false)
     }
 
-    // MARK: - iOS crossfade (Folia P2/P3): dual-deck overlap
 
-    /// Installs the per-deck observations: a 0.2 s time observer driving the
-    /// clock / lyrics / progress, and the buffering observation. Only the
-    /// active deck drives anything — the retiring deck keeps ticking through
-    /// its fade-out and must not publish — so the time observer is identified
-    /// by the deck it was installed on, not by a capture. Runs once per deck
+    /// Installs the engine's observations: a 0.2 s time observer driving the
+    /// clock / lyrics / progress, and the buffering observation. Runs once
     /// in `init`.
-    private func wireDeck(_ deck: AVPlayer) -> DeckWiring {
-        deck.actionAtItemEnd = .pause
+    private func wireDeck() -> DeckWiring {
+        engine.actionAtItemEnd = .pause
         var wiring = DeckWiring()
-        let deckID = ObjectIdentifier(deck)
-        wiring.timeObserver = deck.addPeriodicTimeObserver(
+        wiring.timeObserver = engine.addPeriodicTimeObserver(
             forInterval: CMTime(seconds: 0.2, preferredTimescale: 600), queue: .main
         ) { [weak self] time in
             MainActor.assumeIsolated {
-                guard let self, deckID == ObjectIdentifier(self.engine), !self.isScrubbing else { return }
+                guard let self, !self.isScrubbing else { return }
                 let seconds = time.seconds
                 guard seconds.isFinite else { return }
 
@@ -1027,15 +924,11 @@ final class PlayerService: ObservableObject {
                 if self.isPlaying, self.lastPlaybackCheckpoint.duration(to: .now) >= .seconds(20) {
                     self.persistState()
                 }
-                if self.isPlaying {
-                    self.maybeStartTransition(at: seconds)
-                    self.maybePrepareNextTrack()
-                }
             }
         }
-        wiring.statusObservation = deck.observe(\.timeControlStatus, options: [.new]) { [weak self] player, _ in
+        wiring.statusObservation = engine.observe(\.timeControlStatus, options: [.new]) { [weak self] player, _ in
             Task { @MainActor in
-                guard let self, player === self.engine else { return }
+                guard let self else { return }
                 self.isBuffering = player.timeControlStatus == .waitingToPlayAtSpecifiedRate
             }
         }
@@ -1043,8 +936,7 @@ final class PlayerService: ObservableObject {
     }
 
     /// Status observation for the active item, factored out of
-    /// `installResolvedAsset` so the overlap swap can install one for the
-    /// incoming item under the new generation.
+    /// `installResolvedAsset`.
     private func makeItemStatusObservation(
         for item: AVPlayerItem, track: Track, generation: Int,
         sourceID: AudioSourceID?, remoteURL: URL?, durationMS: Int?
@@ -1076,562 +968,14 @@ final class PlayerService: ObservableObject {
         }
     }
 
-    /// End observer for the active item. The item check in
-    /// `handleItemEnded(for:)` drops notifications queued before a swap.
+    /// End observer for the active item.
     private func makeEndObserver(for item: AVPlayerItem) -> NSObjectProtocol {
         NotificationCenter.default.addObserver(
             forName: AVPlayerItem.didPlayToEndTimeNotification, object: item, queue: .main
         ) { [weak self] _ in
             Task { @MainActor in
-                self?.handleItemEnded(for: item)
+                self?.handleItemEnded()
             }
-        }
-    }
-
-    /// Settles any overlap or post-overlap rate glide before a user action or
-    /// failure path takes the deck over.
-    private func settleDeckBeforeTakeover() {
-        completeTransitionIfNeeded()
-        cancelRateRestore()
-    }
-
-    /// Instantly finishes an in-flight overlap: the incoming deck takes over
-    /// at full volume and unity rate, the retiring deck is silenced, stopped
-    /// and released. No-op when no overlap is running. Every path that takes
-    /// the deck over calls this first, so a retiring deck can never keep
-    /// playing behind the new track.
-    private func completeTransitionIfNeeded() {
-        guard transitionInProgress else { return }
-        transitionTask?.cancel()
-        transitionTask = nil
-        cancelRateRestore()
-        transitionInProgress = false
-        let retiring = standbyEngine
-        retiring.pause()
-        retiring.volume = 0
-        retiring.replaceCurrentItem(with: nil)
-        releaseRetiringResources()
-        engine.volume = effectiveVolume
-        engine.defaultRate = 1.0
-        engine.rate = 1.0
-        NowPlayingManager.shared.updateElapsed(progress, rate: isPlaying ? 1 : 0)
-    }
-
-    /// Cancels a post-overlap rate glide and puts the active deck back to
-    /// unity rate. No-op when no glide is running.
-    private func cancelRateRestore() {
-        guard rateRestoreTask != nil else { return }
-        rateRestoreTask?.cancel()
-        rateRestoreTask = nil
-        engine.defaultRate = 1.0
-        engine.rate = 1.0
-    }
-
-    /// Releases the loader and leases that fed the retiring deck.
-    private func releaseRetiringResources() {
-        retiringResourceLoader?.cancel()
-        retiringResourceLoader = nil
-        if let lease = retiringCacheLease { releaseAudioCacheLease(lease) }
-        retiringCacheLease = nil
-        if let lease = retiringOfflineLease { Task { try? await OfflineStore.shared.release(lease) } }
-        retiringOfflineLease = nil
-    }
-
-    /// Triggers a preload of the next track when the overlap engine is on and
-    /// nothing is prepared yet. Called from the active deck's time observer,
-    /// so it runs at most once per tick and only while playing. A prepared item
-    /// whose queue position no longer holds is dropped first, so a stale
-    /// preload never blocks a fresh one.
-    private func maybePrepareNextTrack() {
-        if let prepared = preparedNext, !stillHolds(prepared.candidate) {
-            discardPrepared()
-        }
-        guard SettingsManager.shared.effectiveIosCrossfadeEnabled, isPlaying, !transitionInProgress,
-              transitionTask == nil, preparedNext == nil, prepareTask == nil,
-              !usesOfflineQueue, repeatMode != .one,
-              let candidate = nextCandidates().first,
-              candidate.track.id != currentTrack?.id else { return }
-        prepareNextTrack(candidate)
-    }
-
-    /// Resolves the next track in the background and installs it on the
-    /// standby deck, paused at volume 0. Mirrors `resolveAndLoad`'s resolution
-    /// order (download → cache → network → unblock → fallback cache) but never
-    /// toasts, never skips, and never touches the playing track: any failure
-    /// just leaves `preparedNext` empty and the next cut is a hard cut,
-    /// exactly as today.
-    private func prepareNextTrack(_ candidate: PlaybackQueueCandidate) {
-        let track = candidate.track
-        let epoch = prepareEpoch
-        preparingCandidate = candidate
-        prepareTask = Task { [weak self] in
-            guard let self else { return }
-            defer { self.prepareTask = nil; self.preparingCandidate = nil }
-            let quality = SettingsManager.shared.audioQuality.rawValue
-            let allowsUnblock = SettingsManager.shared.canResolveUnblockedTracks
-            let cacheEnabled = SettingsManager.shared.enableAudioCache
-
-            // A downloaded copy beats the network, and is all there is without one.
-            if let lease = await self.acquireOfflineLease(for: track, generation: self.resolveGeneration) {
-                guard !Task.isCancelled, self.prepareEpoch == epoch else {
-                    try? await OfflineStore.shared.release(lease)
-                    return
-                }
-                await self.installPreparedAsset(
-                    AVURLAsset(url: lease.url), for: track, candidate: candidate, epoch: epoch,
-                    offlineLease: lease, durationMS: Int(lease.descriptor.duration * 1000))
-                return
-            }
-            guard !Task.isCancelled, self.prepareEpoch == epoch else { return }
-
-            if cacheEnabled,
-               let cached = try? await AudioCache.shared.entry(
-                   for: track.id, requestedQuality: quality, allowsUnblock: allowsUnblock) {
-                guard !Task.isCancelled, self.prepareEpoch == epoch else { return }
-                let lease = await AudioCache.shared.retain(cached)
-                guard !Task.isCancelled, self.prepareEpoch == epoch else {
-                    self.releaseAudioCacheLease(lease)
-                    return
-                }
-                var unblockName: String?
-                if case .unblock(let source) = cached.metadata.source {
-                    unblockName = source
-                }
-                await self.installPreparedAsset(
-                    AVURLAsset(url: cached.fileURL), for: track, candidate: candidate, epoch: epoch,
-                    cacheLease: lease, servedQuality: cached.metadata.servedQuality,
-                    unblockName: unblockName)
-                return
-            }
-            guard !Task.isCancelled, self.prepareEpoch == epoch else { return }
-
-            // Network URL (same two-step quality fallback as `resolveAndLoad`).
-            var data: SongURLData?
-            do {
-                data = try await MusicAPI.songURL(ids: [track.id], level: quality).first
-                if data?.url == nil, quality != AudioQuality.standard.rawValue {
-                    data = try await MusicAPI.songURL(ids: [track.id], level: AudioQuality.standard.rawValue).first
-                }
-            } catch { data = nil }
-            guard !Task.isCancelled, self.prepareEpoch == epoch else { return }
-
-            var resolvedURL: URL?
-            var servedQuality = data?.level
-            var isTrial = false
-            var unblockID: AudioSourceID?
-            var unblockName: String?
-            if let urlString = data?.url {
-                resolvedURL = URL(string: urlString.replacingOccurrences(of: "http://", with: "https://"))
-            }
-            if resolvedURL == nil || data?.freeTrialInfo != nil, allowsUnblock {
-                let resolution = await UnblockService.resolve(
-                    track, enabledSources: SettingsManager.shared.enabledAudioSourceIDs, excluding: [])
-                if let unblocked = resolution.source {
-                    resolvedURL = unblocked.url
-                    unblockID = unblocked.id
-                    unblockName = unblocked.displayName
-                    servedQuality = nil
-                    isTrial = false
-                }
-            }
-            guard !Task.isCancelled, self.prepareEpoch == epoch else { return }
-            guard let url = resolvedURL else {
-                // Last resort: any cached copy, like `loadFallbackCache`.
-                if cacheEnabled,
-                   let cached = try? await AudioCache.shared.fallbackEntry(
-                       for: track.id, allowsUnblock: allowsUnblock) {
-                    guard !Task.isCancelled, self.prepareEpoch == epoch else { return }
-                    let lease = await AudioCache.shared.retain(cached)
-                    guard !Task.isCancelled, self.prepareEpoch == epoch else {
-                        self.releaseAudioCacheLease(lease)
-                        return
-                    }
-                    await self.installPreparedAsset(
-                        AVURLAsset(url: cached.fileURL), for: track, candidate: candidate, epoch: epoch,
-                        cacheLease: lease, servedQuality: cached.metadata.servedQuality)
-                }
-                return
-            }
-            if data?.freeTrialInfo != nil, unblockID == nil {
-                isTrial = true
-            }
-            await self.prepareLoadedURL(
-                track: track, url: url, durationMS: data?.time, candidate: candidate, epoch: epoch,
-                servedQuality: servedQuality, unblockID: unblockID, unblockName: unblockName, isTrial: isTrial)
-        }
-    }
-
-    /// Builds the (possibly cache-wrapped) asset for a resolved network URL
-    /// and installs it on the standby deck — the prepare-side twin of
-    /// `loadResolvedURL`, minus the failure handling: a prepare that cannot
-    /// load just gives up.
-    private func prepareLoadedURL(
-        track: Track, url: URL, durationMS: Int?, candidate: PlaybackQueueCandidate, epoch: Int,
-        servedQuality: String?, unblockID: AudioSourceID?, unblockName: String?, isTrial: Bool
-    ) async {
-        let remote = CDNHost.preferred(for: url)
-        var asset = AVURLAsset(url: remote)
-        // Beans pattern: a QQ/Kugou stream needs the platform login
-        // headers (UA/Referer + cookies) on the asset or the host 403s.
-        // Hoisted out of the `if let`: the same headers also go to the
-        // cache loader below, whose own session downloads the bytes.
-        let headers = Self.playbackHeaders(for: unblockID)
-        if let headers {
-            // The AVURLAssetHTTPHeaderFieldsKey constant is not exposed
-            // to Swift by the iOS SDK (CI run #85: "cannot find in
-            // scope"), so the option key is spelled out as its literal
-            // string — the same value, and the standard workaround.
-            asset = AVURLAsset(url: remote, options: ["AVURLAssetHTTPHeaderFieldsKey": headers])
-        }
-        var resourceLoader: CachingAudioResourceLoader?
-        if SettingsManager.shared.enableAudioCache, !isTrial {
-            let cacheLimitMB = await SettingsManager.shared.effectiveAudioCacheSizeMB()
-            guard prepareEpoch == epoch else { return }
-            let source: AudioCacheSource = unblockName.map(AudioCacheSource.unblock) ?? .origin
-            do {
-                let loader = try CachingAudioResourceLoader(
-                    remoteURL: remote,
-                    trackID: track.id,
-                    requestedQuality: SettingsManager.shared.audioQuality.rawValue,
-                    servedQuality: servedQuality,
-                    source: source,
-                    maximumCacheSizeMB: cacheLimitMB,
-                    additionalHeaders: headers ?? [:]
-                )
-                guard prepareEpoch == epoch else {
-                    loader.cancel()
-                    return
-                }
-                let cachedAsset = AVURLAsset(url: loader.assetURL)
-                loader.attach(to: cachedAsset)
-                resourceLoader = loader
-                asset = cachedAsset
-            } catch {
-                print("Audio source will play without caching: \(error)")
-            }
-        }
-        await installPreparedAsset(
-            asset, for: track, candidate: candidate, epoch: epoch, remoteURL: remote,
-            resourceLoader: resourceLoader, durationMS: durationMS, servedQuality: servedQuality,
-            unblockID: unblockID, unblockName: unblockName, isTrial: isTrial)
-    }
-
-    /// Installs a resolved asset on the standby deck, paused at volume 0, and
-    /// records it as `preparedNext`. The spectrum tap is attached when the
-    /// source allows it — a cached file plays untapped, exactly as on the
-    /// active deck — but `markUntappable()` is deliberately NOT called here:
-    /// that flips shared spectrum state the playing track still owns.
-    private func installPreparedAsset(
-        _ asset: AVURLAsset, for track: Track, candidate: PlaybackQueueCandidate, epoch: Int,
-        remoteURL: URL? = nil, resourceLoader: CachingAudioResourceLoader? = nil,
-        cacheLease: UUID? = nil, offlineLease: OfflinePlaybackLease? = nil,
-        durationMS: Int? = nil, servedQuality: String? = nil,
-        unblockID: AudioSourceID? = nil, unblockName: String? = nil, isTrial: Bool = false
-    ) async {
-        #if os(iOS)
-        let assetTrack = asset.url.isFileURL ? nil : await loadAudioTrack(from: asset, timeout: 2)
-        #else
-        let assetTrack = await loadAudioTrack(from: asset, timeout: 2)
-        #endif
-        guard epoch == prepareEpoch, preparedNext == nil else {
-            resourceLoader?.cancel()
-            if let cacheLease { releaseAudioCacheLease(cacheLease) }
-            if let offlineLease { Task { try? await OfflineStore.shared.release(offlineLease) } }
-            return
-        }
-        let item = AVPlayerItem(asset: asset)
-        if let assetTrack, let mix = AudioSpectrum.shared.makeAudioMix(for: assetTrack) {
-            item.audioMix = mix
-        }
-        let prepared = PreparedNext(
-            track: track, candidate: candidate, item: item, assetURL: asset.url,
-            resourceLoader: resourceLoader, cacheLease: cacheLease, offlineLease: offlineLease,
-            durationMS: durationMS, servedQuality: servedQuality,
-            unblockSourceID: unblockID, unblockSourceName: unblockName, isTrial: isTrial)
-        preparedItemStatusObservation?.invalidate()
-        preparedItemStatusObservation = item.observe(\.status, options: [.new]) { [weak self] item, _ in
-            switch item.status {
-            case .readyToPlay:
-                Task { @MainActor in
-                    guard let self, self.preparedNext?.item === item else { return }
-                    self.preparedNext?.isReady = true
-                }
-            case .failed:
-                Task { @MainActor in
-                    guard let self, self.preparedNext?.item === item else { return }
-                    self.discardPrepared()
-                }
-            default:
-                break
-            }
-        }
-        standbyEngine.volume = 0
-        standbyEngine.replaceCurrentItem(with: item)
-        preparedNext = prepared
-    }
-
-    /// Drops the prepared next track: stops the standby deck, releases its
-    /// loader and leases. No-op when nothing is prepared (in particular during
-    /// an overlap, when `preparedNext` is already consumed).
-    private func discardPrepared() {
-        prepareTask?.cancel()
-        guard let prepared = preparedNext else { return }
-        preparedNext = nil
-        preparedItemStatusObservation?.invalidate()
-        preparedItemStatusObservation = nil
-        standbyEngine.pause()
-        standbyEngine.volume = 0
-        standbyEngine.replaceCurrentItem(with: nil)
-        prepared.resourceLoader?.cancel()
-        if let cacheLease = prepared.cacheLease { releaseAudioCacheLease(cacheLease) }
-        if let offlineLease = prepared.offlineLease { Task { try? await OfflineStore.shared.release(offlineLease) } }
-    }
-
-    /// Decides how the current track hands over to `incoming`. Crossfade mode
-    /// always uses a timed plan (no analysis needed); Automix asks the planner
-    /// when both sides were analyzed, and falls back to the same timed plan
-    /// when a side has no analysis — iOS only analyzes local files, so
-    /// without the fallback Automix would be gapless for almost every
-    /// streamed pair.
-    private func planTransition(outgoing: Track, incoming: Track) -> ActiveTransition? {
-        let mode = SettingsManager.shared.effectiveTransitionMode
-        let config = CrossfadeTransition.plannerConfig(
-            mode: mode, crossfadeMaxSeconds: SettingsManager.shared.effectiveCrossfadeMaxSeconds)
-        let outgoingDuration = duration
-        guard outgoingDuration > 0, incoming.duration > 0 else { return nil }
-        if mode == .crossfade {
-            guard let timed = CrossfadeTransition.timedCrossfade(
-                outgoingDuration: outgoingDuration, incomingDuration: incoming.duration,
-                maxSeconds: SettingsManager.shared.effectiveCrossfadeMaxSeconds) else { return nil }
-            return ActiveTransition(duration: timed.duration, outPoint: timed.outPoint, inPoint: 0,
-                                    outgoingRate: 1, incomingRate: 1, rateReleaseSeconds: 0,
-                                    isBeatMatched: false)
-        }
-        let outgoingAnalysis = analysisByTrackID[outgoing.id]
-        let incomingAnalysis = analysisByTrackID[incoming.id]
-        if outgoingAnalysis == nil || incomingAnalysis == nil {
-            guard let timed = CrossfadeTransition.timedCrossfade(
-                outgoingDuration: outgoingDuration, incomingDuration: incoming.duration,
-                maxSeconds: SettingsManager.shared.effectiveCrossfadeMaxSeconds) else { return nil }
-            return ActiveTransition(duration: timed.duration, outPoint: timed.outPoint, inPoint: 0,
-                                    outgoingRate: 1, incomingRate: 1, rateReleaseSeconds: 0,
-                                    isBeatMatched: false)
-        }
-        switch TransitionPlanner.plan(outgoing: outgoingAnalysis, incoming: incomingAnalysis,
-                                      config: config).plan {
-        case .gapless:
-            return nil
-        case .crossfade(let duration, let outPoint, let inPoint):
-            return ActiveTransition(duration: duration, outPoint: outPoint, inPoint: inPoint,
-                                    outgoingRate: 1, incomingRate: 1, rateReleaseSeconds: 0,
-                                    isBeatMatched: false)
-        case .beatMatched(let plan):
-            return ActiveTransition(duration: plan.overlapDuration, outPoint: plan.outPoint,
-                                    inPoint: plan.inPoint, outgoingRate: plan.outgoingRate,
-                                    incomingRate: plan.incomingRate,
-                                    rateReleaseSeconds: plan.rampReleaseSeconds > 0 ? plan.rampReleaseSeconds : 3,
-                                    isBeatMatched: true)
-        }
-    }
-
-    /// Starts the overlap when the playhead reaches the plan's out point.
-    /// Called from the active deck's time observer, so at most once per 0.2 s
-    /// tick and only while playing.
-    private func maybeStartTransition(at seconds: TimeInterval) {
-        if let prepared = preparedNext, !stillHolds(prepared.candidate) {
-            discardPrepared()
-        }
-        guard SettingsManager.shared.effectiveIosCrossfadeEnabled, isPlaying, !transitionInProgress,
-              transitionTask == nil, sleepTimer.state != .endOfCurrentTrack,
-              let prepared = preparedNext, prepared.isReady,
-              let outgoingTrack = currentTrack,
-              let installed = installedItem, engine.currentItem === installed,
-              duration > 0,
-              let plan = planTransition(outgoing: outgoingTrack, incoming: prepared.track),
-              seconds >= plan.outPoint else { return }
-        // The observer ticks every 0.2 s, so the start is normally on time; a
-        // late start shortens a plain crossfade, and skips a beat-matched plan
-        // outright — its grids were aligned for the planned out point, not for now.
-        let elapsed = seconds - plan.outPoint
-        if plan.isBeatMatched, elapsed > 0.5 { return }
-        let remaining = plan.duration - elapsed
-        guard remaining >= 1 else { return }
-        let active = ActiveTransition(duration: remaining, outPoint: seconds, inPoint: plan.inPoint,
-                                      outgoingRate: plan.outgoingRate, incomingRate: plan.incomingRate,
-                                      rateReleaseSeconds: plan.rateReleaseSeconds,
-                                      isBeatMatched: plan.isBeatMatched)
-        beginTransition(active, prepared: prepared)
-    }
-
-    /// Swaps the decks at the overlap: the standby deck (already holding the
-    /// incoming track, paused at volume 0) starts playing while the outgoing
-    /// deck fades out under an equal-power ramp. Logical state (track, queue
-    /// pointers, metadata, scrobble) moves to the incoming track at the same
-    /// moment, so the lock screen, Control Center and Live Activity never see
-    /// a gap.
-    private func beginTransition(_ plan: ActiveTransition, prepared: PreparedNext) {
-        guard currentTrack != nil else { return }
-        // Any advance waiting on a preparation is superseded by this
-        // transition; its retry must not fire afterwards.
-        deferredAdvanceTrackID = nil
-        let outgoingDeck = engine
-        let incomingDeck = standbyEngine
-        let outgoingBaseVolume = outgoingDeck.volume
-        // The outgoing track is finished for scrobbling purposes — the
-        // listener heard it to the seam.
-        scrobbleIfNeeded(completed: true)
-        // Invalidate anything still resolving or preparing for the outgoing track.
-        resolveGeneration += 1
-        let generation = resolveGeneration
-        prepareEpoch += 1
-        // Resources: the incoming track's take the active slots; the outgoing
-        // track's retire with its deck and are released when the overlap ends.
-        retiringResourceLoader = audioResourceLoader
-        retiringCacheLease = audioCacheLease
-        retiringOfflineLease = offlinePlaybackLease
-        audioResourceLoader = prepared.resourceLoader
-        audioCacheLease = prepared.cacheLease
-        offlinePlaybackLease = prepared.offlineLease
-        // Logical swap.
-        consumeCandidateIfHeld(prepared.candidate)
-        preparedNext = nil
-        preparedItemStatusObservation?.invalidate()
-        preparedItemStatusObservation = nil
-        currentTrack = prepared.track
-        progress = plan.inPoint
-        duration = prepared.durationMS.map { TimeInterval($0) / 1000 } ?? prepared.track.duration
-        lyrics = nil
-        lyricsCursor.activeIndex = nil
-        scrobbled = false
-        startScrobbled = false
-        isTrial = prepared.isTrial
-        servedQuality = prepared.servedQuality
-        unblockSource = prepared.unblockSourceName
-        currentUnblockSourceID = prepared.unblockSourceID
-        consecutiveFailures = 0
-        itemRetryGeneration = nil
-        // Observations: the outgoing item's are retired with it; the incoming
-        // item gets a fresh status observation and end observer under the new
-        // generation.
-        itemStatusObservation?.invalidate()
-        itemStatusObservation = makeItemStatusObservation(
-            for: prepared.item, track: prepared.track, generation: generation,
-            sourceID: currentUnblockSourceID, remoteURL: nil, durationMS: prepared.durationMS)
-        if let old = endObserver { NotificationCenter.default.removeObserver(old) }
-        endObserver = makeEndObserver(for: prepared.item)
-        installedItem = prepared.item
-        // Loudness trim for the incoming track; the ramp below writes the
-        // volumes, so no direct write here.
-        currentLoudnessTrimDB = loudnessTrimDB(for: analysisByTrackID[prepared.track.id])
-        if prepared.assetURL.isFileURL {
-            analyzeForLoudnessIfNeeded(fileURL: prepared.assetURL, for: prepared.track)
-        }
-        // Deck swap.
-        activeDeckIsA.toggle()
-        if plan.incomingRate != 1.0 {
-            prepared.item.audioTimePitchAlgorithm = .spectral
-            incomingDeck.defaultRate = plan.incomingRate
-        }
-        if plan.outgoingRate != 1.0 {
-            outgoingDeck.rate = plan.outgoingRate
-        }
-        if plan.inPoint > 0.01 {
-            incomingDeck.seek(to: CMTime(seconds: plan.inPoint, preferredTimescale: 600),
-                              toleranceBefore: .zero, toleranceAfter: .zero) { _ in
-                Task { @MainActor [weak self] in
-                    guard let self, self.transitionInProgress else { return }
-                    self.engine.play()
-                }
-            }
-        } else {
-            incomingDeck.play()
-        }
-        scrobbleStartIfNeeded()
-        NowPlayingManager.shared.updateMetadata(for: prepared.track, duration: duration)
-        NowPlayingManager.shared.updateElapsed(progress, rate: 1)
-        persistState()
-        Task { await loadLyrics(for: prepared.track, generation: generation) }
-        transitionInProgress = true
-        // Equal-power ramp: the outgoing deck falls as cos, the incoming rises
-        // as sin, so the summed power stays flat across the seam. Targets are
-        // captured once — a volume change mid-ramp lands at the next track instead.
-        let incomingBaseVolume = effectiveVolume
-        transitionTask = Task { @MainActor [weak self] in
-            let steps = max(1, Int(plan.duration / 0.05))
-            for step in 1...steps {
-                guard let self else { return }
-                if Task.isCancelled { return }
-                let t = Double(step) / Double(steps)
-                let gains = CrossfadeTransition.equalPowerGains(at: t)
-                self.standbyEngine.volume = gains.outGain * outgoingBaseVolume
-                self.engine.volume = gains.inGain * incomingBaseVolume
-                try? await Task.sleep(for: .milliseconds(50))
-            }
-            guard let self else { return }
-            if Task.isCancelled { return }
-            self.finishTransition(incomingRate: plan.incomingRate,
-                                  rateReleaseSeconds: plan.rateReleaseSeconds)
-        }
-    }
-
-    /// Ends the overlap: the retiring deck is silenced, stopped and released,
-    /// the incoming deck takes full volume, and a beat-matched deck glides
-    /// back to unity rate.
-    private func finishTransition(incomingRate: Float, rateReleaseSeconds: TimeInterval) {
-        transitionTask = nil
-        transitionInProgress = false
-        let retiring = standbyEngine
-        retiring.pause()
-        retiring.volume = 0
-        retiring.replaceCurrentItem(with: nil)
-        releaseRetiringResources()
-        engine.volume = effectiveVolume
-        // The beat-matched seek plays on completion; if it is still pending
-        // (pathological stall), start the deck here so the track is not left silent.
-        if isPlaying, engine.timeControlStatus != .playing {
-            engine.play()
-        }
-        if incomingRate != 1.0, rateReleaseSeconds > 0 {
-            let startRate = incomingRate
-            let release = max(0.5, rateReleaseSeconds)
-            rateRestoreTask?.cancel()
-            rateRestoreTask = Task { @MainActor [weak self] in
-                let steps = max(1, Int(release / 0.05))
-                for step in 1...steps {
-                    guard let self else { return }
-                    if Task.isCancelled { return }
-                    let t = Float(step) / Float(steps)
-                    self.engine.rate = startRate + (1.0 - startRate) * t
-                    try? await Task.sleep(for: .milliseconds(50))
-                }
-                guard let self else { return }
-                if Task.isCancelled { return }
-                self.engine.rate = 1.0
-                self.engine.defaultRate = 1.0
-                self.rateRestoreTask = nil
-            }
-        } else {
-            engine.defaultRate = 1.0
-            engine.rate = 1.0
-        }
-        NowPlayingManager.shared.updateElapsed(progress, rate: isPlaying ? 1 : 0)
-        persistState()
-    }
-
-    /// Advances the queue pointers for a prepared candidate — but only if it
-    /// still holds. The callers of `startPlaying` (next / jump-to / FM
-    /// advance) already consumed it on their way in, so consuming twice
-    /// would eat the following track.
-    private func consumeCandidateIfHeld(_ candidate: PlaybackQueueCandidate) {
-        guard stillHolds(candidate) else { return }
-        switch candidate.origin {
-        case .inserted(let offset):
-            playNextList.removeSubrange(0...offset)
-        case .queue(let offset):
-            if !playNextList.isEmpty { playNextList.removeAll() }
-            currentIndex = offset
-        case .fm(let index):
-            fmUpcoming.removeSubrange(0...index)
         }
     }
 
@@ -1639,70 +983,6 @@ final class PlayerService: ObservableObject {
 
     private func startPlaying(_ track: Track,
                               localLease: OfflinePlaybackLease? = nil, resumeAt: TimeInterval = 0) {
-        settleDeckBeforeTakeover()
-        // iOS crossfade: a manual advance onto the prepared track crossfades
-        // immediately instead of re-resolving it. The active deck must still
-        // be playing the current track — after a natural end the deck has
-        // stopped, so that case falls through to the hard cut below.
-        if SettingsManager.shared.effectiveIosCrossfadeEnabled, isPlaying, !transitionInProgress,
-           let prepared = preparedNext, prepared.track.id == track.id, prepared.isReady,
-           sleepTimer.state != .endOfCurrentTrack, repeatMode != .one,
-           engine.timeControlStatus == .playing,
-           let installed = installedItem, engine.currentItem === installed,
-           stillHolds(prepared.candidate),
-           let plan = planTransition(outgoing: currentTrack ?? track, incoming: track) {
-            let remaining = max(0, duration - livePlaybackTime)
-            let overlap = min(plan.duration, remaining)
-            if overlap >= 1 {
-                currentWasAdvanced = pendingAutoAdvance
-                pendingAutoAdvance = false
-                beginTransition(
-                    ActiveTransition(duration: overlap, outPoint: livePlaybackTime,
-                                     inPoint: plan.inPoint, outgoingRate: plan.outgoingRate,
-                                     incomingRate: plan.incomingRate,
-                                     rateReleaseSeconds: plan.rateReleaseSeconds,
-                                     isBeatMatched: plan.isBeatMatched),
-                    prepared: prepared)
-                return
-            }
-        }
-        // One exception, checked before discarding anything: a preparation
-        // for exactly this track is already in flight (the user tapped
-        // next while the preload was still resolving). Discarding it and
-        // re-resolving from scratch is what makes rapid skipping feel laggy,
-        // so wait for it instead — the old track keeps playing meanwhile, so
-        // the wait is silent, not a gap. After ~6s the wait gives up and the
-        // normal hard cut runs, so a tap is never left unanswered.
-        if let candidate = preparingCandidate,
-           candidate.track.id == track.id,
-           prepareTask != nil,
-           stillHolds(candidate) {
-            deferredAdvanceTrackID = track.id
-            let wasPlaying = isPlaying
-            Task { @MainActor [weak self] in
-                guard let self else { return }
-                let deadline = Date().addingTimeInterval(6)
-                while Date() < deadline {
-                    if self.prepareTask == nil,
-                       self.preparedNext?.track.id != track.id || self.preparedNext?.isReady == true {
-                        break
-                    }
-                    try? await Task.sleep(for: .milliseconds(100))
-                }
-                // Only retry when nothing changed meanwhile: a pause/resume
-                // or a newer advance supersedes the wait.
-                guard self.isPlaying == wasPlaying, self.deferredAdvanceTrackID == track.id else { return }
-                self.deferredAdvanceTrackID = nil
-                self.startPlaying(track, localLease: localLease, resumeAt: resumeAt)
-            }
-            return
-        }
-        deferredAdvanceTrackID = nil
-        // The prepared item (if any) is for another track now, and the item
-        // on the deck belongs to the previous track: both stop being valid here.
-        discardPrepared()
-        prepareEpoch += 1
-        installedItem = nil
         offlineScan?.cancel()
         offlineScan = nil
         offlineScanID = UUID()
@@ -1910,7 +1190,6 @@ final class PlayerService: ObservableObject {
     }
 
     private func handleUnplayable(_ track: Track) {
-        settleDeckBeforeTakeover()
         consecutiveFailures += 1
         let playability = track.playability(privilege: nil,
                                             isLoggedIn: AccountStore.shared.isLoggedIn,
@@ -1967,7 +1246,7 @@ final class PlayerService: ObservableObject {
         let remote = CDNHost.preferred(for: url)
 
         var asset = AVURLAsset(url: remote)
-        // Beans pattern (see `prepareLoadedURL`): a QQ/Kugou stream
+        // Beans pattern: a QQ/Kugou stream
         // needs the platform login headers on the asset or the host
         // 403s. `loadResolvedURL` takes no source parameter; the caller
         // (`resolveAndLoadUnblocked`) records it in
@@ -1976,7 +1255,7 @@ final class PlayerService: ObservableObject {
         // below, whose own session downloads the bytes.
         let headers = Self.playbackHeaders(for: currentUnblockSourceID)
         if let headers {
-            // Same literal-string key as in prepareLoadedURL: the
+            // Same literal-string key: the
             // AVURLAssetHTTPHeaderFieldsKey constant is not exposed to
             // Swift by the iOS SDK (CI run #85).
             asset = AVURLAsset(url: remote, options: ["AVURLAssetHTTPHeaderFieldsKey": headers])
@@ -2119,7 +1398,6 @@ final class PlayerService: ObservableObject {
         audioCacheLease = cacheLease
         offlinePlaybackLease = offlineLease
         engine.replaceCurrentItem(with: item)
-        installedItem = item
         // Loudness (Folia P8, iOS): retune the per-track volume trim from
         // any in-session analysis, and analyze this file in the background
         // when it is a full local copy — a streamed asset has no file to
@@ -2158,7 +1436,6 @@ final class PlayerService: ObservableObject {
         generation: Int,
         sourceID: AudioSourceID
     ) {
-        settleDeckBeforeTakeover()
         guard generation == resolveGeneration,
               currentTrack?.id == track.id,
               currentUnblockSourceID == sourceID
@@ -2212,7 +1489,6 @@ final class PlayerService: ObservableObject {
         durationMS: Int?,
         error: Error?
     ) {
-        settleDeckBeforeTakeover()
         guard generation == resolveGeneration,
               currentTrack?.id == track.id,
               currentUnblockSourceID == nil
@@ -2410,7 +1686,6 @@ final class PlayerService: ObservableObject {
     /// The stream died for lack of network. A download of the same song picks
     /// up where it stopped; otherwise the song is reported or skipped.
     private func handleConnectivityItemFailure(track: Track, generation: Int) {
-        settleDeckBeforeTakeover()
         guard generation == resolveGeneration, currentTrack?.id == track.id else { return }
         let position = max(progress, livePlaybackTime)
         resolveGeneration += 1
@@ -2436,7 +1711,6 @@ final class PlayerService: ObservableObject {
     }
 
     private func unavailableOffline(_ track: Track, generation: Int, autoAdvance: Bool? = nil) {
-        settleDeckBeforeTakeover()
         guard generation == resolveGeneration else { return }
         if autoAdvance ?? currentWasAdvanced {
             advanceOffline(initialSkipped: 1, excludingFailedCurrent: true)
@@ -2457,7 +1731,6 @@ final class PlayerService: ObservableObject {
 
     /// Walks the upcoming list for the first song that is on this device.
     private func advanceOffline(initialSkipped: Int = 0, excludingFailedCurrent: Bool = false) {
-        settleDeckBeforeTakeover()
         offlineScan?.cancel()
         let requestID = UUID()
         offlineScanID = requestID
@@ -2527,8 +1800,6 @@ final class PlayerService: ObservableObject {
     func activateAccount(scope: String?) {
         guard offlineActivatedScope != scope else { return }
         offlineActivatedScope = scope
-        settleDeckBeforeTakeover()
-        discardPrepared()
         offlineScan?.cancel()
         offlineScan = nil
         offlineScanID = UUID()
@@ -2679,8 +1950,6 @@ final class PlayerService: ObservableObject {
     func checkpointPlayback() { persistState() }
 
     func suspendForAccountChange() {
-        settleDeckBeforeTakeover()
-        discardPrepared()
         resolveGeneration += 1
         scrobbled = true
         pause()
@@ -2796,46 +2065,5 @@ enum PlaybackEntry {
     /// page alone.
     static func shouldOpenNowPlaying(for entryView: PlaybackEntryView) -> Bool {
         entryView == .nowPlaying
-    }
-}
-
-/// iOS crossfade (Folia P2/P3): the pure math behind the dual-deck overlap —
-/// the equal-power ramp, the timed plan used when no analysis exists, and the
-/// user-settings → planner-config mapping (mirroring macOS
-/// `PlayerService.transitionPlannerConfig`).
-enum CrossfadeTransition {
-    /// Equal-power crossfade gains at `t` (0 = outgoing only, 1 = incoming
-    /// only): out falls as cos, in rises as sin, so out² + in² stays 1 and
-    /// the summed power is flat across the seam. `t` is clamped to 0...1.
-    static func equalPowerGains(at t: Double) -> (outGain: Float, inGain: Float) {
-        let t = min(1, max(0, t))
-        return (Float(cos(t * .pi / 2)), Float(sin(t * .pi / 2)))
-    }
-
-    /// A plain timed crossfade with no analysis: the overlap is the user's
-    /// maximum, capped at a quarter of the shorter track, and the hand-over
-    /// starts that far before the outgoing track ends. Returns nil when the
-    /// overlap would be under the planner's 2 s minimum — the pair is too
-    /// short to blend, so the cut stays a hard cut.
-    static func timedCrossfade(outgoingDuration: TimeInterval, incomingDuration: TimeInterval,
-                               maxSeconds: Double) -> (duration: TimeInterval, outPoint: TimeInterval, inPoint: TimeInterval)? {
-        let overlap = min(maxSeconds, 0.25 * min(outgoingDuration, incomingDuration))
-        guard overlap >= 2 else { return nil }
-        return (duration: overlap, outPoint: outgoingDuration - overlap, inPoint: 0)
-    }
-
-    /// Maps the user's transition settings onto the planner config fields
-    /// they own: the hand-over mode, and — in crossfade mode only — the
-    /// overlap ceiling. `.automix` leaves the config exactly as `base` (the
-    /// shipped planner).
-    static func plannerConfig(mode: TransitionMode, crossfadeMaxSeconds: Double,
-                              base: TransitionPlanner.Config = .standard) -> TransitionPlanner.Config {
-        var config = base
-        config.handoverMode = mode == .crossfade ? .crossfade : .automix
-        if mode == .crossfade {
-            config.maxOverlap = min(crossfadeMaxSeconds,
-                                    TransitionPlanner.Config.standard.maxOverlap)
-        }
-        return config
     }
 }
