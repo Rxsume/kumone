@@ -9,6 +9,8 @@ struct SettingsView: View {
     @Environment(\.openDestination) private var openDestination
     @Environment(\.dismiss) private var dismiss
     @State private var loginProvider: ProviderLogin?
+    @State private var showCustomSources = false
+    @ObservedObject private var customSources = CustomAudioSourceStore.shared
     @State private var accountsVersion = 0
     // Beans-based QQ/Kugou logins: @Published isLoggedIn/nickname drive
     // these rows, so logout in LoginSheet refreshes them with no bump.
@@ -150,6 +152,23 @@ struct SettingsView: View {
                                 }
                             }
                         ))
+                    }
+                    Button {
+                        showCustomSources = true
+                    } label: {
+                        HStack {
+                            Text("自定义音源")
+                            Spacer()
+                            Text("\(customSources.sources.count) 个")
+                                .foregroundStyle(.secondary)
+                            Image(systemName: "chevron.right")
+                                .font(.caption)
+                                .foregroundStyle(.tertiary)
+                        }
+                    }
+                    .buttonStyle(.plain)
+                    .sheet(isPresented: $showCustomSources) {
+                        CustomAudioSourcesView()
                     }
                 } header: {
                     Text("音源")
