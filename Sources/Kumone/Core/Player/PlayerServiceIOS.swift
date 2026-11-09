@@ -332,12 +332,10 @@ final class PlayerService: ObservableObject {
             .flatMap(RepeatMode.init) ?? .off
 
         #if os(iOS)
-        do {
-            try AVAudioSession.sharedInstance().setCategory(.playback, mode: .default, policy: .longFormAudio, options: [])
-            try AVAudioSession.sharedInstance().setActive(true)
-        } catch {
-            print("Failed to activate audio session: \(error)")
-        }
+        // Category (incl. the mix-with-others option) lives in
+        // `PlaybackEngine.applyAudioSessionCategory` so the engine
+        // start and the settings toggle share one call site.
+        PlaybackEngine.applyAudioSessionCategory()
 
         // Resume after interruptions (phone calls, WeChat voice messages, …).
         NotificationCenter.default.addObserver(
@@ -396,7 +394,16 @@ final class PlayerService: ObservableObject {
         if SettingsManager.shared.enableAudioCache {
             Task { try? await AudioCache.shared.enforce(maximumSizeMB: await SettingsManager.shared.effectiveAudioCacheSizeMB()) }
         }
-        restoreState()
+        let restoredSession = restoreState()
+        // Beans `playbackSection`: resume the last unfinished song on
+        // launch. `restoreState` already applied the session (queue +
+        // current track + saved progress); `resume` re-validates access
+        // and starts playback from the saved position. A stale session
+        // or a different account just skips the resume — never an error
+        // at launch.
+        if SettingsManager.shared.autoResumeLastPlayback, let session = restoredSession {
+            try? resume(session)
+        }
     }
 
     /// Set while the user drags the seek bar so the time observer doesn't fight the thumb.
@@ -1176,7 +1183,9 @@ final class PlayerService: ObservableObject {
         )
         guard case .loaded = loadResult else { return false }
 
-        ToastCenter.shared.show(String(localized: "已使用第三方音源：\(unblocked.displayName)"))
+        if SettingsManager.shared.showThirdPartySourceNotice {
+            ToastCenter.shared.show(String(localized: "已使用第三方音源：\(unblocked.displayName)"))
+        }
         return true
     }
 
@@ -1930,10 +1939,15 @@ final class PlayerService: ObservableObject {
         PlaybackStateStorage.save(state, to: Self.stateFileURL)
     }
 
-    private func restoreState() {
+    /// Restores the persisted queue + current track (+ saved progress).
+    /// Returns the restored session so the caller can auto-resume from
+    /// it (Beans `playbackSection`: 启动时自动播放上次歌曲); nil when
+    /// there is no session to resume (no state file, or legacy-only).
+    @discardableResult
+    private func restoreState() -> PlaybackSession? {
         guard let data = try? Data(contentsOf: Self.stateFileURL),
               let state = try? JSONDecoder().decode(PlaybackState.self, from: data)
-        else { return }
+        else { return nil }
         // Recents outlive the queue: restore them before bailing out on an
         // empty queue, or the next played track persists an empty list over
         // them and the Dock menu loses its history for good.
@@ -1943,10 +1957,13 @@ final class PlayerService: ObservableObject {
                 try session.validate()
                 applyPlaybackSession(session)
                 NowPlayingManager.shared.updateMetadata(for: session.currentTrack, duration: duration)
-            } catch { ToastCenter.shared.show(error.localizedDescription) }
-            return
+                return session
+            } catch {
+                ToastCenter.shared.show(error.localizedDescription)
+                return nil
+            }
         }
-        guard let legacy = state.legacy, !legacy.queue.isEmpty else { return }
+        guard let legacy = state.legacy, !legacy.queue.isEmpty else { return nil }
         queue = legacy.queue
         shuffleEnabled = legacy.shuffle
         if shuffleEnabled {
@@ -1962,6 +1979,7 @@ final class PlayerService: ObservableObject {
                 await loadLyrics(for: activeQueue[idx], generation: resolveGeneration)
             }
         }
+        return nil
     }
 
     private static var stateFileURL: URL {

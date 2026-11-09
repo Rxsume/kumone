@@ -268,23 +268,13 @@ private struct SourceEditorSheet: View {
     let onSave: (CustomAudioSource) -> Void
     @Environment(\.dismiss) private var dismiss
 
-    private static let qualityOptions: [(value: String, label: String)] = [
-        ("128k", "128k"),
-        ("192k", "192k"),
-        ("320k", "320k"),
-        ("flac", "FLAC"),
-        ("flac24bit", "FLAC 24-bit"),
-        ("hires", "Hi-Res"),
-        ("master", "Master"),
-    ]
-
     init(source: CustomAudioSource, onSave: @escaping (CustomAudioSource) -> Void) {
         _draft = State(initialValue: source)
         self.onSave = onSave
     }
 
     private var qualityOptions: [(value: String, label: String)] {
-        var options = Self.qualityOptions
+        var options = CustomAudioSource.qualityOptions
         if !options.contains(where: { $0.value == draft.quality }) {
             options.insert((draft.quality, draft.quality), at: 0)
         }

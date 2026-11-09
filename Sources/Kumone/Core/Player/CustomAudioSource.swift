@@ -23,6 +23,20 @@ struct CustomAudioSource: Identifiable, Codable, Hashable, Sendable {
     var script: String?
     var enabled: Bool = true
 
+    /// Quality options offered for a custom source, shared by the
+    /// per-source editor and the global third-party quality picker in
+    /// Settings (Beans `ThirdPartyAudioQuality`, adapted: Golia's list
+    /// also offers 192k, which the editor already had).
+    static let qualityOptions: [(value: String, label: String)] = [
+        ("128k", "128k"),
+        ("192k", "192k"),
+        ("320k", "320k"),
+        ("flac", "FLAC"),
+        ("flac24bit", "FLAC 24-bit"),
+        ("hires", "Hi-Res"),
+        ("master", "Master"),
+    ]
+
     enum CodingKeys: String, CodingKey {
         case id, name, kind, template, urlPath, headers, quality, script, enabled
     }

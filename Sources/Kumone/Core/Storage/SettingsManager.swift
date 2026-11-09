@@ -503,6 +503,10 @@ final class SettingsManager: ObservableObject {
         static let playbackFadeEnabled = "settings.playbackFadeEnabled"
         static let queueAddBehavior = "settings.queueAddBehavior"
         static let autoSkipUnplayable = "settings.autoSkipUnplayable"
+        // Beans `playbackSection` (P3 2/3).
+        static let mixWithOtherAudio = "settings.mixWithOtherAudio"
+        static let autoResumeLastPlayback = "settings.autoResumeLastPlayback"
+        static let showThirdPartySourceNotice = "settings.showThirdPartySourceNotice"
         static let playbackEntryView = "settings.playbackEntryView"
         static let playerPageTintIntensity = "settings.playerPageTintIntensity"
         static let hidePlayerProgressBar = "settings.hidePlayerProgressBar"
@@ -1189,6 +1193,24 @@ final class SettingsManager: ObservableObject {
     /// track just failed instead of skipping to the next one.
     var effectiveAutoSkipUnplayable: Bool {
         foliaEnabled ? autoSkipUnplayable : false
+    }
+
+    /// Beans `playbackSection` (P3 2/3): play alongside other apps'
+    /// audio instead of silencing them. Not Folia-gated.
+    @Published var mixWithOtherAudio: Bool {
+        didSet { UserDefaults.standard.set(mixWithOtherAudio, forKey: Keys.mixWithOtherAudio) }
+    }
+
+    /// Beans `playbackSection` (P3 2/3): resume the last unfinished
+    /// song on launch. Not Folia-gated.
+    @Published var autoResumeLastPlayback: Bool {
+        didSet { UserDefaults.standard.set(autoResumeLastPlayback, forKey: Keys.autoResumeLastPlayback) }
+    }
+
+    /// Beans `playbackSection` (P3 2/3): toast when a third-party
+    /// source plays a VIP song. Not Folia-gated.
+    @Published var showThirdPartySourceNotice: Bool {
+        didSet { UserDefaults.standard.set(showThirdPartySourceNotice, forKey: Keys.showThirdPartySourceNotice) }
     }
 
     /// Which view opens when playback starts from a list.
@@ -2510,6 +2532,10 @@ final class SettingsManager: ObservableObject {
         queueAddBehavior = defaults.string(forKey: Keys.queueAddBehavior)
             .flatMap(QueueAddBehavior.init) ?? .next
         autoSkipUnplayable = defaults.object(forKey: Keys.autoSkipUnplayable) as? Bool ?? true
+        // Beans `playbackSection` (P3 2/3).
+        mixWithOtherAudio = defaults.object(forKey: Keys.mixWithOtherAudio) as? Bool ?? false
+        autoResumeLastPlayback = defaults.object(forKey: Keys.autoResumeLastPlayback) as? Bool ?? false
+        showThirdPartySourceNotice = defaults.object(forKey: Keys.showThirdPartySourceNotice) as? Bool ?? true
         playbackEntryView = defaults.string(forKey: Keys.playbackEntryView)
             .flatMap(PlaybackEntryView.init) ?? .nowPlaying
         let storedTintIntensity = defaults.object(forKey: Keys.playerPageTintIntensity) as? Double ?? 1

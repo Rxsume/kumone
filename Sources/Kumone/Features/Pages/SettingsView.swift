@@ -13,6 +13,7 @@ struct SettingsView: View {
     // Beans 主题/平台组的可展开状态（默认收起，与 Beans 一致）。
     @State private var themeExpanded = false
     @State private var platformExpanded = false
+    @State private var playbackExpanded = false
     @ObservedObject private var customSources = CustomAudioSourceStore.shared
     #if os(macOS)
     @AppStorage(SettingsManager.Keys.menuBarPlayer) private var showMenuBarPlayer = false
@@ -143,73 +144,68 @@ struct SettingsView: View {
                 }
             }
 
-            Section("播放") {
-                Picker("音质", selection: $settings.audioQuality) {
-                    ForEach(AudioQuality.allCases) { quality in
-                        Text(quality.displayName).tag(quality)
+            // Beans 播放设置组（`ProfileView.playbackSection`，可展开；
+            // 默认收起，与 Beans 一致）。行的取舍：播放音质 pill 选择
+            // 器（写 `settings.audioQuality`，与 Beans 的五档一一对应）、
+            // 第三方音源音质 pill 选择器（写进各自定义音源的 quality，
+            // 解析仍读各源自己的 quality）、自定义音源管理行（Golia
+            // 的 `CustomAudioSourcesView`，不换 Beans 的
+            // `ThirdPartySourceManagerSheet`），及三项新开关（与其他音
+            // 频同时播放、启动续播、第三方会员歌提醒）。未搬：120Hz 高
+            // 刷新（Beans 里强制开启、无 Golia 等价物）、触感反馈
+            // （Golia 无触感基建，加开关会是死开关）。被取代的 Golia
+            // 旧行（音质 Picker、灰色歌曲解锁、淡入淡出、加歌默认行
+            // 为、自动跳过、防息屏、ReplayGain、音源开关、AutoMix）随
+            // 旧节删除——key 仍在 SettingsManager 里，引擎继续按已存
+            // 值工作，平台切换器仍自动开对应音源。
+            Section {
+                Button {
+                    withAnimation(.easeInOut(duration: 0.22)) {
+                        playbackExpanded.toggle()
                     }
+                } label: {
+                    HStack(spacing: 12) {
+                        Image(systemName: "play.circle.fill")
+                            .font(.system(size: 14))
+                            .foregroundStyle(Theme.accent)
+                            .frame(width: 28)
+                        Text("播放设置")
+                        Spacer()
+                        Image(systemName: playbackExpanded ? "chevron.up" : "chevron.down")
+                            .font(.system(size: 11, weight: .semibold))
+                            .foregroundStyle(.secondary)
+                    }
+                    .padding(.vertical, 6)
+                    .contentShape(Rectangle())
                 }
-                Text("无损与 Hi-Res 需要黑胶 VIP，未开通时自动回落到可用音质")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                Toggle("灰色歌曲解锁", isOn: $settings.enableUnblock)
-                Text("无版权或下架歌曲将从已启用音源中匹配播放")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                Group {
-                    // D7: these playback behaviours only exist in the iOS
-                    // player engine (PlayerServiceIOS); on macOS the rows
-                    // would be dead switches.
+                .buttonStyle(.plain)
+                if playbackExpanded {
                     #if os(iOS)
-                    Toggle("暂停/播放淡入淡出", isOn: $settings.playbackFadeEnabled)
-                    Text("暂停与恢复播放时音量短暂淡入淡出，避免声音突变")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                    Picker("加歌默认行为", selection: $settings.queueAddBehavior) {
-                        ForEach(QueueAddBehavior.allCases) { behavior in
-                            Text(behavior.displayName).tag(behavior)
+                    Toggle("与其他音频同时播放", isOn: $settings.mixWithOtherAudio)
+                        .onChange(of: settings.mixWithOtherAudio) { _ in
+                            PlaybackEngine.applyAudioSessionCategory()
                         }
-                    }
-                    Toggle("无法播放自动跳过", isOn: $settings.autoSkipUnplayable)
-                    Text("无法播放的歌曲自动跳到下一首")
+                    Text("播放时允许其他 App 的音频继续播放")
                         .font(.caption)
                         .foregroundStyle(.secondary)
                     #endif
-                    #if os(iOS)
-                    Toggle("播放时防息屏", isOn: $settings.preventDisplaySleepDuringPlayback)
-                    Text("播放期间屏幕不自动息屏，暂停或切到后台后恢复")
+                    Toggle("启动时自动播放上次歌曲", isOn: $settings.autoResumeLastPlayback)
+                    Text("打开软件后自动恢复上次未播放完的歌曲")
                         .font(.caption)
                         .foregroundStyle(.secondary)
-                    #endif
-                    Picker("响度平衡（ReplayGain）", selection: $settings.replayGainMode) {
-                        ForEach(ReplayGainMode.allCases) { mode in
-                            Text(mode.displayName).tag(mode)
-                        }
-                    }
-                    Text("按单曲或专辑统一播放响度；iOS 上只对已缓存分析过的歌曲生效")
+                    QualityPillPicker(
+                        title: "播放音质",
+                        hint: "按列表选择，无法使用时会由平台自动降级。",
+                        options: AudioQuality.allCases.map { (value: $0.rawValue, label: $0.displayName) },
+                        selection: Binding(
+                            get: { settings.audioQuality.rawValue },
+                            set: { settings.audioQuality = AudioQuality(rawValue: $0) ?? .exhigh }
+                        )
+                    )
+                    Toggle("第三方播放会员歌提醒", isOn: $settings.showThirdPartySourceNotice)
+                    Text("第三方音源播出会员歌曲时弹出提醒")
                         .font(.caption)
                         .foregroundStyle(.secondary)
-                }.disabled(!settings.foliaEnabled)
-            }
-            #if os(macOS)
-
-            AutoMixSettingsSection()
-            #endif
-
-            if settings.enableUnblock {
-                Section {
-                    ForEach(AudioSourceID.displayOrder, id: \.self) { source in
-                        Toggle(source.displayName, isOn: Binding(
-                            get: { settings.enabledAudioSourceIDs.contains(source) },
-                            set: { isEnabled in
-                                if isEnabled {
-                                    settings.enabledAudioSourceIDs.insert(source)
-                                } else {
-                                    settings.enabledAudioSourceIDs.remove(source)
-                                }
-                            }
-                        ))
-                    }
                     Button {
                         showCustomSources = true
                     } label: {
@@ -227,8 +223,18 @@ struct SettingsView: View {
                     .sheet(isPresented: $showCustomSources) {
                         CustomAudioSourcesView()
                     }
-                } header: {
-                    Text("音源")
+                    QualityPillPicker(
+                        title: "第三方音源音质",
+                        hint: "会优先按所选音质解析第三方音源，不可用时会自动降级；写入全部已导入音源。",
+                        options: CustomAudioSource.qualityOptions,
+                        selection: thirdPartyQualitySelection
+                    )
+                    .disabled(customSources.sources.isEmpty)
+                    if customSources.sources.isEmpty {
+                        Text("导入自定义音源后可用")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
                 }
             }
 
@@ -627,6 +633,19 @@ struct SettingsView: View {
         account.profile?.nickname ?? "未登录"
     }
 
+    /// The global third-party quality picker: the first imported
+    /// source's quality (the common one when all agree), "320k" when
+    /// nothing is imported. Writing sets all sources' quality
+    /// (`CustomAudioSourceStore.updateQualityForAll`); resolve keeps
+    /// reading each source's own `quality`, so the per-source editor
+    /// can still override afterwards.
+    private var thirdPartyQualitySelection: Binding<String> {
+        Binding(
+            get: { customSources.sources.first?.quality ?? "320k" },
+            set: { customSources.updateQualityForAll($0) }
+        )
+    }
+
     private var appVersion: String {
         Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "dev"
     }
@@ -648,6 +667,53 @@ struct SettingsView: View {
         return "Golia, version \(appVersion)"
     }
 
+}
+
+/// Horizontal pill picker for a quality setting (Beans
+/// `playbackQualitySection` / `ThirdPartyAudioQuality`, adapted to
+/// Golia's `Theme`).
+private struct QualityPillPicker: View {
+    let title: String
+    let hint: String
+    let options: [(value: String, label: String)]
+    @Binding var selection: String
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text(title)
+                .font(.subheadline)
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: 8) {
+                    ForEach(options, id: \.value) { option in
+                        Button {
+                            selection = option.value
+                        } label: {
+                            HStack(spacing: 4) {
+                                if selection == option.value {
+                                    Image(systemName: "checkmark")
+                                        .font(.system(size: 10, weight: .bold))
+                                }
+                                Text(option.label)
+                                    .font(.subheadline)
+                            }
+                            .padding(.horizontal, 12)
+                            .padding(.vertical, 6)
+                            .background(
+                                Capsule()
+                                    .fill(selection == option.value ? Theme.accent.opacity(0.15) : Color.secondary.opacity(0.12))
+                            )
+                            .foregroundStyle(selection == option.value ? Theme.accent : .primary)
+                        }
+                        .buttonStyle(.plain)
+                    }
+                }
+            }
+            Text(hint)
+                .font(.caption)
+                .foregroundStyle(.secondary)
+        }
+        .padding(.vertical, 4)
+    }
 }
 
 #if os(macOS)
