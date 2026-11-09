@@ -152,8 +152,8 @@ struct QQMusicSongURLResult: Hashable, Sendable {
 /// Skipped from Beans on purpose: comments, recommend songs, the
 /// y.qq.com hot-playlists HTML scrape (SSR parsing breaks on every
 /// redesign — the home feed uses the clean musicu
-/// `RecommendPlaylist.GetRecommendPlaylist` instead), lyric (lyrics
-/// are PR #23's `QQLyricProvider` — untouched), playlist create/delete
+/// `RecommendPlaylist.GetRecommendPlaylist` instead), lyric (lyrics are
+/// NetEase-only after the Folia multi-source rollback), playlist create/delete
 /// and playlist-song browsing beyond what `favoriteSongs` and the home
 /// feed need.
 ///

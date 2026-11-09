@@ -24,10 +24,6 @@ struct FoliaMasterSwitchTests {
     private struct Snapshot {
         var foliaEnabled: Bool
         var lyricAnimationStyle: LyricAnimationStyle
-        var themePresetID: String
-        var customThemeJSON: String
-        var preferCustomTheme: Bool
-        var songThemeAutoSwitch: Bool
         var homeDynamicBackground: Bool
         var playerPageNativeBlur: Bool
         var staticMode: Bool
@@ -54,7 +50,6 @@ struct FoliaMasterSwitchTests {
         // fields in the argument list (`#if` cannot split a call's
         // arguments) and assign them right after instead.
         var preventDisplaySleepDuringPlayback: Bool = false
-        var iosCrossfadeEnabled: Bool = false
         #endif
 
         static func take() -> Snapshot {
@@ -62,10 +57,6 @@ struct FoliaMasterSwitchTests {
             var snap = Snapshot(
                 foliaEnabled: s.foliaEnabled,
                 lyricAnimationStyle: s.lyricAnimationStyle,
-                themePresetID: s.themePresetID,
-                customThemeJSON: s.customThemeJSON,
-                preferCustomTheme: s.preferCustomTheme,
-                songThemeAutoSwitch: s.songThemeAutoSwitch,
                 homeDynamicBackground: s.homeDynamicBackground,
                 playerPageNativeBlur: s.playerPageNativeBlur,
                 staticMode: s.staticMode,
@@ -90,7 +81,6 @@ struct FoliaMasterSwitchTests {
             )
             #if os(iOS)
             snap.preventDisplaySleepDuringPlayback = s.preventDisplaySleepDuringPlayback
-            snap.iosCrossfadeEnabled = s.iosCrossfadeEnabled
             #endif
             return snap
         }
@@ -99,10 +89,6 @@ struct FoliaMasterSwitchTests {
             let s = SettingsManager.shared
             s.foliaEnabled = foliaEnabled
             s.lyricAnimationStyle = lyricAnimationStyle
-            s.themePresetID = themePresetID
-            s.customThemeJSON = customThemeJSON
-            s.preferCustomTheme = preferCustomTheme
-            s.songThemeAutoSwitch = songThemeAutoSwitch
             s.homeDynamicBackground = homeDynamicBackground
             s.playerPageNativeBlur = playerPageNativeBlur
             s.staticMode = staticMode
@@ -126,7 +112,6 @@ struct FoliaMasterSwitchTests {
             s.replayGainMode = replayGainMode
             #if os(iOS)
             s.preventDisplaySleepDuringPlayback = preventDisplaySleepDuringPlayback
-            s.iosCrossfadeEnabled = iosCrossfadeEnabled
             #endif
         }
     }
@@ -139,15 +124,6 @@ struct FoliaMasterSwitchTests {
     private func applyStoredValues(provingOff: Bool) {
         let s = SettingsManager.shared
         s.lyricAnimationStyle = .karaokeZoom
-        s.themePresetID = "ocean"
-        let custom = ThemePreset(
-            id: "custom",
-            accent: ThemeColor(red: 1, green: 0, blue: 0),
-            tint: ThemeColor(red: 0, green: 0, blue: 1)
-        )
-        s.customThemeJSON = custom.encodeToJSON() ?? ""
-        s.preferCustomTheme = true
-        s.songThemeAutoSwitch = false
         s.homeDynamicBackground = false
         s.playerPageNativeBlur = false
         s.staticMode = true
@@ -168,7 +144,6 @@ struct FoliaMasterSwitchTests {
         s.replayGainMode = .track
         #if os(iOS)
         s.preventDisplaySleepDuringPlayback = provingOff ? true : false
-        s.iosCrossfadeEnabled = true
         #endif
     }
 
@@ -185,10 +160,6 @@ struct FoliaMasterSwitchTests {
         s.foliaEnabled = true
 
         #expect(s.effectiveLyricAnimationStyle == .karaokeZoom)
-        #expect(s.effectiveThemePresetID == "ocean")
-        #expect(!s.effectiveCustomThemeJSON.isEmpty)
-        #expect(s.effectivePreferCustomTheme == true)
-        #expect(s.effectiveSongThemeAutoSwitch == false)
         #expect(s.effectiveHomeDynamicBackground == false)
         #expect(s.effectivePlayerPageNativeBlur == false)
         #expect(s.effectiveStaticMode == true)
@@ -212,7 +183,6 @@ struct FoliaMasterSwitchTests {
         #expect(s.effectiveReplayGainMode == .track)
         #if os(iOS)
         #expect(s.effectivePreventDisplaySleepDuringPlayback == false)
-        #expect(s.effectiveIosCrossfadeEnabled == true)
         #endif
     }
 
@@ -232,10 +202,6 @@ struct FoliaMasterSwitchTests {
         s.foliaEnabled = false
 
         #expect(s.effectiveLyricAnimationStyle == .fade)
-        #expect(s.effectiveThemePresetID == "default")
-        #expect(s.effectiveCustomThemeJSON == "")
-        #expect(s.effectivePreferCustomTheme == false)
-        #expect(s.effectiveSongThemeAutoSwitch == true)
         #expect(s.effectiveHomeDynamicBackground == true)
         #expect(s.effectivePlayerPageNativeBlur == true)
         #expect(s.effectiveStaticMode == false)
@@ -259,39 +225,9 @@ struct FoliaMasterSwitchTests {
         #if os(iOS)
         #expect(s.effectiveReplayGainMode == .off)
         #expect(s.effectivePreventDisplaySleepDuringPlayback == false)
-        #expect(s.effectiveIosCrossfadeEnabled == false)
         #else
         #expect(s.effectiveReplayGainMode == .auto)
         #endif
-    }
-
-    // MARK: - Master switch drives the theme path end to end
-
-    @Test func resolvedThemeFollowsMasterSwitch() {
-        let saved = Snapshot.take()
-        defer { saved.restore() }
-        let s = SettingsManager.shared
-        let custom = ThemePreset(
-            id: "custom",
-            accent: ThemeColor(red: 1, green: 0, blue: 0),
-            tint: ThemeColor(red: 0, green: 0, blue: 1)
-        )
-        s.customThemeJSON = custom.encodeToJSON() ?? ""
-        s.preferCustomTheme = true
-        s.themePresetID = "ocean"
-        s.songThemeAutoSwitch = false
-
-        s.foliaEnabled = true
-        #expect(ThemePreset.resolvedTheme(settings: s, palette: nil).source == .custom)
-        s.foliaEnabled = false
-        #expect(ThemePreset.resolvedTheme(settings: s, palette: nil).source == .preset("default"))
-
-        s.preferCustomTheme = false
-        s.customThemeJSON = ""
-        s.foliaEnabled = true
-        #expect(ThemePreset.resolvedTheme(settings: s, palette: nil).source == .preset("ocean"))
-        s.foliaEnabled = false
-        #expect(ThemePreset.resolvedTheme(settings: s, palette: nil).source == .preset("default"))
     }
 
     // MARK: - Master switch persists

@@ -478,13 +478,17 @@ enum MusicAPI {
                               ["id": id, "lv": -1, "kv": -1, "tv": -1, "rv": -1])
     }
 
-    /// Multi-source lyric lookup (Folia auto-match): tries each lyric source
-    /// in turn — preferred source first — and returns the best match, or nil
-    /// when no source has usable lyrics. Never throws, so callers keep
-    /// today's `try?` behaviour: no error UI when lyrics are missing.
+    /// NetEase-only lyric lookup (post-rollback: the Folia multi-source
+    /// providers were removed, so this is the single source again).
+    /// Never throws, so callers keep today's `try?` behaviour: no error
+    /// UI when lyrics are missing.
     static func lyric(for track: Track) async -> LyricResponse? {
-        let preferred = await SettingsManager.shared.effectivePreferredLyricSource
-        return await LyricMultiSource.fetch(for: track, preferred: preferred)
+        // Platform tracks carry a negative stable-hash id, never a NetEase
+        // song id (PR #34, commit 85d4660): querying NetEase with it would
+        // only burn a request, and a bogus id must never be mistaken for a
+        // pure-music verdict. Platform tracks get no lyrics from here.
+        guard track.platformSource == nil else { return nil }
+        return try? await lyric(id: track.id)
     }
 
     struct FMResponse: Decodable {

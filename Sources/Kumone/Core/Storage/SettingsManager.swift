@@ -482,12 +482,7 @@ final class SettingsManager: ObservableObject {
         static let audioCacheSizeMB = "settings.audioCacheSizeMB"
         static let audioCacheAutomatic = "settings.audioCacheAutomatic"
         static let lyricAnimationStyle = "settings.lyricAnimationStyle"
-        static let preferredLyricSource = "settings.preferredLyricSource"
         static let homePlatform = "settings.homePlatform"
-        static let themePreset = "settings.themePreset"
-        static let customTheme = "settings.customTheme"
-        static let preferCustomTheme = "settings.preferCustomTheme"
-        static let songThemeAutoSwitch = "settings.songThemeAutoSwitch"
         static let homeDynamicBackground = "settings.homeDynamicBackground"
         static let playerPageNativeBlur = "settings.playerPageNativeBlur"
         static let staticMode = "settings.staticMode"
@@ -500,7 +495,6 @@ final class SettingsManager: ObservableObject {
         static let playbackEntryView = "settings.playbackEntryView"
         static let playerPageTintIntensity = "settings.playerPageTintIntensity"
         static let hidePlayerProgressBar = "settings.hidePlayerProgressBar"
-        static let autoHidePlayerChrome = "settings.autoHidePlayerChrome"
         static let alwaysShowPlayerBackButton = "settings.alwaysShowPlayerBackButton"
         static let alwaysShowTrackSwitchButtons = "settings.alwaysShowTrackSwitchButtons"
         static let playerControlSlots = "settings.playerControlSlots"
@@ -509,7 +503,6 @@ final class SettingsManager: ObservableObject {
         static let transitionAnimationCard = "settings.transitionAnimationCard"
         #if os(iOS)
         static let preventDisplaySleep = "settings.preventDisplaySleepDuringPlayback"
-        static let iosCrossfadeEnabled = "settings.iosCrossfadeEnabled"
         #endif
         static let transitionMode = "settings.transitionMode"
         static let crossfadeMaxSeconds = "settings.crossfadeMaxSeconds"
@@ -984,70 +977,10 @@ final class SettingsManager: ObservableObject {
         foliaEnabled ? lyricAnimationStyle : .fade
     }
 
-    /// Preferred lyric source for the multi-source lookup (Folia auto-match).
-    /// NetEase first by default, which preserves today's behaviour.
-    @Published var preferredLyricSource: LyricSource {
-        didSet { UserDefaults.standard.set(preferredLyricSource.rawValue, forKey: Keys.preferredLyricSource) }
-    }
-
     /// Home-page platform: which service's feed the home page shows.
     /// NetEase by default, which preserves today's behaviour.
     @Published var homePlatform: HomePlatform {
         didSet { UserDefaults.standard.set(homePlatform.rawValue, forKey: Keys.homePlatform) }
-    }
-
-    /// Preferred lyric source with the master switch off: NetEase only, i.e.
-    /// the pre-Folia single-source lookup.
-    var effectivePreferredLyricSource: LyricSource {
-        foliaEnabled ? preferredLyricSource : .netease
-    }
-
-    /// Built-in colour theme preset id; "default" follows the system light/dark
-    /// artwork tint, "custom" uses `customThemeJSON`.
-    @Published var themePresetID: String {
-        didSet { UserDefaults.standard.set(themePresetID, forKey: Keys.themePreset) }
-    }
-
-    /// Theme preset with the master switch off: `"default"`, whose
-    /// colours are the pre-folia ones (`Theme.accent` over the
-    /// fallback artwork tint). No custom theme existed before PR #8.
-    var effectiveThemePresetID: String {
-        foliaEnabled ? themePresetID : "default"
-    }
-
-    /// JSON-encoded custom theme (see `ThemePreset`), empty when none is saved.
-    @Published var customThemeJSON: String {
-        didSet { UserDefaults.standard.set(customThemeJSON, forKey: Keys.customTheme) }
-    }
-
-    /// Custom theme JSON with the master switch off: none was saved
-    /// before PR #8, so there is no custom theme.
-    var effectiveCustomThemeJSON: String {
-        foliaEnabled ? customThemeJSON : ""
-    }
-
-    /// Prefer the custom theme over the current song's artwork theme.
-    @Published var preferCustomTheme: Bool {
-        didSet { UserDefaults.standard.set(preferCustomTheme, forKey: Keys.preferCustomTheme) }
-    }
-
-    /// Prefer-custom-theme with the master switch off: no custom
-    /// theme existed before PR #8, so there is nothing to prefer.
-    var effectivePreferCustomTheme: Bool {
-        foliaEnabled ? preferCustomTheme : false
-    }
-
-    /// Let the now-playing page and main interface follow the current song's
-    /// artwork palette. Off keeps the default theme colours.
-    @Published var songThemeAutoSwitch: Bool {
-        didSet { UserDefaults.standard.set(songThemeAutoSwitch, forKey: Keys.songThemeAutoSwitch) }
-    }
-
-    /// Song-theme auto-switch with the master switch off: pre-folia
-    /// the now-playing page always followed the artwork palette, so
-    /// it stays on.
-    var effectiveSongThemeAutoSwitch: Bool {
-        foliaEnabled ? songThemeAutoSwitch : true
     }
 
     /// Home page artwork-tinted dynamic background, separate from the main
@@ -1212,18 +1145,6 @@ final class SettingsManager: ObservableObject {
         foliaEnabled ? hidePlayerProgressBar : false
     }
 
-    /// Auto-hide the now-playing page chrome (scrubber, transport and
-    /// top buttons) after 3 seconds idle; any tap brings it back.
-    @Published var autoHidePlayerChrome: Bool {
-        didSet { UserDefaults.standard.set(autoHidePlayerChrome, forKey: Keys.autoHidePlayerChrome) }
-    }
-
-    /// Auto-hide with the master switch off: the chrome never hid
-    /// before Folia, so it stays visible.
-    var effectiveAutoHidePlayerChrome: Bool {
-        foliaEnabled ? autoHidePlayerChrome : false
-    }
-
     /// Always show the back button on the now-playing page.
     @Published var alwaysShowPlayerBackButton: Bool {
         didSet {
@@ -1309,19 +1230,6 @@ final class SettingsManager: ObservableObject {
     /// nothing held the idle timer while playing.
     var effectivePreventDisplaySleepDuringPlayback: Bool {
         foliaEnabled ? preventDisplaySleepDuringPlayback : false
-    }
-
-    /// iOS crossfade (Folia P2/P3): cut between songs with a dual-deck
-    /// overlap instead of a hard cut. Default off — the single-`AVPlayer`
-    /// path is used until the user turns it on.
-    @Published var iosCrossfadeEnabled: Bool {
-        didSet { UserDefaults.standard.set(iosCrossfadeEnabled, forKey: Keys.iosCrossfadeEnabled) }
-    }
-
-    /// iOS crossfade with the master switch off: pre-folia iOS
-    /// played through a single `AVPlayer` with hard cuts.
-    var effectiveIosCrossfadeEnabled: Bool {
-        foliaEnabled ? iosCrossfadeEnabled : false
     }
     #endif
 
@@ -2487,14 +2395,8 @@ final class SettingsManager: ObservableObject {
         foliaEnabled = defaults.object(forKey: Keys.foliaEnabled) as? Bool ?? true
         lyricAnimationStyle = defaults.string(forKey: Keys.lyricAnimationStyle)
             .flatMap(LyricAnimationStyle.init) ?? .fade
-        preferredLyricSource = defaults.string(forKey: Keys.preferredLyricSource)
-            .flatMap(LyricSource.init) ?? .netease
         homePlatform = defaults.string(forKey: Keys.homePlatform)
             .flatMap(HomePlatform.init) ?? .netease
-        themePresetID = defaults.string(forKey: Keys.themePreset) ?? "default"
-        customThemeJSON = defaults.string(forKey: Keys.customTheme) ?? ""
-        preferCustomTheme = defaults.object(forKey: Keys.preferCustomTheme) as? Bool ?? false
-        songThemeAutoSwitch = defaults.object(forKey: Keys.songThemeAutoSwitch) as? Bool ?? true
         homeDynamicBackground = defaults.object(forKey: Keys.homeDynamicBackground) as? Bool ?? true
         playerPageNativeBlur = defaults.object(forKey: Keys.playerPageNativeBlur) as? Bool ?? true
         staticMode = defaults.object(forKey: Keys.staticMode) as? Bool ?? false
@@ -2513,7 +2415,6 @@ final class SettingsManager: ObservableObject {
             Self.playerPageTintIntensityRange.upperBound
         )
         hidePlayerProgressBar = defaults.object(forKey: Keys.hidePlayerProgressBar) as? Bool ?? false
-        autoHidePlayerChrome = defaults.object(forKey: Keys.autoHidePlayerChrome) as? Bool ?? false
         alwaysShowPlayerBackButton =
             defaults.object(forKey: Keys.alwaysShowPlayerBackButton) as? Bool ?? false
         alwaysShowTrackSwitchButtons =
@@ -2526,8 +2427,6 @@ final class SettingsManager: ObservableObject {
         #if os(iOS)
         preventDisplaySleepDuringPlayback =
             defaults.object(forKey: Keys.preventDisplaySleep) as? Bool ?? true
-        iosCrossfadeEnabled =
-            defaults.object(forKey: Keys.iosCrossfadeEnabled) as? Bool ?? false
         #endif
         transitionMode = defaults.string(forKey: Keys.transitionMode)
             .flatMap(TransitionMode.init) ?? .automix

@@ -13,41 +13,17 @@ struct MainWindowAmbientBackground: View {
     @Environment(\.colorScheme) private var colorScheme
     @EnvironmentObject private var settings: SettingsManager
 
-    /// C12/C14: the ambient tint follows the resolved theme (custom → song
-    /// artwork → selected preset). The passed-in palette is the artwork
-    /// palette, or `.fallback` when nothing is playing — that sentinel reads
-    /// as "no palette" so a non-default preset still wins with no song.
-    /// Default preset + no custom theme resolves exactly to the old
-    /// behaviour (artwork palette while auto-switch is on, fallback
-    /// otherwise).
-    private var resolvedTheme: ResolvedTheme {
-        ThemePreset.resolvedTheme(
-            settings: settings,
-            palette: colors == .fallback ? nil : colors
-        )
-    }
-
-    private var displayColors: ArtworkColors {
-        ArtworkColors(primary: resolvedTheme.tint, secondary: resolvedTheme.secondaryTint)
-    }
-
-    /// The theme's own tint strength (1 for built-in presets and the
-    /// artwork theme) scales the caller-supplied ambient intensity.
-    private var effectiveIntensity: Double {
-        intensity * resolvedTheme.intensity
-    }
-
     private var gradientOpacity: Double {
         MainWindowAmbientOpacity.gradient(
             isDark: colorScheme == .dark,
-            intensity: effectiveIntensity
+            intensity: intensity
         )
     }
 
     private var glowOpacity: Double {
         MainWindowAmbientOpacity.glow(
             isDark: colorScheme == .dark,
-            intensity: effectiveIntensity
+            intensity: intensity
         )
     }
 
@@ -65,14 +41,14 @@ struct MainWindowAmbientBackground: View {
         if settings.effectiveHomeDynamicBackground {
             ZStack {
                 LinearGradient(
-                    colors: [displayColors.primary, displayColors.secondary],
+                    colors: [colors.primary, colors.secondary],
                     startPoint: .topLeading,
                     endPoint: .bottomTrailing
                 )
                 .opacity(gradientOpacity)
 
                 RadialGradient(
-                    colors: [displayColors.primary.opacity(glowOpacity), .clear],
+                    colors: [colors.primary.opacity(glowOpacity), .clear],
                     center: .topTrailing,
                     startRadius: 0,
                     endRadius: 680
@@ -80,8 +56,8 @@ struct MainWindowAmbientBackground: View {
             }
             .allowsHitTesting(false)
             .accessibilityHidden(true)
-            .animation(ambientAnimation, value: displayColors)
-            .animation(ambientAnimation, value: effectiveIntensity)
+            .animation(ambientAnimation, value: colors)
+            .animation(ambientAnimation, value: intensity)
         }
     }
 }

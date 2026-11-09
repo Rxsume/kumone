@@ -21,7 +21,6 @@ struct SettingsView: View {
 
     private enum SettingsPage: Hashable {
         case storage
-        case themePark
         case lyricStyle
         #if os(macOS)
         case shortcuts
@@ -90,37 +89,6 @@ struct SettingsView: View {
                     Text("播放期间屏幕不自动息屏，暂停或切到后台后恢复")
                         .font(.caption)
                         .foregroundStyle(.secondary)
-                    Toggle("切歌淡入淡出", isOn: $settings.iosCrossfadeEnabled)
-                    Text("切歌时两首歌重叠淡入淡出；关闭后恢复原来的直接切歌")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                    if settings.iosCrossfadeEnabled {
-                        Picker("过渡模式", selection: $settings.transitionMode) {
-                            ForEach(TransitionMode.allCases) { mode in
-                                Text(mode.displayName).tag(mode)
-                            }
-                        }
-                        if settings.transitionMode == .crossfade {
-                            HStack {
-                                Text("最长淡入淡出")
-                                Spacer()
-                                Text("\(Int(settings.crossfadeMaxSeconds)) 秒")
-                                    .foregroundStyle(.secondary)
-                            }
-                            Slider(
-                                value: $settings.crossfadeMaxSeconds,
-                                in: SettingsManager.crossfadeMaxSecondsRange,
-                                step: 1
-                            )
-                            HStack {
-                                Text("2 秒")
-                                Spacer()
-                                Text("12 秒")
-                            }
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                        }
-                    }
                     #endif
                     Picker("响度平衡（ReplayGain）", selection: $settings.replayGainMode) {
                         ForEach(ReplayGainMode.allCases) { mode in
@@ -196,11 +164,6 @@ struct SettingsView: View {
                 Toggle("点击封面打开专辑", isOn: $settings.openAlbumOnArtworkClick)
                 Toggle("显示歌词翻译", isOn: $settings.showLyricsTranslation)
                 Toggle("逐字歌词（卡拉OK）", isOn: $settings.verbatimLyrics)
-                Picker("首选歌词源", selection: $settings.preferredLyricSource) {
-                    ForEach(LyricSource.allCases) { source in
-                        Text(source.displayName).tag(source)
-                    }
-                }
                 Picker("日文歌词读音", selection: $settings.lyricsAnnotation) {
                     ForEach(LyricsAnnotation.allCases) { annotation in
                         Text(annotation.displayName).tag(annotation)
@@ -251,32 +214,9 @@ struct SettingsView: View {
                             Text(style.displayName).tag(style)
                         }
                     }
-                    Picker("配色主题预设", selection: $settings.themePresetID) {
-                        Text("默认").tag("default")
-                        Text("暮色").tag("dusk")
-                        Text("海洋").tag("ocean")
-                        Text("林深").tag("forest")
-                        Text("玫瑰").tag("rose")
-                        Text("自定义").tag("custom")
-                    }
-                    // The theme actually in effect (see `activeThemeCaption`):
-                    // the preset picker alone cannot show it, because
-                    // song-theme auto-switch short-circuits the preset and
-                    // "custom" with no saved theme falls back to default.
-                    Text(activeThemeCaption)
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                    NavigationLink(value: SettingsPage.themePark) {
-                        Label("主题乐园", systemImage: "paintpalette")
-                    }
                     NavigationLink(value: SettingsPage.lyricStyle) {
                         Label("歌词样式", systemImage: "textformat")
                     }
-                    Toggle("歌曲主题自动切换", isOn: $settings.songThemeAutoSwitch)
-                    Text("切歌时播放页与主界面跟随当前歌曲封面取色，关闭后使用默认配色")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                    Toggle("优先使用自定义主题", isOn: $settings.preferCustomTheme)
                     Toggle("静态模式", isOn: $settings.staticMode)
                     Text("关闭动态效果（环境色过渡、黑胶旋转、歌词动效）")
                         .font(.caption)
@@ -344,10 +284,6 @@ struct SettingsView: View {
             Section("播放页") {
                 Toggle("隐藏进度条", isOn: $settings.hidePlayerProgressBar)
                 Text("iOS 可用")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                Toggle("自动隐藏播放控件", isOn: $settings.autoHidePlayerChrome)
-                Text("3 秒无操作后隐藏进度条、播放按钮和顶部按钮，点一下屏幕即可恢复")
                     .font(.caption)
                     .foregroundStyle(.secondary)
                 // D8: the back button is only gated by this setting on
@@ -529,8 +465,6 @@ struct SettingsView: View {
                 case .shortcuts:
                     ShortcutSettingsView()
                 #endif
-                case .themePark:
-                    ThemeParkView()
                 case .lyricStyle:
                     LyricStyleSettingsView()
                 }
@@ -542,7 +476,6 @@ struct SettingsView: View {
                 ToolbarItem(placement: .principal) {
                     switch page {
                     case .storage: Text("存储空间").font(.headline)
-                    case .themePark: Text("主题乐园").font(.headline)
                     case .lyricStyle: Text("歌词样式").font(.headline)
                     case .shortcuts: Text("快捷键").font(.headline)
                     }
@@ -550,24 +483,6 @@ struct SettingsView: View {
             }
             #endif
         }
-    }
-
-    /// The theme actually in effect, by the same priority as
-    /// `ThemePreset.resolvedTheme` (custom > song artwork > preset),
-    /// resolved without an artwork palette — this page has none, so with
-    /// song-theme auto-switch on the caption reads 跟随封面: the palette
-    /// wins whenever a song with artwork is playing, and the preset below
-    /// it is what shows while nothing is. Reads the effective values, so
-    /// the caption stays true with the Folia master switch off too.
-    private var activeThemeCaption: String {
-        if ThemePreset.customTheme(from: settings) != nil,
-           settings.effectivePreferCustomTheme || settings.effectiveThemePresetID == "custom" {
-            return "当前：自定义"
-        }
-        if settings.effectiveSongThemeAutoSwitch {
-            return "当前：跟随封面"
-        }
-        return "当前：\(ThemePreset.preset(id: settings.effectiveThemePresetID).displayName)"
     }
 
     /// Sparkle on macOS; on iOS only sideload builds carry an updater.

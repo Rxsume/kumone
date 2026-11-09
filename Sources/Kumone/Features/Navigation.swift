@@ -60,16 +60,9 @@ struct PlayerChromeModifier: ViewModifier {
 
 private struct MainColumnPlayerBar: View {
     @ObservedObject var geometry: MainColumnGeometry
-    @EnvironmentObject private var settings: SettingsManager
 
     var body: some View {
-        if settings.foliaEnabled {
-            // The floating capsule centers itself (max 512pt) inside the
-            // full-width overlay; it must not be forced to full width.
-            PlayerBar()
-        } else {
-            PlayerBar().frame(width: geometry.layout.width)
-        }
+        PlayerBar().frame(width: geometry.layout.width)
     }
 }
 
