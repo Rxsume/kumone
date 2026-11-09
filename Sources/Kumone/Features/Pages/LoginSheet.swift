@@ -73,13 +73,13 @@ struct LoginSheet: View {
                 .padding(.horizontal, 24)
 
                 // NetEase sign-in is Beans' web login (NetEaseWebLoginPanel).
-                // The sheet title lives inside the panel; the provider list
-                // below is unchanged (the Bilibili workstream adds its row
-                // to `ProviderLogin` on top of this).
+                // The sheet title lives inside the panel. There is no
+                // provider list here anymore: AccountHubSheet is the single
+                // account entry point and opens this sheet per provider
+                // (the Bilibili workstream adds its `.bilibili` case to
+                // `ProviderLogin` on top of this).
                 NetEaseWebLoginPanel()
                     .padding(.top, 28)
-
-                providerListSection
             }
 
             Button("取消") {
@@ -136,40 +136,6 @@ struct LoginSheet: View {
             case .kugou: kugouSection
             case .bilibili: bilibiliSection
             }
-        }
-    }
-
-    private var providerListSection: some View {
-        VStack(spacing: 2) {
-            Text("更多平台")
-                .font(.system(size: 12, weight: .semibold))
-                .foregroundStyle(.secondary)
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .padding(.horizontal, 28)
-                .padding(.bottom, 2)
-            ForEach(ProviderLogin.allCases) { item in
-                Button {
-                    provider = item
-                } label: {
-                    HStack {
-                        Text(item.rawValue)
-                            .font(.system(size: 14))
-                        Spacer()
-                        Image(systemName: "chevron.right")
-                            .font(.system(size: 12))
-                            .foregroundStyle(.tertiary)
-                    }
-                    .padding(.horizontal, 28)
-                    .padding(.vertical, 8)
-                }
-                .buttonStyle(.plain)
-            }
-            Text("QQ / 酷狗 / 哔哩哔哩直连官方登录，无需自托管后端。")
-                .font(.system(size: 11))
-                .foregroundStyle(.tertiary)
-                .multilineTextAlignment(.center)
-                .padding(.horizontal, 24)
-                .padding(.top, 4)
         }
     }
 

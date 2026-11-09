@@ -240,21 +240,80 @@ final class KugouMusicAPI: @unchecked Sendable {
             let auth = await KugouMusicAuth.shared
             await auth.saveLogin(userId: userId, token: token, nickname: nick, avatar: avatar, vipType: vip)
             await registerDevice()
+            await refreshMembershipStatusIfNeeded(force: true)
             return .confirmed
         }
+        // Status codes, aligned with Beans (main and 2.0.3 agree; the
+        // PR #25 port had drifted): 2 = scanned, 3 = expired, anything
+        // else (including 0 and 4 without a token) = still waiting.
+        // Status 4 without a token used to return `.confirmed`, which
+        // made the UI toast "酷狗已登录" with no login saved.
         switch status {
-        case 0:
-            return .expired
-        case 2, 3:
+        case 2:
             return .scanned
-        case 4:
-            // Confirmed but no token arrived with this poll (the token
-            // normally accompanies status 4, and the login is saved on
-            // the token path above). The caller re-checks login state
-            // before relying on the confirmation.
-            return .confirmed
+        case 3:
+            return .expired
         default:
             return .waiting
+        }
+    }
+
+    /// Membership probe (Beans `refreshMembershipStatusIfNeeded`): the
+    /// QR login's `vip_type` is often 0 even for members, so probe the
+    /// two VIP-only playlists (listid 3, then 2) and raise the cached
+    /// `vipType` to 1 when a VIP-tier playback URL resolves for one of
+    /// their songs. Throttled to once per 5 minutes unless forced
+    /// (right after login). Never throws; a failed probe is silent and
+    /// leaves `vipType` at 0 — playback already tries the VIP tiers
+    /// per song (`vipTypeCandidates`), so nothing depends on this.
+    private var lastMembershipProbeAt: Date?
+
+    private func refreshMembershipStatusIfNeeded(force: Bool = false) async {
+        let auth = await KugouMusicAuth.shared
+        guard await auth.isLoggedIn, await !auth.hasMembership else { return }
+        if !force, let last = lastMembershipProbeAt, Date().timeIntervalSince(last) < 300 {
+            return
+        }
+        lastMembershipProbeAt = Date()
+        let snapshot = await authSnapshot()
+        for listID in ["3", "2"] {
+            do {
+                let body: [String: Any] = [
+                    "listid": listID,
+                    "page": 1,
+                    "pagesize": 1,
+                    "area_code": 1,
+                    "show_relate_goods": 0,
+                    "allplatform": 1,
+                    "show_cover": 1,
+                    "type": 0,
+                    "userid": Int(snapshot.userID) ?? 0,
+                    "token": snapshot.token,
+                ]
+                let json = try await gatewayRequest(
+                    "/v4/get_list_all_file",
+                    method: "POST",
+                    params: ["listid": listID, "page": "1", "pagesize": "1"],
+                    data: body,
+                    headers: ["x-router": "cloudlist.service.kugou.com"])
+                guard let first = Self.deepArrays(
+                    json.json, names: ["songs", "songlist", "list", "info", "files", "data"]
+                ).first,
+                      let song = Self.mapSong(first),
+                      !song.hash.isEmpty
+                else { continue }
+                if let url = try? await songURLOnce(
+                    hash: song.hash, albumAudioId: song.albumAudioId, albumId: song.albumId,
+                    vipType: 1, snapshot: snapshot),
+                    !url.absoluteString.isEmpty {
+                    await auth.updateVIPType(1)
+                    Self.log.debug("kugou membership probe hit listid=\(listID, privacy: .public); vipType=1")
+                    return
+                }
+                Self.log.debug("kugou membership probe miss listid=\(listID, privacy: .public)")
+            } catch {
+                Self.log.debug("kugou membership probe failed listid=\(listID, privacy: .public): \(error.localizedDescription, privacy: .public)")
+            }
         }
     }
 
@@ -263,6 +322,7 @@ final class KugouMusicAPI: @unchecked Sendable {
     func userPlaylists() async throws -> [KugouMusicPlaylist] {
         let snapshot = await authSnapshot()
         guard snapshot.isLoggedIn else { return [] }
+        await refreshMembershipStatusIfNeeded()
         let dataBody: [String: Any] = [
             "total_ver": 979,
             "type": 2,
@@ -973,7 +1033,8 @@ final class KugouMusicAPI: @unchecked Sendable {
     /// first rung; the ladder below it is still tried (`flac` → `high`
     /// → `320` → `128`). `nil` quality tries the full ladder.
     func songURL(song: KugouMusicSong, quality: KugouAudioQuality? = nil) async throws -> URL? {
-        try await songURL(
+        await refreshMembershipStatusIfNeeded()
+        return try await songURL(
             hash: song.hash, albumAudioId: song.albumAudioId, albumId: song.albumId,
             quality: quality)
     }

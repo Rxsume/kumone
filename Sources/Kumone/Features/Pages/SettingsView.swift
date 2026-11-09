@@ -8,16 +8,9 @@ struct SettingsView: View {
     @EnvironmentObject private var account: AccountStore
     @Environment(\.openDestination) private var openDestination
     @Environment(\.dismiss) private var dismiss
-    @State private var loginProvider: ProviderLogin?
+    @State private var showAccountHub = false
     @State private var showCustomSources = false
     @ObservedObject private var customSources = CustomAudioSourceStore.shared
-    @State private var accountsVersion = 0
-    // Beans-based QQ/Kugou logins: @Published isLoggedIn/nickname drive
-    // these rows, so logout in LoginSheet refreshes them with no bump.
-    @ObservedObject private var qqAuth = QQMusicAuth.shared
-    @ObservedObject private var kgAuth = KugouMusicAuth.shared
-    // Bilibili login (full CiliCili port, phase 1): same pattern.
-    @ObservedObject private var blAuth = BilibiliAuth.shared
     #if os(macOS)
     @AppStorage(SettingsManager.Keys.menuBarPlayer) private var showMenuBarPlayer = false
     @State private var navigationPath: [SettingsPage] = []
@@ -453,75 +446,28 @@ struct SettingsView: View {
             SyncSettingsSection()
 
             Section("账号") {
-                if let profile = account.profile {
-                    LabeledContent("当前账号", value: profile.nickname)
-                    Button("退出登录", role: .destructive) {
-                        Task {
-                            do { try await AccountStore.shared.logout() }
-                            catch { ToastCenter.shared.show(error.localizedDescription) }
-                        }
+                // All platform accounts live in AccountHubSheet now (the
+                // single account entry point); this section only links to
+                // it. The Bilibili workstream adds its hub row on rebase;
+                // SettingsView no longer opens LoginSheet directly.
+                Button {
+                    showAccountHub = true
+                } label: {
+                    HStack {
+                        Text("账号登录")
+                        Spacer()
+                        Text(accountSummary)
+                            .foregroundStyle(.secondary)
+                        Image(systemName: "chevron.right")
+                            .font(.system(size: 12))
+                            .foregroundStyle(.tertiary)
                     }
-                } else {
-                    Text("未登录")
-                        .foregroundStyle(.secondary)
                 }
 
                 Toggle("听歌打卡", isOn: $settings.neteaseScrobbleEnabled)
                 Text("向网易云上报听歌记录，影响每日推荐与听歌排行。关闭后不再上报。")
                     .font(.caption)
                     .foregroundStyle(.secondary)
-
-                // Folia platform logins (folia-full-ios-port). Each keeps
-                // its own session; none touches the NetEase AccountStore.
-                // Status is read at render time; `accountsVersion` is
-                // bumped after logout so the rows refresh.
-                Group {
-                    if qqAuth.isLoggedIn {
-                        LabeledContent("QQ音乐", value: qqDisplayName)
-                        Button("退出登录", role: .destructive) {
-                            qqAuth.logout()
-                            accountsVersion += 1
-                        }
-                    } else {
-                        LabeledContent("QQ音乐", value: "未登录")
-                        Button("登录 QQ音乐") { loginProvider = .qqmusic }
-                    }
-                    Text("QQ 音乐直连官方登录，无需自托管后端。")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                }
-
-                Group {
-                    if kgAuth.isLoggedIn {
-                        LabeledContent("酷狗", value: kgDisplayName)
-                        Button("退出登录", role: .destructive) {
-                            kgAuth.logout()
-                            accountsVersion += 1
-                        }
-                    } else {
-                        LabeledContent("酷狗", value: "未登录")
-                        Button("登录酷狗") { loginProvider = .kugou }
-                    }
-                    Text("酷狗直连官方扫码登录，无需自托管后端。")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                }
-
-                Group {
-                    if blAuth.isLoggedIn {
-                        LabeledContent("哔哩哔哩", value: blDisplayName)
-                        Button("退出登录", role: .destructive) {
-                            blAuth.logout()
-                            accountsVersion += 1
-                        }
-                    } else {
-                        LabeledContent("哔哩哔哩", value: "未登录")
-                        Button("登录哔哩哔哩") { loginProvider = .bilibili }
-                    }
-                    Text("哔哩哔哩直连官方扫码登录，无需自托管后端。")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                }
 
             }
 
@@ -566,9 +512,7 @@ struct SettingsView: View {
             }
         }
         .formStyle(.grouped)
-        .sheet(item: $loginProvider) { item in
-            LoginSheet(initialProvider: item)
-        }
+        .sheet(isPresented: $showAccountHub) { AccountHubSheet() }
         .navigationDestination(for: SettingsPage.self) { page in
             Group {
                 switch page {
@@ -615,22 +559,10 @@ struct SettingsView: View {
         #endif
     }
 
-    /// Beans QQ login display name, with the VIP badge when present.
-    private var qqDisplayName: String {
-        let base = qqAuth.nickname.isEmpty ? "已登录" : qqAuth.nickname
-        if let badge = qqAuth.vipBadge, !badge.isEmpty { return "\(base) · \(badge)" }
-        return base
-    }
-
-    /// Beans Kugou login display name, with a VIP marker when applicable.
-    private var kgDisplayName: String {
-        let base = kgAuth.nickname.isEmpty ? "已登录" : kgAuth.nickname
-        return kgAuth.vipType > 0 ? "\(base) · VIP" : base
-    }
-
-    /// Bilibili login display name.
-    private var blDisplayName: String {
-        blAuth.nickname.isEmpty ? "已登录" : blAuth.nickname
+    /// NetEase nickname on the hub entry row (the hub itself shows all
+    /// three platforms' states); "未登录" when NetEase is logged out.
+    private var accountSummary: String {
+        account.profile?.nickname ?? "未登录"
     }
 
     private var appVersion: String {

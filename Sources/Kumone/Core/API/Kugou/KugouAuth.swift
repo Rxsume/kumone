@@ -37,6 +37,11 @@ final class KugouMusicAuth: ObservableObject {
     @Published private(set) var vipType = 0
     @Published private(set) var avatarURL: URL?
 
+    /// Beans parity (`hasMembership`): whether the cached membership
+    /// state says this account is a member. Used by the API layer's
+    /// membership probe, which only probes while this is false.
+    var hasMembership: Bool { vipType > 0 }
+
     private static let log = Logger(subsystem: "sb.moe.kumone", category: "kugou")
 
     private static let keychainService = "sb.moe.kumone.kugou"
