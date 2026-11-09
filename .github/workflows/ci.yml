@@ -21,7 +21,7 @@ jobs:
       - name: Build
         run: swift build
 
-      # Split in three on purpose. The two playback suites below are the only
+      # Split in four on purpose. The two playback suites below are the only
       # ones driving AVAudioEngine through runWithWatchdog, and on the
       # 3-thread CI runner the whole target oversubscribes Swift's
       # cooperative pool (upstream 9e24dc1 documents the same starvation:
@@ -35,19 +35,23 @@ jobs:
       # in the first group, with the whole runner frozen 41s in (935 tests
       # passed) at AccountIsolationTests'
       # lateResponseCannotRestoreLoggedOutCredentials — a victim of the
-      # starvation, not its cause (its own logic completes on the happy
-      # path; the log went silent for all 120 suites at once). So the
-      # account-isolation suite gets its own invocation too: if it hangs
-      # alone, it is a real test bug; if it passes alone, the stall is
-      # load-dependent and the remaining group gets split further. The
-      # 60-minute job cap above is headroom for the split's extra startup,
-      # not a fix for the hang: a stalled run is silent indefinitely, so a
-      # higher cap alone would only burn more minutes.
+      # starvation, not its cause. That suite then got its own invocation,
+      # and in run 42537537722 it PASSED alone, proving the stall is
+      # load-dependent — but the remaining ~115 suites still stalled and
+      # the run was cancelled at the cap. So the remainder is split in two
+      # by suite-name initial (A-M / N-Z, via --skip so any suite whose
+      # type name does not end in Tests still runs instead of being
+      # dropped). The 60-minute job cap above is headroom for the split's
+      # extra startup, not a fix for the hang: a stalled run is silent
+      # indefinitely, so a higher cap alone would only burn more minutes.
       - name: Test (account isolation)
         run: swift test --filter 'AccountIsolationTests'
 
-      - name: Test
-        run: swift test --skip 'PlaybackEngineSmokeTests|TransitionSegmentTests|AccountIsolationTests'
+      - name: Test (suites A-M)
+        run: swift test --skip 'NavigationDestinationTests|NowPlayingArtworkStoreTests|OfflineArtworkTests|OfflineMetadataCleanupTests|OfflineStoreTests|OfflineUIFixtureTests|OutputRouteChangeDamperTests|OverloadTraceLineTests|PauseDrainTests|PlaybackQueuePlanTests|PlaybackRepositoryTests|PlaybackRescheduleCheckTests|PlaybackStallCheckTests|PlaybackStartErrorCheckTests|PlaybackStateStorageTests|PlaylistAddErrorTests|PlaylistLoadingTests|PlaylistPublicationTests|PlaylistSearchTests|PreparedDeckTests|ProgressiveAudioBufferTests|ProgressiveLoaderFLACTests|QueueOrderAcquisitionTests|QueueOrderTests|QueuePrefetchTests|RecommendationTests|ScoreByteIdentityTests|ScoreCompilerTests|ScoreGridSelfCheckTests|ScoreRenderTests|ScoreSegmentAdmissionTests|ScoreTemplateSelectionTests|ScoreVettingTests|SeamAlignmentTests|SeamLatencyCalibrationTests|SeamReleaseTests|SegmentTimelineAlignmentTests|SettingsBackupTests|ShortcutSettingsTests|SlamAndTensionCutCompileTests|SleepTimerTests|StemEnvelopeTests|StemModelDownloaderStateTests|StemModelSpecTests|StemModelVerificationTests|StemPrerenderFieldSampleTests|StemPrerenderStartTests|StemTechniqueTests|StorageUsageTests|StructureSegmenterTests|SyncTests|TapCaptureThreadingTests|TapWriteLedgerTests|TempoRampTests|TestWatchdogTests|TrackAnalyzerTests|TrackTableTests|TransitionAimTests|TransitionAutomationTests|TransitionIntentTests|TransitionPlannerStructureTests|TransitionPlannerTests|TransitionScoreModelTests|VinylRecordTests|VocalExchangeBothClocksTests|VocalHoldEQTests|WholeMixLaneTests|PlaybackEngineSmokeTests|TransitionSegmentTests|AccountIsolationTests'
+
+      - name: Test (suites N-Z)
+        run: swift test --skip 'AdmissionGateTests|AnalysisStoreTests|AudioCacheEvictionTests|AudioCacheTests|AudioOutputDeviceTests|AudioSourceTrackMatcherTests|AuditionPlanOverrideTests|AutoMixDebugModelTests|AutoMixSettingsTests|AutomaticCacheLimitTests|BackgroundDownloadTransportTests|BedIntroCompileTests|BedSplitTests|CDNHostTests|ChainCoherenceTests|DeckChainDSPResetTests|DeckChainTimePitchBypassTests|DeviceIDTests|DistributionChannelTests|DownloadEligibilityTests|DownloadManagerTests|EngineAudioCacheDownloadTests|EngineDumpThrottleTests|EngineResurrectionSentinelTests|EngineTraceCoalesceTests|EngineTraceRenderTests|EngineTraceRingHygieneTests|EngineTraceRingTests|FoliaIOSCrossfadeTests|FoliaIOSPureLogicTests|FoliaMacPlaybackSettingsTests|FoliaMasterSwitchTests|FoliaPlaybackSettingsTests|GestureLibraryByteIdentityTests|HeadLatencyOverrideTests|HiddenAppWindowsTests|ImageCacheClearTests|ImageThumbnailTests|KumoneObjCTests|LatticePlayerTests|LayoutSizeClassTests|LoudnessCompensationTests|LoudnessMeterTests|LuminousPlayerTests|LyricsParserTests|LyricsSidecarTests|MasterLimiterTests|PlaybackEngineSmokeTests|TransitionSegmentTests|AccountIsolationTests'
 
       - name: Test (playback suites)
         run: swift test --filter 'PlaybackEngineSmokeTests|TransitionSegmentTests'

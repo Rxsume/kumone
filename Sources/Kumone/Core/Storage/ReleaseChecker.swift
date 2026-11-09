@@ -72,13 +72,34 @@ enum ReleaseChecker {
         } catch {
             // GitHub unreadable: ask the mirrors for the version only.
             // If no mirror answers either, throw GitHub's original error
-            // (Folia's `discoverUpdateVersion` does the same).
+            // (Folia's `discoverUpdateVersion` does the same). The IPA URL
+            // is rebuilt from the tag with this repo's own fixed release
+            // convention (see `ipaURLFor(version:build:)`), never taken
+            // from a mirror response — so with GitHub blocked the download
+            // buttons still work in-app (direct, or the accelerated mirror
+            // button) instead of degrading to opening the GitHub page in
+            // Safari, which is what used to happen when `ipaURL` was nil.
             if let mirrored = await fetchTagViaMirrors() {
                 return Release(version: mirrored.version, build: mirrored.build,
-                              url: releasesPage, ipaURL: nil)
+                              url: releasesPage,
+                              ipaURL: Self.ipaURLFor(version: mirrored.version, build: mirrored.build))
             }
             throw error
         }
+    }
+
+    /// The IPA asset URL for a release, from the repo's own naming
+    /// convention: the unsigned-iOS workflow publishes
+    /// `Golia-iOS-<version>-custom.ipa` under the tag
+    /// `Golia-<version>-build-<build>`. Only the tag (version + build)
+    /// comes from the caller — the shape is fixed here, so a mirror
+    /// that lies about the tag can only point at another release of
+    /// this repo, never at an arbitrary URL. Nil when there is no build
+    /// number (pre-build-number tags), in which case the caller falls
+    /// back to opening the releases page.
+    private static func ipaURLFor(version: String, build: Int?) -> URL? {
+        guard let build else { return nil }
+        return URL(string: "https://github.com/\(repo)/releases/download/Golia-\(version)-build-\(build)/Golia-iOS-\(version)-custom.ipa")
     }
 
     /// Fetch a full release (tag + page URL + IPA asset URL) from a
