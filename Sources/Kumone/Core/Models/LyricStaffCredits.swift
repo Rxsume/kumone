@@ -157,8 +157,8 @@ return try? NSRegularExpression(pattern: pattern, options:.caseInsensitive)
 /// Why a custom staff pattern is invalid, or nil (Folia
 /// `getLyricStaffPatternError`).
 static func patternError(_ pattern: String?) -> String? {
-let normalized = pattern?.trimmingCharacters(in:.whitespacesAndNewlines)?? ""
-guard!normalized.isEmpty else { return nil}
+let normalized = pattern?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+guard !normalized.isEmpty else { return nil}
 do {
 _ = try NSRegularExpression(pattern: normalized, options:.caseInsensitive)
 return nil
@@ -172,14 +172,14 @@ return error.localizedDescription
 /// position constraints still apply). An invalid custom pattern falls
 /// back to the built-in list (Folia `createStaffCreditMatcher`).
 static func staffMatcher(pattern: String?) -> (LyricLine) -> Bool {
-let normalized = pattern?.trimmingCharacters(in:.whitespacesAndNewlines)?? ""
+let normalized = pattern?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
 let custom: NSRegularExpression? = normalized.isEmpty
 ? nil: try? NSRegularExpression(pattern: normalized, options:.caseInsensitive)
 let builtIn = builtInStaffRegex()
 let byPrefix = try? NSRegularExpression(pattern: staffByPrefixPattern, options:.caseInsensitive)
 return { line in
 let text = line.text.trimmingCharacters(in:.whitespaces)
-guard!text.isEmpty else { return false}
+guard !text.isEmpty else { return false}
 if let custom {
 let range = NSRange(text.startIndex..., in: text)
 return custom.firstMatch(in: text, options: [], range: range) != nil
@@ -195,7 +195,7 @@ return false
 /// ("#", "//", "---") — staff blocks use them as separators.
 static func isFillerLine(_ line: LyricLine) -> Bool {
 let text = line.text.trimmingCharacters(in:.whitespaces)
-guard!text.isEmpty else { return true}
+guard !text.isEmpty else { return true}
 guard text.count <= 8 else { return false}
 return text.unicodeScalars.allSatisfy { scalar in
 !CharacterSet.letters.contains(scalar) && !CharacterSet.decimalDigits.contains(scalar)
@@ -219,7 +219,7 @@ return regex.firstMatch(in: text, options: [], range: range) != nil
 /// detector tolerates it before the staff block.
 private static func isHeaderLike(_ line: LyricLine, title: String?, artist: String?) -> Bool {
 let text = line.text.trimmingCharacters(in:.whitespaces)
-guard!text.isEmpty else { return true}
+guard !text.isEmpty else { return true}
 if text.range(of: #"\s[-–—]\s"#, options:.regularExpression) != nil { return true}
 if let title,!title.trimmingCharacters(in:.whitespaces).isEmpty, text.contains(title.trimmingCharacters(in:.whitespaces)) { return true}
 if let artist,!artist.trimmingCharacters(in:.whitespaces).isEmpty, text.contains(artist.trimmingCharacters(in:.whitespaces)) { return true}
@@ -340,7 +340,7 @@ func collectShortRun(from start: Int, step: Int) -> [Int] {
 var taken: [Int] = []
 var index = start
 while index >= 0 && index < lines.count {
-guard!memberSet.contains(index), isShortLine(lines[index]) else { break}
+guard !memberSet.contains(index), isShortLine(lines[index]) else { break}
 taken.append(index)
 index += step
 }
@@ -355,7 +355,7 @@ let backward = collectShortRun(from: min(lastMember + 1, lastIndex), step: 1)
 .filter { $0 < lastIndex}
 absorbed.append(contentsOf: backward)
 }
-guard!absorbed.isEmpty else { return block}
+guard !absorbed.isEmpty else { return block}
 let absorbedIndexes = absorbed.sorted()
 var memberIndexes = (block.memberIndexes + absorbedIndexes).sorted()
 for index in (memberIndexes[memberIndexes.count - 1] + 1)..<lines.count {
@@ -367,7 +367,7 @@ memberIndexes.append(index)
 // first lyric, and the decision degrades to keep, same as the
 // detector's own handling.
 let nextIndex = memberIndexes[memberIndexes.count - 1] + 1
-let firstLyricIndex: Int? = nextIndex < lines.count? nextIndex: nil
+let firstLyricIndex: Int? = nextIndex < lines.count ? nextIndex : nil
 return StaffCreditBlock(
 staffIndexes: block.staffIndexes,
 memberIndexes: memberIndexes,
@@ -427,7 +427,7 @@ needsRetime = true
 break
 }
 }
-decision.verdict = needsRetime?.retime:.keep
+decision.verdict = needsRetime ? .retime : .keep
 return decision
 }
 
@@ -475,9 +475,7 @@ let spreadIndexes = (block.staffIndexes + block.absorbedIndexes).sorted()
 let spreadLines = spreadIndexes.map { lines[$0]}
 let windowStart = lines[block.memberIndexes[0]].time
 let firstLyric = block.firstLyricIndex.map { lines[$0]}
-let windowEnd = firstLyric
-? firstLyric.time - tailMarginSeconds
-: spreadLines[spreadLines.count - 1].end
+let windowEnd = firstLyric.map { $0.time - tailMarginSeconds } ?? spreadLines[spreadLines.count - 1].end
 let replacement: [LyricLine]
 if decision.verdict == .retime {
 replacement = spreadLines.enumerated().map { index, line in
@@ -492,7 +490,7 @@ replacement = []
 }
 var next: [LyricLine] = []
 for (index, line) in lines.enumerated() {
-guard!memberIndexes.contains(index) else {
+guard !memberIndexes.contains(index) else {
 if index == block.memberIndexes[0] {
 next.append(contentsOf: replacement)
 }
