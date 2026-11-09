@@ -314,8 +314,6 @@ final class PlayerService: ObservableObject {
     /// arrive in either order (streamed first play, cache hit, hand-over).
     private var currentLyricLRC: String?
     private var consecutiveFailures = 0
-    private var scrobbled = false
-    private var startScrobbled = false
 
     // MARK: - Offline playback (downloads)
 
@@ -534,7 +532,6 @@ final class PlayerService: ObservableObject {
             // resume() would be a no-op; re-issue play from where we are.
             engine.play(deck: activeDeck, from: min(progress, max(0, duration - 0.1)))
             isPlaying = true
-            scrobbleStartIfNeeded(track)
         }
         NowPlayingManager.shared.updateElapsed(progress, rate: isPlaying ? 1 : 0)
     }
@@ -907,7 +904,6 @@ final class PlayerService: ObservableObject {
     }
 
     private func handleItemEnded() {
-        scrobbleIfNeeded(completed: true)
 
         if sleepTimer.consumeEndOfCurrentTrack() {
             // The deck has drained on its own — there is no hand-over, because
@@ -927,7 +923,6 @@ final class PlayerService: ObservableObject {
         guard isPlaying else { return }
 
         if repeatMode == .one, !isFMMode {
-            scrobbled = false
             if hasLocalFile {
                 progress = 0
                 engine.play(deck: activeDeck, from: 0)
@@ -1024,7 +1019,6 @@ final class PlayerService: ObservableObject {
         isBuffering = false
         enginePaused = false
 
-        scrobbleIfNeeded(completed: false)
         currentTrack = track
         playbackAccountID = AccountStore.shared.profile?.userId
         progress = resumeAt
@@ -1034,8 +1028,6 @@ final class PlayerService: ObservableObject {
         isTrial = false
         lyrics = nil
         currentLyricLRC = nil
-        scrobbled = false
-        startScrobbled = false
         isPlaying = true
         lyricsCursor.activeIndex = nil
         // Before the URL is even resolved: holds the bars still rather than
@@ -1227,7 +1219,6 @@ final class PlayerService: ObservableObject {
                 engine.play(deck: activeDeck, from: 0)
                 isPlaying = true
                 AudioSpectrum.shared.markTapped()
-                scrobbleStartIfNeeded(track)
                 duration = fileDuration
                 NowPlayingManager.shared.updateMetadata(for: track, duration: fileDuration)
                 ensureCurrentAnalysis(key: key, fileURL: local)
@@ -1254,7 +1245,6 @@ final class PlayerService: ObservableObject {
         engine.play(deck: activeDeck, from: 0)
         isPlaying = true
         AudioSpectrum.shared.markTapped()
-        scrobbleStartIfNeeded(track)
 
         if let time = resolved.durationMS, time > 0 {
             duration = TimeInterval(time) / 1000
@@ -2778,8 +2768,6 @@ final class PlayerService: ObservableObject {
         // A hand-over is an automatic advance, and the outgoing download is done.
         releaseOfflineLease()
         currentWasAdvanced = true
-        scrobbleIfNeeded(completed: true)
-        scrobbled = false
         consecutiveFailures = 0
 
         // Advance the queue pointers the same way advanceToNext would have.
@@ -3264,7 +3252,6 @@ final class PlayerService: ObservableObject {
         if isPlaying {
             engine.play(deck: activeDeck, from: min(position, max(0, fileDuration - 1)))
             AudioSpectrum.shared.markTapped()
-            scrobbleStartIfNeeded(track)
         } else {
             enginePaused = false
         }
@@ -3379,31 +3366,6 @@ final class PlayerService: ObservableObject {
         releaseOfflineLease()
         isPlaying = false
         NowPlayingManager.shared.updateElapsed(progress, rate: 0)
-    }
-
-    // MARK: - Scrobble
-
-    /// Tell the server the track started, once per track. Called from the
-    /// point playback actually begins — the cache-hit path and the streaming
-    /// path both reach it, and `startPlaying` clears the flag.
-    private func scrobbleStartIfNeeded(_ track: Track) {
-        guard SettingsManager.shared.effectiveNetEaseScrobbleEnabled else { return }
-        guard !startScrobbled else { return }
-        startScrobbled = true
-        let tid = track.id
-        let sid = source.sourceID
-        Task.detached { await MusicAPI.scrobbleStart(trackID: tid, sourceID: sid) }
-    }
-
-    private func scrobbleIfNeeded(completed: Bool) {
-        guard SettingsManager.shared.effectiveNetEaseScrobbleEnabled else { return }
-        guard let track = currentTrack, !scrobbled, progress > 1 else { return }
-        scrobbled = true
-        let seconds = completed ? Int(duration) : Int(progress)
-        let sourceID = source.sourceID
-        Task.detached {
-            await MusicAPI.scrobbleFinish(trackID: track.id, sourceID: sourceID, seconds: seconds)
-        }
     }
 
     // MARK: - Shuffle helpers
@@ -3972,7 +3934,6 @@ final class PlayerService: ObservableObject {
     func resume(_ session: PlaybackSession) throws {
         let accountID = AccountStore.shared.authenticatedAccountID
         try session.validateAccess(accountID: accountID)
-        scrobbleIfNeeded(completed: false)
         pause()
         applyPlaybackSession(session)
         startPlaying(session.currentTrack, resumeAt: session.progress)
@@ -4001,15 +3962,12 @@ final class PlayerService: ObservableObject {
         fmUpcoming = []
         progress = session.progress
         duration = session.currentTrack.duration
-        // A received checkpoint is not listening earned on this device.
-        scrobbled = true
     }
 
     func checkpointPlayback() { persistState() }
 
     func suspendForAccountChange() {
         invalidateTrackPreparation()
-        scrobbled = true
         pause()
         stopForOffline()
         releaseOfflineLease()

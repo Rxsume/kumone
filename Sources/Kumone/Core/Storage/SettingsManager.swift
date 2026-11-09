@@ -474,8 +474,6 @@ final class SettingsManager: ObservableObject {
 
         // Folia B12: global lyric timeline offset, milliseconds, ±2000.
         static let globalLyricTimelineOffsetMs = "settings.globalLyricTimelineOffsetMs"
-        // Folia B18: report listening to NetEase (scrobble), default on.
-        static let neteaseScrobbleEnabled = "settings.neteaseScrobbleEnabled"
         static let autoCheckUpdates = "settings.autoCheckUpdates"
         static let desktopLyrics = "settings.showDesktopLyrics"
         #if os(macOS)
@@ -808,17 +806,6 @@ final class SettingsManager: ObservableObject {
     var canResolveUnblockedTracks: Bool {
         enableUnblock && !enabledAudioSourceIDs.isEmpty
     }
-
-    /// Report listening to NetEase (scrobble), Folia B18. On by default,
-    /// matching the historical always-on behaviour; off means no
-    /// `scrobbleStart`/`scrobbleFinish` calls at all.
-    @Published var neteaseScrobbleEnabled: Bool {
-        didSet { UserDefaults.standard.set(neteaseScrobbleEnabled, forKey: Keys.neteaseScrobbleEnabled) }
-    }
-
-    /// Scrobble is NetEase account behaviour, not a Folia visual setting,
-    /// so it is not gated by the Folia master switch.
-    var effectiveNetEaseScrobbleEnabled: Bool { neteaseScrobbleEnabled }
 
     /// Floating desktop lyrics window (LyricsX-style).
     @Published var showDesktopLyrics: Bool {
@@ -2484,7 +2471,6 @@ final class SettingsManager: ObservableObject {
             )
         }
         autoCheckUpdates = defaults.object(forKey: Keys.autoCheckUpdates) as? Bool ?? true
-        neteaseScrobbleEnabled = defaults.object(forKey: Keys.neteaseScrobbleEnabled) as? Bool ?? true
         showDesktopLyrics = defaults.object(forKey: Keys.desktopLyrics) as? Bool ?? false
         #if os(macOS)
         automixEnabled = defaults.object(forKey: Keys.automix) as? Bool ?? false

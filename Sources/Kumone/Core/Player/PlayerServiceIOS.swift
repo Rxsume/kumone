@@ -288,8 +288,6 @@ final class PlayerService: ObservableObject {
     /// Set when a failure skips to the next song, so that skip keeps counting
     /// toward the stop after five in a row instead of resetting it.
     private var advancingAfterFailure = false
-    private var scrobbled = false
-    private var startScrobbled = false
 
     // MARK: - Offline playback (downloads)
 
@@ -541,12 +539,10 @@ final class PlayerService: ObservableObject {
             engine.volume = 0
             engine.play()
             isPlaying = true
-            scrobbleStartIfNeeded()
             fadeVolume(to: effectiveVolume)
         } else {
             engine.play()
             isPlaying = true
-            scrobbleStartIfNeeded()
         }
         NowPlayingManager.shared.updateElapsed(progress, rate: isPlaying ? 1 : 0)
     }
@@ -871,7 +867,6 @@ final class PlayerService: ObservableObject {
     }
 
     private func handleItemEnded() {
-        scrobbleIfNeeded(completed: true)
 
         if sleepTimer.consumeEndOfCurrentTrack() {
             progress = duration
@@ -885,7 +880,6 @@ final class PlayerService: ObservableObject {
         guard isPlaying else { return }
 
         if repeatMode == .one, !isFMMode {
-            scrobbled = false
             seek(to: 0)
             engine.play()
             isPlaying = true
@@ -991,7 +985,6 @@ final class PlayerService: ObservableObject {
         pendingAutoAdvance = false
         pendingAudioResourceLoader?.cancel()
         pendingAudioResourceLoader = nil
-        scrobbleIfNeeded(completed: false)
         currentTrack = track
         playbackAccountID = AccountStore.shared.profile?.userId
         progress = resumeAt
@@ -1004,8 +997,6 @@ final class PlayerService: ObservableObject {
         itemStatusObservation = nil
         isTrial = false
         lyrics = nil
-        scrobbled = false
-        startScrobbled = false
         isPlaying = true
         lyricsCursor.activeIndex = nil
         // Before the URL is even resolved: holds the bars still rather than
@@ -1421,7 +1412,6 @@ final class PlayerService: ObservableObject {
         }
         if isPlaying {
             engine.play()
-            scrobbleStartIfNeeded()
         }
 
         if let durationMS, durationMS > 0 {
@@ -1813,30 +1803,6 @@ final class PlayerService: ObservableObject {
         NowPlayingManager.shared.updateElapsed(progress, rate: 0)
     }
 
-    // MARK: - Scrobble
-
-    private func scrobbleStartIfNeeded() {
-        guard SettingsManager.shared.effectiveNetEaseScrobbleEnabled else { return }
-        guard let track = currentTrack, !startScrobbled else { return }
-        startScrobbled = true
-        let trackID = track.id
-        let sourceID = source.sourceID
-        Task.detached {
-            await MusicAPI.scrobbleStart(trackID: trackID, sourceID: sourceID)
-        }
-    }
-
-    private func scrobbleIfNeeded(completed: Bool) {
-        guard SettingsManager.shared.effectiveNetEaseScrobbleEnabled else { return }
-        guard let track = currentTrack, !scrobbled, progress > 1 else { return }
-        scrobbled = true
-        let seconds = completed ? Int(duration) : Int(progress)
-        let sourceID = source.sourceID
-        Task.detached {
-            await MusicAPI.scrobbleFinish(trackID: track.id, sourceID: sourceID, seconds: seconds)
-        }
-    }
-
     // MARK: - Shuffle helpers
 
     private func reshuffle(keeping first: Track) {
@@ -1923,7 +1889,6 @@ final class PlayerService: ObservableObject {
     func resume(_ session: PlaybackSession) throws {
         let accountID = AccountStore.shared.authenticatedAccountID
         try session.validateAccess(accountID: accountID)
-        scrobbleIfNeeded(completed: false)
         pause()
         applyPlaybackSession(session)
         startPlaying(session.currentTrack, resumeAt: session.progress)
@@ -1944,14 +1909,12 @@ final class PlayerService: ObservableObject {
         fmUpcoming = []
         progress = session.progress
         duration = session.currentTrack.duration
-        scrobbled = true
     }
 
     func checkpointPlayback() { persistState() }
 
     func suspendForAccountChange() {
         resolveGeneration += 1
-        scrobbled = true
         pause()
         pendingAudioResourceLoader?.cancel()
         pendingAudioResourceLoader = nil

@@ -10,6 +10,9 @@ struct SettingsView: View {
     @Environment(\.dismiss) private var dismiss
     @State private var showAccountHub = false
     @State private var showCustomSources = false
+    // Beans 主题/平台组的可展开状态（默认收起，与 Beans 一致）。
+    @State private var themeExpanded = false
+    @State private var platformExpanded = false
     @ObservedObject private var customSources = CustomAudioSourceStore.shared
     #if os(macOS)
     @AppStorage(SettingsManager.Keys.menuBarPlayer) private var showMenuBarPlayer = false
@@ -50,6 +53,96 @@ struct SettingsView: View {
 
     private var settingsForm: some View {
         Form {
+            Section("账号") {
+                // All platform accounts live in AccountHubSheet now (the
+                // single account entry point); this section only links to
+                // it. The Bilibili workstream adds its hub row on rebase;
+                // SettingsView no longer opens LoginSheet directly.
+                // 听歌打卡已随设置页删除（P3：Beans 无等价物，用户未把
+                // 它放进保留项；打卡的上报函数与开关 key 一并删除）。
+                Button {
+                    showAccountHub = true
+                } label: {
+                    HStack {
+                        Text("账号登录")
+                        Spacer()
+                        Text(accountSummary)
+                            .foregroundStyle(.secondary)
+                        Image(systemName: "chevron.right")
+                            .font(.system(size: 12))
+                            .foregroundStyle(.tertiary)
+                    }
+                }
+            }
+
+            // Beans 主题模式组（`ProfileView.themeSection`）：可展开的
+            // 主题行；展开后是主题模式分段选择器。Beans 的其余三行无
+            // Golia 等价物，不加死开关：沉浸详情界面是 Beans 的详情
+            // 页头功能、语言需要整套本地化基建、关闭液态模式需要一
+            // 个液态玻璃总闸——三者都不是 Golia 的 `staticMode`，
+            // 不得与之合并；深层外观定制（漂浮特效/壁纸/字体等）是
+            // 后续 P3 子项。
+            Section {
+                Button {
+                    withAnimation(.easeInOut(duration: 0.22)) {
+                        themeExpanded.toggle()
+                    }
+                } label: {
+                    HStack(spacing: 12) {
+                        Image(systemName: "paintpalette.fill")
+                            .font(.system(size: 14))
+                            .foregroundStyle(Theme.accent)
+                            .frame(width: 28)
+                        Text("主题模式")
+                        Spacer()
+                        Image(systemName: themeExpanded ? "chevron.up" : "chevron.down")
+                            .font(.system(size: 11, weight: .semibold))
+                            .foregroundStyle(.secondary)
+                    }
+                    .padding(.vertical, 6)
+                    .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                if themeExpanded {
+                    Picker("主题模式", selection: $settings.appearance) {
+                        ForEach(AppAppearance.allCases) { appearance in
+                            Text(appearance.displayName).tag(appearance)
+                        }
+                    }
+                    .pickerStyle(.segmented)
+                }
+            }
+
+            // Beans 平台显示组（`ProfileView.platformSection`）：可展开
+            // 的平台行；展开后是各平台显示/隐藏开关，只控制首页切换
+            // 器的入口可见性，不动音源开关与平台能力。
+            Section {
+                Button {
+                    withAnimation(.easeInOut(duration: 0.22)) {
+                        platformExpanded.toggle()
+                    }
+                } label: {
+                    HStack(spacing: 12) {
+                        Image(systemName: "checklist")
+                            .font(.system(size: 14))
+                            .foregroundStyle(Theme.accent)
+                            .frame(width: 28)
+                        Text("平台显示")
+                        Spacer()
+                        Image(systemName: platformExpanded ? "chevron.up" : "chevron.down")
+                            .font(.system(size: 11, weight: .semibold))
+                            .foregroundStyle(.secondary)
+                    }
+                    .padding(.vertical, 6)
+                    .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                if platformExpanded {
+                    PlatformPreferencePicker()
+                        .padding(.bottom, 6)
+                }
+            }
+
             Section("播放") {
                 Picker("音质", selection: $settings.audioQuality) {
                     ForEach(AudioQuality.allCases) { quality in
@@ -140,11 +233,6 @@ struct SettingsView: View {
             }
 
             Section("外观") {
-                Picker("主题", selection: $settings.appearance) {
-                    ForEach(AppAppearance.allCases) { appearance in
-                        Text(appearance.displayName).tag(appearance)
-                    }
-                }
                 #if os(macOS)
                 // macOS only renders two now-playing layouts — 黑胶 and the
                 // regular page; the iOS 沉浸/简洁 options all fall back to the
@@ -444,32 +532,6 @@ struct SettingsView: View {
             #endif
 
             SyncSettingsSection()
-
-            Section("账号") {
-                // All platform accounts live in AccountHubSheet now (the
-                // single account entry point); this section only links to
-                // it. The Bilibili workstream adds its hub row on rebase;
-                // SettingsView no longer opens LoginSheet directly.
-                Button {
-                    showAccountHub = true
-                } label: {
-                    HStack {
-                        Text("账号登录")
-                        Spacer()
-                        Text(accountSummary)
-                            .foregroundStyle(.secondary)
-                        Image(systemName: "chevron.right")
-                            .font(.system(size: 12))
-                            .foregroundStyle(.tertiary)
-                    }
-                }
-
-                Toggle("听歌打卡", isOn: $settings.neteaseScrobbleEnabled)
-                Text("向网易云上报听歌记录，影响每日推荐与听歌排行。关闭后不再上报。")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-
-            }
 
             if showsUpdateControls {
                 Section("更新") {

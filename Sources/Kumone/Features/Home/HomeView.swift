@@ -223,6 +223,7 @@ struct HomeView: View {
     /// Bilibili login state for the phase-1 home placeholder.
     @ObservedObject private var blAuth = BilibiliAuth.shared
     @State private var showBilibiliLogin = false
+    @ObservedObject private var platformPrefs = PlatformPreferenceStore.shared
 
     /// `.task(id:)` needs an `Equatable` id; tuples cannot conform to
     /// `Equatable` in Swift, so the (loggedIn, platform) pair gets a
@@ -260,7 +261,9 @@ struct HomeView: View {
         .toolbar {
             ToolbarItem(placement: platformSwitcherPlacement) {
                 Menu {
-                    ForEach(HomePlatform.allCases) { platform in
+                    // 切换器只列设置页“平台显示”里启用的平台，按保存的
+                    // 顺序；只控制入口可见性，不动音源开关与平台能力。
+                    ForEach(platformPrefs.orderedEnabledPlatforms) { platform in
                         Button {
                             selectPlatform(platform)
                         } label: {
@@ -287,6 +290,14 @@ struct HomeView: View {
         }
         .sheet(isPresented: $showBilibiliLogin) {
             LoginSheet(initialProvider: .bilibili)
+        }
+        // 当前平台在设置页被隐藏时回落到第一个可见平台（设置页改
+        // 动时经 onChange 立刻生效；首页重现时经 onAppear 兜底）。
+        .onAppear {
+            settings.homePlatform = platformPrefs.ensureVisible(settings.homePlatform)
+        }
+        .onChange(of: platformPrefs.selectedRaw) { _ in
+            settings.homePlatform = platformPrefs.ensureVisible(settings.homePlatform)
         }
     }
 
