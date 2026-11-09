@@ -47,17 +47,17 @@ struct ReleaseCheckerDownloadTests {
 
     @Test func probeFailsOn404() async {
         let session = stubbedSession(statusCode: 404)
-        #expect(!await ReleaseChecker.isDirectReachable(ipaURL, session: session))
+        #expect(await ReleaseChecker.isDirectReachable(ipaURL, session: session) == false)
     }
 
     @Test func probeFailsOnTimeout() async {
         let session = stubbedSession(error: URLError(.timedOut))
-        #expect(!await ReleaseChecker.isDirectReachable(ipaURL, session: session))
+        #expect(await ReleaseChecker.isDirectReachable(ipaURL, session: session) == false)
     }
 
     @Test func probeFailsOnUnreachableHost() async {
         let session = stubbedSession(error: URLError(.cannotFindHost))
-        #expect(!await ReleaseChecker.isDirectReachable(ipaURL, session: session))
+        #expect(await ReleaseChecker.isDirectReachable(ipaURL, session: session) == false)
     }
 
     @Test func probeSendsHEAD() async {
