@@ -164,6 +164,51 @@ enum ReleaseChecker {
         "https://cors.isteed.cc/",
     ]
 
+    /// One IPA download candidate: the URL to try, and the mirror host to
+    /// show in the progress view while trying it (nil for the direct
+    /// GitHub URL).
+    struct DownloadCandidate {
+        let url: URL
+        /// Mirror host (e.g. "ghfast.top") while this candidate is tried;
+        /// nil for the direct GitHub URL.
+        let mirrorHost: String?
+    }
+
+    /// Download candidates for an IPA, in try order. When the direct
+    /// GitHub URL is reachable, it is the only candidate; when it is not
+    /// (mainland network without a VPN), the domestic mirrors are tried
+    /// in the `downloadMirrorPrefixes` order instead. Pure function of
+    /// its inputs, so the selection is unit-testable without network.
+    static func downloadCandidates(for ipaURL: URL, directReachable: Bool) -> [DownloadCandidate] {
+        if directReachable { return [DownloadCandidate(url: ipaURL, mirrorHost: nil)] }
+        return downloadMirrorPrefixes.compactMap { prefix in
+            URL(string: prefix + ipaURL.absoluteString).map {
+                DownloadCandidate(url: $0, mirrorHost: URL(string: prefix)?.host ?? prefix)
+            }
+        }
+    }
+
+    /// Probe whether the direct GitHub asset URL answers (HEAD, 5 s).
+    /// iOS cannot read another app's VPN state, so this is the ground
+    /// truth for "no VPN": on mainland networks github.com is unreachable
+    /// and the probe fails or times out; with a VPN (or outside China) it
+    /// answers. The session follows GitHub's 302 to the asset CDN and the
+    /// final 2xx is what counts; a HEAD carries no body, so a slow or
+    /// unreachable direct link costs at most the 5 s timeout. `session`
+    /// is injectable for tests; production passes `.shared`.
+    static func isDirectReachable(_ url: URL, session: URLSession = .shared) async -> Bool {
+        var request = URLRequest(url: url)
+        request.httpMethod = "HEAD"
+        request.timeoutInterval = 5
+        do {
+            let (_, response) = try await session.data(for: request)
+            guard let http = response as? HTTPURLResponse else { return false }
+            return (200..<300).contains(http.statusCode)
+        } catch {
+            return false
+        }
+    }
+
     /// Race the mirrors for the latest tag; first plausible answer wins,
     /// nil when none answers. Only the tag is read from a mirror — never
     /// an asset URL (see the `latest()` invariant above).

@@ -119,18 +119,27 @@ final class IOSUpdater: NSObject, ObservableObject {
     /// Non-TrollStore path: download the IPA into Documents (findable in the
     /// Files app under On My iPhone ▸ Golia), then open the share sheet so the
     /// user can Save to Files or hand it straight to a signing app.
+    ///
+    /// Auto-select (no-VPN rule): before downloading, probe the direct
+    /// GitHub URL (HEAD, 5 s). It answers → direct download, as before.
+    /// It fails or times out (mainland network without a VPN) → the
+    /// domestic mirrors are tried in order, first success wins.
     func download(_ release: ReleaseChecker.Release) {
         guard let ipaURL = release.ipaURL else {
             openReleasePage(release)
             return
         }
-        downloadMirrorHost = nil
         pendingDownloadFilename = release.build.map { "Golia-\(release.version)-build-\($0).ipa" }
             ?? "Golia-\(release.version).ipa"
         phase = .downloading(0)
         Task {
             do {
-                let localURL = try await downloadIPA(from: ipaURL)
+                // Clear any stale mirror host from a previous download while
+                // the probe runs; the candidate loop sets it per attempt.
+                downloadMirrorHost = nil
+                let direct = await ReleaseChecker.isDirectReachable(ipaURL)
+                let candidates = ReleaseChecker.downloadCandidates(for: ipaURL, directReachable: direct)
+                let localURL = try await downloadFirstSuccess(from: candidates)
                 phase = .readyToInstall(localURL)
                 share(localURL)
             } catch {
@@ -154,25 +163,37 @@ final class IOSUpdater: NSObject, ObservableObject {
             ?? "Golia-\(release.version).ipa"
         phase = .downloading(0)
         Task {
-            var lastError: Error?
-            for prefix in ReleaseChecker.downloadMirrorPrefixes {
-                guard let mirrorURL = URL(string: prefix + ipaURL.absoluteString) else { continue }
-                downloadMirrorHost = URL(string: prefix)?.host ?? prefix
-                do {
-                    let localURL = try await downloadIPA(from: mirrorURL)
-                    downloadMirrorHost = nil
-                    phase = .readyToInstall(localURL)
-                    share(localURL)
-                    return
-                } catch {
-                    lastError = error
-                    continue
-                }
+            do {
+                // Explicit override: straight to the mirrors, no probe.
+                let candidates = ReleaseChecker.downloadCandidates(for: ipaURL, directReachable: false)
+                let localURL = try await downloadFirstSuccess(from: candidates)
+                phase = .readyToInstall(localURL)
+                share(localURL)
+            } catch {
+                phase = .failed(error.localizedDescription)
             }
-            downloadMirrorHost = nil
-            phase = .failed(lastError?.localizedDescription
-                ?? String(localized: "加速镜像均不可用，请改用直接下载"))
         }
+    }
+
+    /// Try each candidate URL in order until one downloads. While a mirror
+    /// candidate is being tried, `downloadMirrorHost` names it in the
+    /// progress view; cleared on success or when every candidate fails.
+    private func downloadFirstSuccess(from candidates: [ReleaseChecker.DownloadCandidate]) async throws -> URL {
+        var lastError: Error?
+        for candidate in candidates {
+            downloadMirrorHost = candidate.mirrorHost
+            do {
+                let localURL = try await downloadIPA(from: candidate.url)
+                downloadMirrorHost = nil
+                return localURL
+            } catch {
+                lastError = error
+                continue
+            }
+        }
+        downloadMirrorHost = nil
+        if let lastError { throw lastError }
+        throw UpdaterDownloadError.noCandidates
     }
 
     func openReleasePage(_ release: ReleaseChecker.Release) {
@@ -213,6 +234,20 @@ final class IOSUpdater: NSObject, ObservableObject {
             pop.permittedArrowDirections = []
         }
         presenter.present(activity, animated: true)
+    }
+}
+
+/// Errors from the updater's own candidate loop (not from the network):
+/// `noCandidates` is the empty-list case, which keeps the accelerated
+/// button's old "all mirrors unavailable" message.
+private enum UpdaterDownloadError: LocalizedError {
+    case noCandidates
+
+    var errorDescription: String? {
+        switch self {
+        case .noCandidates:
+            return String(localized: "加速镜像均不可用，请改用直接下载")
+        }
     }
 }
 
@@ -295,7 +330,7 @@ struct IOSUpdaterSheet: View {
                     .buttonStyle(.plain)
                     .font(.system(size: 13, weight: .medium))
                     .foregroundStyle(Theme.accent)
-                Text("直连下载慢可用「加速下载」，走第三方代理镜像（ghfast.top 等），仅本次下载用，不做默认")
+                Text("「下载 IPA」会先探测 GitHub 直连：能直连就直连，不通时自动改走国内加速镜像；「加速下载」是直接走镜像")
                     .font(.caption).foregroundStyle(.secondary)
                     .multilineTextAlignment(.center)
                 laterButton(release)
