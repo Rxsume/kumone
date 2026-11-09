@@ -506,41 +506,9 @@ struct SettingsView: View {
                 Toggle("点击封面打开专辑", isOn: $settings.openAlbumOnArtworkClick)
                 Toggle("显示歌词翻译", isOn: $settings.showLyricsTranslation)
                 Toggle("逐字歌词（卡拉OK）", isOn: $settings.verbatimLyrics)
-                // Folia 歌词多源 (restored): auto-best search across
-                // NetEase / AMLL / QQ / Kugou, the preferred-source
-                // tie-break, and the global timeline offset. The lyric
-                // filter rows below belong to the same delimited section
-                // — re-home into the new settings page with the rest of
-                // the lyric rows when the Beans settings replacement
-                // lands.
-                Toggle("自动使用最佳歌词", isOn: $settings.autoUseBestLyric)
-                Text("自动检索网易云、AMLLDB、QQ 和酷狗歌词，若存在完美匹配的逐字歌词则自动优先采用")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                Picker("歌词匹配优先级", selection: $settings.preferredLyricSource) {
-                    ForEach(LyricSource.allCases) { source in
-                        Text(source.displayName).tag(source)
-                    }
-                }
-                Text("在多个歌词源都存在高置信度匹配时，优先选择该歌词源的结果")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                HStack {
-                    Text("全局时间偏移")
-                    Spacer()
-                    Text("\(settings.globalLyricTimelineOffsetMs)ms")
-                        .foregroundStyle(.secondary)
-                    Stepper("", value: $settings.globalLyricTimelineOffsetMs, in: -2000...2000, step: 50)
-                        .labelsHidden()
-                }
-                Text("为本设备的所有歌曲整体平移歌词时间轴，补偿蓝牙等输出延迟")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
                 // Folia 歌词过滤 (lyricLineRules + staff-credits policy):
                 // per-line rules live on their own page; the staff policy
-                // lives here. Same delimited section as the multi-source
-                // rows above — re-home together when the Beans settings
-                // replacement lands.
+                // lives here.
                 NavigationLink(value: SettingsPage.lyricFilter) {
                     Label("歌词过滤", systemImage: "line.3.horizontal.decrease.circle")
                 }
@@ -639,11 +607,34 @@ struct SettingsView: View {
                     NavigationLink(value: SettingsPage.lyricStyle) {
                         Label("歌词样式", systemImage: "textformat")
                     }
-                    // P6 re-homing slot (PR #40, branch
-                    // `folia-lyrics-multisource-restore`): its 歌词 section
-                    // rows — 自动使用最佳歌词 toggle、歌词匹配优先级
-                    // picker、全局时间偏移 stepper — 合并时移到这里。
-                    // 本分支不得重建它们，否则 rebase 会出两份。
+                // Folia 歌词多源 (restored; re-homed here from
+                // PR #40的 section on the rebase over main
+                // 2ca91b8): auto-best search across NetEase /
+                // AMLL / QQ / Kugou, the preferred-source
+                // tie-break, and the global timeline offset.
+                Toggle("自动使用最佳歌词", isOn: $settings.autoUseBestLyric)
+                Text("自动检索网易云、AMLLDB、QQ 和酷狗歌词，若存在完美匹配的逐字歌词则自动优先采用")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                Picker("歌词匹配优先级", selection: $settings.preferredLyricSource) {
+                    ForEach(LyricSource.allCases) { source in
+                        Text(source.displayName).tag(source)
+                    }
+                }
+                Text("在多个歌词源都存在高置信度匹配时，优先选择该歌词源的结果")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                HStack {
+                    Text("全局时间偏移")
+                    Spacer()
+                    Text("\(settings.globalLyricTimelineOffsetMs)ms")
+                        .foregroundStyle(.secondary)
+                    Stepper("", value: $settings.globalLyricTimelineOffsetMs, in: -2000...2000, step: 50)
+                        .labelsHidden()
+                }
+                Text("为本设备的所有歌曲整体平移歌词时间轴，补偿蓝牙等输出延迟")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
                     Toggle("静态模式", isOn: $settings.staticMode)
                     Text("关闭动态效果（环境色过渡、黑胶旋转、歌词动效）")
                         .font(.caption)
