@@ -333,9 +333,9 @@ final class PlayerService: ObservableObject {
 
         #if os(iOS)
         // Category (incl. the mix-with-others option) lives in
-        // `PlaybackEngine.applyAudioSessionCategory` so the engine
-        // start and the settings toggle share one call site.
-        PlaybackEngine.applyAudioSessionCategory()
+        // `AudioSessionCategory.apply` so the engine start and the
+        // settings toggle share one call site.
+        AudioSessionCategory.apply()
 
         // Resume after interruptions (phone calls, WeChat voice messages, …).
         NotificationCenter.default.addObserver(

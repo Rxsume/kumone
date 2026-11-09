@@ -407,7 +407,7 @@ struct SettingsView: View {
                     #if os(iOS)
                     Toggle("与其他音频同时播放", isOn: $settings.mixWithOtherAudio)
                         .onChange(of: settings.mixWithOtherAudio) { _ in
-                            PlaybackEngine.applyAudioSessionCategory()
+                            AudioSessionCategory.apply()
                         }
                     Text("播放时允许其他 App 的音频继续播放")
                         .font(.caption)

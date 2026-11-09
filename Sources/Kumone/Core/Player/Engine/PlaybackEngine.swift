@@ -1599,29 +1599,8 @@ final class PlaybackEngine: @unchecked Sendable {
 
     // MARK: - Engine lifecycle (locked)
 
-    #if os(iOS)
-    /// (Re-)applies the audio session category with the current mix
-    /// preference (Beans `playbackSection`: 与其他音频同时播放).
-    /// Reads the raw default instead of `SettingsManager.shared`:
-    /// the engine is `@unchecked Sendable` and must not touch
-    /// @MainActor state. Called on engine start and whenever the
-    /// setting changes.
-    static func applyAudioSessionCategory() {
-        let mix = UserDefaults.standard.bool(forKey: SettingsManager.Keys.mixWithOtherAudio)
-        let options: AVAudioSession.CategoryOptions = mix ? [.mixWithOthers] : []
-        try? AVAudioSession.sharedInstance().setCategory(.playback, mode: .default, policy: .longFormAudio, options: options)
-        try? AVAudioSession.sharedInstance().setActive(true)
-    }
-    #endif
-
     private func ensureEngineRunningLocked() {
         guard !engine.isRunning else { return }
-        #if os(iOS)
-        if !sessionConfigured {
-            sessionConfigured = true
-            Self.applyAudioSessionCategory()
-        }
-        #endif
         engine.prepare()
         do {
             try engine.start()
