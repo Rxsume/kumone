@@ -366,6 +366,13 @@ struct NetEaseLyricProvider: LyricProvider {
     var source: LyricSource { .netease }
 
     func fetch(for track: Track) async -> LyricCandidate? {
+        // Platform tracks carry a negative stable-hash id, never a
+        // NetEase song id: querying NetEase with it can only burn the
+        // per-source budget, and a false pure-music verdict would end
+        // the whole pick before the track's own platform provider runs.
+        // QQ/Kugou tracks get their lyrics from their own provider,
+        // AMLL, or Kugou instead.
+        guard track.platformSource == nil else { return nil }
         guard let response = try? await MusicAPI.lyric(id: track.id) else { return nil }
         guard !Task.isCancelled else { return nil }
         let isWordByWord = !(response.yrc?.lyric?.isEmpty ?? true)
