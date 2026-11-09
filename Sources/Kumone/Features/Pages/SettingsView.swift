@@ -183,6 +183,35 @@ struct SettingsView: View {
                 Toggle("点击封面打开专辑", isOn: $settings.openAlbumOnArtworkClick)
                 Toggle("显示歌词翻译", isOn: $settings.showLyricsTranslation)
                 Toggle("逐字歌词（卡拉OK）", isOn: $settings.verbatimLyrics)
+                // Folia 歌词多源 (restored): auto-best search across
+                // NetEase / AMLL / QQ / Kugou, the preferred-source
+                // tie-break, and the global timeline offset. Small
+                // delimited section — re-home into the new settings
+                // page with the rest of the lyric rows when the Beans
+                // settings replacement lands.
+                Toggle("自动使用最佳歌词", isOn: $settings.autoUseBestLyric)
+                Text("自动检索网易云、AMLLDB、QQ 和酷狗歌词，若存在完美匹配的逐字歌词则自动优先采用")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                Picker("歌词匹配优先级", selection: $settings.preferredLyricSource) {
+                    ForEach(LyricSource.allCases) { source in
+                        Text(source.displayName).tag(source)
+                    }
+                }
+                Text("在多个歌词源都存在高置信度匹配时，优先选择该歌词源的结果")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                HStack {
+                    Text("全局时间偏移")
+                    Spacer()
+                    Text("\(settings.globalLyricTimelineOffsetMs)ms")
+                        .foregroundStyle(.secondary)
+                    Stepper("", value: $settings.globalLyricTimelineOffsetMs, in: -2000...2000, step: 50)
+                        .labelsHidden()
+                }
+                Text("为本设备的所有歌曲整体平移歌词时间轴，补偿蓝牙等输出延迟")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
                 Picker("日文歌词读音", selection: $settings.lyricsAnnotation) {
                     ForEach(LyricsAnnotation.allCases) { annotation in
                         Text(annotation.displayName).tag(annotation)

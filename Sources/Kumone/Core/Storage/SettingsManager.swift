@@ -454,6 +454,11 @@ final class SettingsManager: ObservableObject {
         static let showRomaji = "settings.showLyricsRomaji"  // migrated to `annotation`
         static let annotation = "settings.lyricsAnnotation"
         static let verbatimLyrics = "settings.verbatimLyrics"
+        // Folia 歌词多源 (restored): auto-best-lyric search across
+        // NetEase / AMLL / QQ / Kugou, and the preferred source when
+        // several sources match with high confidence.
+        static let autoUseBestLyric = "settings.autoUseBestLyric"
+        static let preferredLyricSource = "settings.preferredLyricSource"
         static let volume = "settings.volume"
         static let fmMode = "settings.fmMode"
         static let unblock = "settings.enableUnblock"
@@ -690,6 +695,32 @@ final class SettingsManager: ObservableObject {
     /// characters.
     @Published var verbatimLyrics: Bool {
         didSet { UserDefaults.standard.set(verbatimLyrics, forKey: Keys.verbatimLyrics) }
+    }
+
+    /// Auto-search NetEase, AMLL, QQ and Kugou lyrics and prefer a
+    /// perfectly-matching verbatim lyric when one exists (Folia
+    /// "自动使用最佳歌词", default on).
+    @Published var autoUseBestLyric: Bool {
+        didSet { UserDefaults.standard.set(autoUseBestLyric, forKey: Keys.autoUseBestLyric) }
+    }
+
+    /// When several sources have a high-confidence match, prefer this
+    /// source's result (Folia "歌词匹配优先级", default NetEase).
+    @Published var preferredLyricSource: LyricSource {
+        didSet { UserDefaults.standard.set(preferredLyricSource.rawValue, forKey: Keys.preferredLyricSource) }
+    }
+
+    /// Best-lyric search with the master switch off: pre-rollback the
+    /// app fetched NetEase lyrics only, so the multi-source search
+    /// stays off.
+    var effectiveAutoUseBestLyric: Bool {
+        foliaEnabled ? autoUseBestLyric : false
+    }
+
+    /// Preferred lyric source with the master switch off: NetEase,
+    /// the pre-folia behaviour.
+    var effectivePreferredLyricSource: LyricSource {
+        foliaEnabled ? preferredLyricSource : .netease
     }
 
     /// Resolve gray tracks from third-party sources (unblock-style).
@@ -2316,6 +2347,8 @@ final class SettingsManager: ObservableObject {
         lyricsFontScale = Self.defaultLyricsFontScale
         lyricsFontWeight = nil
         globalLyricTimelineOffsetMs = 0
+        autoUseBestLyric = true
+        preferredLyricSource = .netease
         lyricsCustomFont = nil
         visualizerOpacity = Self.defaultVisualizerOpacity
         subtitleFontScale = Self.defaultSubtitleFontScale
@@ -2355,6 +2388,9 @@ final class SettingsManager: ObservableObject {
         lyricsAnnotation = defaults.string(forKey: Keys.annotation).flatMap(LyricsAnnotation.init)
             ?? (defaults.bool(forKey: Keys.showRomaji) ? .romaji : .off)
         verbatimLyrics = defaults.object(forKey: Keys.verbatimLyrics) as? Bool ?? true
+        autoUseBestLyric = defaults.object(forKey: Keys.autoUseBestLyric) as? Bool ?? true
+        preferredLyricSource = defaults.string(forKey: Keys.preferredLyricSource)
+            .flatMap(LyricSource.init) ?? .netease
         enableUnblock = defaults.object(forKey: Keys.unblock) as? Bool ?? true
         if let rawSourceIDs = defaults.stringArray(forKey: Keys.unblockSources) {
             enabledAudioSourceIDs = Set(rawSourceIDs.compactMap(AudioSourceID.init))

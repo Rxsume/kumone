@@ -478,11 +478,27 @@ enum MusicAPI {
                               ["id": id, "lv": -1, "kv": -1, "tv": -1, "rv": -1])
     }
 
-    /// NetEase-only lyric lookup (post-rollback: the Folia multi-source
-    /// providers were removed, so this is the single source again).
+    /// Lyric lookup for a track (Folia multi-source, restored).
+    /// When the auto-best-lyric switch is on, the four sources
+    /// (NetEase, AMLL, QQ, Kugou) are tried in order — preferred
+    /// source first — and the best match wins (word-by-word beats
+    /// line-timed; see `LyricMultiSource`). When it is off, the
+    /// single-source path (`lyricSingleSource`) runs instead.
     /// Never throws, so callers keep today's `try?` behaviour: no error
     /// UI when lyrics are missing.
-    ///
+    static func lyric(for track: Track) async -> LyricResponse? {
+        if await SettingsManager.shared.effectiveAutoUseBestLyric {
+            let preferred = await SettingsManager.shared.effectivePreferredLyricSource
+            return await LyricMultiSource.fetch(for: track, preferred: preferred)
+        }
+        return await lyricSingleSource(for: track)
+    }
+
+    /// Single-source NetEase lyric lookup (the 4cbbfef matched-track
+    /// path). Shared by the auto-best-off fallback above and by the
+    /// NetEase leg of the multi-source selection — the provider must
+    /// call this, never `lyric(for:)`, or the selection would recurse
+    /// back into itself.
     /// Platform tracks (QQ/Kugou) carry a negative stable-hash id,
     /// never a NetEase song id (PR #34, commit 85d4660), so they are
     /// resolved to the same song on NetEase first and the matched
@@ -491,8 +507,8 @@ enum MusicAPI {
     /// version conflict), so the lyrics sync with the audio. With
     /// no confident match the track stays lyric-less, exactly as
     /// before. No DES/QRC decryption and no QQ/Kugou lyric provider
-    /// are restored here; the rollback stands.
-    static func lyric(for track: Track) async -> LyricResponse? {
+    /// are involved in this leg; they live in the multi-source leg.
+    static func lyricSingleSource(for track: Track) async -> LyricResponse? {
         if track.platformSource != nil {
             guard let matched = await UnblockService.matchedNetEaseTrack(for: track) else { return nil }
             return try? await lyric(id: matched.id)
