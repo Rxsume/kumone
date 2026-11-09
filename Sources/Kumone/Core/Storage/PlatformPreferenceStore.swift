@@ -22,8 +22,8 @@ final class PlatformPreferenceStore: ObservableObject {
     /// 就一直保持关着。
     private static let seenKey = "settings.homePlatformsSeen.v1"
 
-    @Published private(set) var selectedRaw: Set<String>
-    @Published var orderedRaw: [String]
+    @Published private(set) var selectedRaw: Set<String> = []
+    @Published var orderedRaw: [String] = []
 
     private init() {
         loadFromUserDefaults()
