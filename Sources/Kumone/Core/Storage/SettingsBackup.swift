@@ -28,7 +28,11 @@ import Foundation
 ///   "format": "golia-settings-backup", "formatVersion": 1,
 ///   "app": "Golia", "appVersion": "0.3.29", "build": "693",
 ///   "exportedAt": "2026-11-08T14:00:00Z",
-///   "settings": { "settings.audioQuality": "exhigh", ... }
+///   "settings": { "settings.audioQuality": "exhigh", ... },
+///   "font": { "name": "MyFont", "data": "<base64>" }  // optional:
+///     // the single user-installed font, if one is installed (P6:
+///     // `FontManager.exportFontData`). Absent when no font is
+///     // installed; old files without it still import fine.
 /// }
 /// ```
 /// `Data` values (only `settings.urlBackgroundList`) are stored as
@@ -250,6 +254,10 @@ enum SettingsBackup {
         let unknownKeyCount: Int
         /// Keys in the file whose value had the wrong type (ignored).
         let typeMismatchCount: Int
+        /// The installed font carried by the file, if any (name +
+        /// file data). A malformed `font` entry is ignored, never a
+        /// validation failure — the settings still restore.
+        let font: (name: String, data: Data)?
         let appVersion: String?
         let build: String?
         let exportedAt: Date?
@@ -259,6 +267,8 @@ enum SettingsBackup {
         let appliedCount: Int
         let skippedUnknownCount: Int
         let skippedTypeMismatchCount: Int
+        /// True when the file carried a font and it installed.
+        let fontRestored: Bool
     }
 
     // MARK: - Export
@@ -289,7 +299,7 @@ enum SettingsBackup {
             // Anything else (not JSON-representable) is skipped.
         }
         let info = Bundle.main.infoDictionary
-        let doc: [String: Any] = [
+        var doc: [String: Any] = [
             "format": formatIdentifier,
             "formatVersion": formatVersion,
             "app": "Golia",
@@ -298,6 +308,15 @@ enum SettingsBackup {
             "exportedAt": ISO8601DateFormatter().string(from: Date()),
             "settings": settings,
         ]
+        // The single installed font, if any (P6). One font only, so
+        // the file stays small; a CJK font can still be several MB
+        // of base64 — accepted, it is the user's font.
+        if let font = FontManager.exportFontData() {
+            doc["font"] = [
+                "name": font.name,
+                "data": font.data.base64EncodedString(),
+            ]
+        }
         return try? JSONSerialization.data(
             withJSONObject: doc, options: [.prettyPrinted, .sortedKeys])
     }
@@ -335,10 +354,22 @@ enum SettingsBackup {
         }
         let exportedAt = (doc["exportedAt"] as? String)
             .flatMap { ISO8601DateFormatter().date(from: $0) }
+        // Optional installed font: malformed entries are ignored
+        // (never a validation failure — the settings still restore).
+        let font: (name: String, data: Data)? = {
+            guard let dict = doc["font"] as? [String: Any],
+                  dict.count == 2,
+                  let name = dict["name"] as? String, !name.isEmpty,
+                  let b64 = dict["data"] as? String,
+                  let data = Data(base64Encoded: b64), !data.isEmpty
+            else { return nil }
+            return (name, data)
+        }()
         return ValidatedBackup(
             values: values,
             unknownKeyCount: unknown,
             typeMismatchCount: mismatched,
+            font: font,
             appVersion: doc["appVersion"] as? String,
             build: doc["build"] as? String,
             exportedAt: exportedAt
@@ -355,10 +386,18 @@ enum SettingsBackup {
         }
         SettingsManager.shared.reloadFromUserDefaults()
         PlatformPreferenceStore.shared.reloadFromUserDefaults()
+        // The installed font, if the file carried one.
+        // `restoreFont` stages + registers before replacing, so bad
+        // data can never wipe the font already installed.
+        let fontRestored: Bool = {
+            guard let font = backup.font else { return false }
+            return FontManager.restoreFont(name: font.name, data: font.data)
+        }()
         return ImportResult(
             appliedCount: backup.values.count,
             skippedUnknownCount: backup.unknownKeyCount,
-            skippedTypeMismatchCount: backup.typeMismatchCount
+            skippedTypeMismatchCount: backup.typeMismatchCount,
+            fontRestored: fontRestored
         )
     }
 

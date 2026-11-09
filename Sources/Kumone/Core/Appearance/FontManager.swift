@@ -85,17 +85,28 @@ enum FontManager {
         return nil
     }
 
-    /// Restore a font from backup data.
+    /// Restore a font from backup data. Stages + registers the data
+    /// BEFORE touching the installed font, so corrupt backup data can
+    /// never wipe the font the user already has (P6: the backup
+    /// carries the font file, and a hand-edited file may be bad).
     @discardableResult
     static func restoreFont(name: String, data: Data) -> Bool {
-        clear()
-        let file = fontsDirectory.appendingPathComponent("golia-restored-font.ttf")
-        do {
-            try data.write(to: file, options: .atomic)
-        } catch {
+        guard !data.isEmpty else { return false }
+        let staging = fontsDirectory.appendingPathComponent("golia-restored-font-staging.ttf")
+        do { try data.write(to: staging, options: .atomic) } catch { return false }
+        guard register(staging) != nil else {
+            try? FileManager.default.removeItem(at: staging)
             return false
         }
-        guard register(file) != nil else { return false }
+        let file = fontsDirectory.appendingPathComponent("golia-restored-font.ttf")
+        try? FileManager.default.removeItem(at: file)
+        do { try FileManager.default.moveItem(at: staging, to: file) } catch { return false }
+        // Already registered in-process from the staging file (same
+        // bytes); launch re-registers from this path.
+        if let files = try? FileManager.default.contentsOfDirectory(
+            at: fontsDirectory, includingPropertiesForKeys: nil) {
+            for f in files where f != file { try? FileManager.default.removeItem(at: f) }
+        }
         installedFontName = name
         return true
     }

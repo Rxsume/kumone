@@ -145,4 +145,62 @@ struct SettingsBackupTests {
         #expect(s.audioQuality == .exhigh)
         #expect(s.subtitleCustomFont == "restored-preset")
     }
+
+    // MARK: - Installed font in the backup (P6)
+
+    private func backupDocWithFont(_ font: [String: Any]?) -> Data {
+        var doc: [String: Any] = [
+            "format": SettingsBackup.formatIdentifier,
+            "formatVersion": SettingsBackup.formatVersion,
+            "app": "Golia",
+            "appVersion": "0.3.29",
+            "build": "693",
+            "exportedAt": "2026-11-08T14:00:00Z",
+            "settings": ["settings.audioQuality": "exhigh"],
+        ]
+        if let font { doc["font"] = font }
+        return try! JSONSerialization.data(withJSONObject: doc)
+    }
+
+    @Test("a well-formed font entry validates, a malformed one is ignored")
+    func fontEntryValidation() throws {
+        // Well-formed: name + base64 data.
+        let good = backupDocWithFont([
+            "name": "TestFont",
+            "data": Data("not-a-real-font".utf8).base64EncodedString(),
+        ])
+        let validated = try SettingsBackup.validate(good)
+        #expect(validated.font?.name == "TestFont")
+        #expect(validated.font?.data == Data("not-a-real-font".utf8))
+
+        // Malformed variants: missing data, bad base64, empty name —
+        // all ignored, and the settings in the same file still validate.
+        for bad in [
+            ["name": "TestFont"],
+            ["name": "TestFont", "data": "!!!not-base64!!!"],
+            ["name": "", "data": Data("x".utf8).base64EncodedString()],
+            ["name": "TestFont", "data": Data().base64EncodedString()],
+        ] as [[String: Any]] {
+            let v = try SettingsBackup.validate(backupDocWithFont(bad))
+            #expect(v.font == nil)
+            #expect(v.values["settings.audioQuality"] as? String == "exhigh")
+        }
+
+        // No font key at all: old files still validate, font is nil.
+        let v = try SettingsBackup.validate(backupDocWithFont(nil))
+        #expect(v.font == nil)
+    }
+
+    @Test("applying a backup with an uninstallable font reports fontRestored == false")
+    func fontRestoreFailureIsReported() throws {
+        // Garbage font bytes: `restoreFont` stages + registers first,
+        // so it fails without touching any installed font.
+        let doc = backupDocWithFont([
+            "name": "TestFont",
+            "data": Data("not-a-real-font".utf8).base64EncodedString(),
+        ])
+        let result = try SettingsBackup.importData(doc)
+        #expect(result.fontRestored == false)
+        #expect(result.appliedCount > 0)
+    }
 }

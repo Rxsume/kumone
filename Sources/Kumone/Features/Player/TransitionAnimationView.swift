@@ -8,10 +8,10 @@ import SwiftUI
 /// The ring shows only when `isTransitioning` is true *and*
 /// `settings.effectiveTransitionAnimationRing` is on. `isTransitioning`
 /// comes from `NowPlayingView.transitionInProgress`, which reads the
-/// player's published signal: on iOS the dual-deck crossfade engine drives
-/// it (and it stays false while crossfade is switched off); on macOS the
-/// AutoMix engine does. The ring therefore only appears during an actual
-/// track transition, never on a plain tap.
+/// player's published signal: on macOS the AutoMix engine drives it; on
+/// iOS the single-engine player never overlaps tracks, so it stays false
+/// there (PR #36 rollback) and the ring never appears. The ring therefore
+/// only appears during an actual track transition, never on a plain tap.
 struct TransitionAnimationView: View {
     let isTransitioning: Bool
     /// Resolved theme accent, passed down from NowPlayingView (C12/C14).

@@ -430,6 +430,15 @@ struct SettingsView: View {
                     Text("第三方音源播出会员歌曲时弹出提醒")
                         .font(.caption)
                         .foregroundStyle(.secondary)
+                    // P6: 灰色歌曲解锁是第三方音源的总闸
+                    // (`unblockEnabled = enableUnblock &&
+                    // !enabledAudioSourceIDs.isEmpty`)，备份恢复也能把它
+                    // 关掉；P3b 删了它的旧行后一旦关掉就再也打不开了，
+                    // 所以它必须留一个可见开关，放在自定义音源行上面。
+                    Toggle("灰色歌曲解锁", isOn: $settings.enableUnblock)
+                    Text("无版权或下架歌曲将从已启用音源中匹配播放")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
                     Button {
                         showCustomSources = true
                     } label: {
@@ -630,6 +639,11 @@ struct SettingsView: View {
                     NavigationLink(value: SettingsPage.lyricStyle) {
                         Label("歌词样式", systemImage: "textformat")
                     }
+                    // P6 re-homing slot (PR #40, branch
+                    // `folia-lyrics-multisource-restore`): its 歌词 section
+                    // rows — 自动使用最佳歌词 toggle、歌词匹配优先级
+                    // picker、全局时间偏移 stepper — 合并时移到这里。
+                    // 本分支不得重建它们，否则 rebase 会出两份。
                     Toggle("静态模式", isOn: $settings.staticMode)
                     Text("关闭动态效果（环境色过渡、黑胶旋转、歌词动效）")
                         .font(.caption)
@@ -716,11 +730,16 @@ struct SettingsView: View {
                     .font(.caption)
                     .foregroundStyle(.secondary)
                 Toggle("过渡动画-屏幕圆环", isOn: $settings.transitionAnimationRing)
-                Text("需先打开「切歌淡入淡出」，只在切歌过渡时出现")
+                // P6: 旧文案“需先打开「切歌淡入淡出」”指向的过渡模式
+                // 选择器（AutoMixSettingsSection 的“过渡模式”）已不在
+                // 设置页里；iOS 上 `PlayerServiceIOS.transitionInProgress`
+                // 在 PR #36 单引擎回退后恒为 false，圆环目前只在 macOS
+                // 的 AutoMix 切歌过渡进行时出现。
+                Text("只在切歌过渡进行时短暂出现；iOS 单引擎播放时不产生过渡")
                     .font(.caption)
                     .foregroundStyle(.secondary)
                 Toggle("过渡动画-卡片描边", isOn: $settings.transitionAnimationCard)
-                Text("需先打开「切歌淡入淡出」，只在切歌过渡时出现")
+                Text("只在切歌过渡进行时短暂出现；iOS 单引擎播放时不产生过渡")
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }

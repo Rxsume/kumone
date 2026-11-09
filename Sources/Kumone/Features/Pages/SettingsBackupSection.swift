@@ -37,7 +37,7 @@ struct SettingsBackupSection: View {
                 showImporter = true
             }
 
-            Text("只备份设置，不含登录账号、密码与 Token。恢复会覆盖当前全部设置，恢复前会请你确认；登录状态不受影响。")
+            Text("只备份设置与已安装字体，不含登录账号、密码与 Token。恢复会覆盖当前全部设置，恢复前会请你确认；登录状态不受影响。")
                 .font(.caption)
                 .foregroundStyle(.secondary)
         }
@@ -55,6 +55,9 @@ struct SettingsBackupSection: View {
                     let result = SettingsBackup.apply(backup)
                     pendingBackup = nil
                     var message = "已恢复 \(result.appliedCount) 项设置"
+                    if result.fontRestored {
+                        message += "，已安装备份里的字体"
+                    }
                     if result.skippedUnknownCount > 0 || result.skippedTypeMismatchCount > 0 {
                         message += "（跳过 \(result.skippedUnknownCount + result.skippedTypeMismatchCount) 项无法识别的内容）"
                     }
@@ -87,6 +90,9 @@ struct SettingsBackupSection: View {
             parts.append("导出于 \(date.formatted(date: .long, time: .shortened))")
         }
         parts.append("将用它覆盖当前设置（\(backup.values.count) 项）")
+        if let font = backup.font {
+            parts.append("包含已安装字体「\(font.name)」，恢复时会一并安装")
+        }
         if backup.unknownKeyCount > 0 || backup.typeMismatchCount > 0 {
             parts.append("其中 \(backup.unknownKeyCount + backup.typeMismatchCount) 项无法识别，会被跳过")
         }
@@ -122,7 +128,7 @@ struct SettingsBackupSection: View {
         }
         do {
             let backup = try SettingsBackup.validate(data)
-            if backup.values.isEmpty {
+            if backup.values.isEmpty && backup.font == nil {
                 fail(String(localized: "这个备份里没有可恢复的设置"))
                 return
             }
