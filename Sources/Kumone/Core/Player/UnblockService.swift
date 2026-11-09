@@ -44,6 +44,27 @@ enum UnblockService {
     ) async -> Resolution {
         var newlyAttemptedSources = Set<AudioSourceID>()
         guard !Task.isCancelled else { return Resolution(source: nil, attemptedSources: []) }
+        // User-imported LX script sources FIRST, before the platform
+        // rule: the user asked for the imported script to replace
+        // 酸甜贤 as the default playback source. If every script
+        // fails, the ladder continues exactly as today. The
+        // `enableUnblock` gate lives at the call sites (PlayerService
+        // / PlayerServiceIOS only call `resolve` when unblocking is
+        // allowed), so it is not re-checked here. Order within the
+        // step is the user's list order in the store.
+        let customSources = await MainActor.run { CustomAudioSourceStore.shared.sources }
+            .filter { $0.enabled && $0.script?.isEmpty == false }
+        if !customSources.isEmpty, !attemptedSources.contains(.customScript) {
+            newlyAttemptedSources.insert(.customScript)
+            for source in customSources {
+                guard !Task.isCancelled else { break }
+                guard let scriptURL = await customScriptResolve(track, source: source) else { continue }
+                let resolved = ResolvedAudioSource(id: .customScript, displayName: source.name, url: scriptURL)
+                if await isUsable(resolved, track: track) {
+                    return Resolution(source: resolved, attemptedSources: newlyAttemptedSources)
+                }
+            }
+        }
         // Platform tracks resolve through the NetEase ladder FIRST:
         // the user asked for 酸甜贤 as the default playback source for
         // songs from all platforms ("搜索全平台歌曲播放音源酸甜贤").
@@ -130,18 +151,7 @@ enum UnblockService {
     /// (269s, 叶惠美）. A logged-in QQ session stays the sure path for
     /// VIP songs when the other platform cannot resolve them either.
     private static func platformTrackViaFallbacks(_ track: Track) async -> ResolvedAudioSource? {
-        let keyword = AudioSourceTrackMatcher.keyword(for: track)
-        guard !keyword.isEmpty else { return nil }
-        guard let result = try? await MusicAPI.search(keyword, type: .songs, limit: 10),
-              let candidates = result.songs,
-              let match = candidates.first(where: {
-                  AudioSourceTrackMatcher.matchesNetEase(
-                      track: track, title: $0.name,
-                      artist: $0.artists.map(\.name).joined(separator: "/"),
-                      durationMS: $0.durationMS)
-              }),
-              match.id > 0
-        else { return nil }
+        guard let match = await matchedNetEaseTrack(for: track) else { return nil }
         // NetEase ladder on the matched track, ikun first.
         if let resolved = try? await ikunProvider.resolve(track: match),
            await isUsable(resolved, track: match) {
@@ -171,6 +181,77 @@ enum UnblockService {
            await isUsable(resolved, track: track) {
             log.info("platform track via \(otherProvider.id.rawValue, privacy: .public): cross-platform match for \"\(track.name, privacy: .public)\"")
             return resolved
+        }
+        return nil
+    }
+
+    /// Matches a platform track to the same song on NetEase
+    /// (cross-platform search + match). Nil when nothing matches —
+    /// the failure is surfaced, never a wrong song. Factored out of
+    /// `platformTrackViaFallbacks` so the custom script step can
+    /// reuse the same match.
+    private static func matchedNetEaseTrack(for track: Track) async -> Track? {
+        let keyword = AudioSourceTrackMatcher.keyword(for: track)
+        guard !keyword.isEmpty else { return nil }
+        guard let result = try? await MusicAPI.search(keyword, type: .songs, limit: 10),
+              let candidates = result.songs,
+              let match = candidates.first(where: {
+                  AudioSourceTrackMatcher.matchesNetEase(
+                      track: track, title: $0.name,
+                      artist: $0.artists.map(\.name).joined(separator: "/"),
+                      durationMS: $0.durationMS)
+              }),
+              match.id > 0
+        else { return nil }
+        return match
+    }
+
+    /// Tries one imported script for a track, in identity order:
+    /// the track's own platform id first (QQ songmid / Kugou hash),
+    /// then the NetEase id — directly for NetEase tracks, or via the
+    /// matched NetEase track for platform tracks (whose own id is a
+    /// negative stable hash that no source can resolve). First
+    /// non-nil URL wins; the `isUsable` clip check is applied by the
+    /// caller. Quality is the source's own quality (default `320k`).
+    private static func customScriptResolve(_ track: Track, source: CustomAudioSource) async -> URL? {
+        let quality = source.quality
+        let albumName = track.album.name
+        let albumID = String(track.album.id)
+        if track.platformSource == .qqmusic, let key = track.platformSongKey, !key.isEmpty {
+            // `songmid[|mediaMid]`
+            let parts = key.split(separator: "|", omittingEmptySubsequences: false).map(String.init)
+            let qqMid = parts[0]
+            let qqMediaMid = parts.count > 1 && !parts[1].isEmpty ? parts[1] : nil
+            if let url = await LXScriptRunner.shared.resolve(
+                source: source, songSource: .qq, songID: qqMid,
+                qqMid: qqMid, qqMediaMid: qqMediaMid,
+                name: track.name, artists: track.artistNames,
+                albumName: albumName, albumID: albumID, quality: quality
+            ) { return url }
+        }
+        if track.platformSource == .kugou, let key = track.platformSongKey, !key.isEmpty {
+            // `hash[|albumAudioId|albumId]`
+            let hash = key.split(separator: "|").first.map(String.init) ?? key
+            if let url = await LXScriptRunner.shared.resolve(
+                source: source, songSource: .kugou, songID: hash,
+                kugouID: hash,
+                name: track.name, artists: track.artistNames,
+                albumName: albumName, albumID: albumID, quality: quality
+            ) { return url }
+        }
+        if track.id > 0 {
+            return await LXScriptRunner.shared.resolve(
+                source: source, songSource: .netease, songID: String(track.id),
+                name: track.name, artists: track.artistNames,
+                albumName: albumName, albumID: albumID, quality: quality
+            )
+        }
+        if let matched = await matchedNetEaseTrack(for: track) {
+            return await LXScriptRunner.shared.resolve(
+                source: source, songSource: .netease, songID: String(matched.id),
+                name: track.name, artists: track.artistNames,
+                albumName: albumName, albumID: albumID, quality: quality
+            )
         }
         return nil
     }
