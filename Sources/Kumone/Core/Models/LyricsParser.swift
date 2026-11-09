@@ -154,7 +154,7 @@ enum LyricsParser {
         return lines
     }
 
-    static func parse(_ response: LyricResponse) -> ParsedLyrics {
+    static func parse(_ response: LyricResponse, filter: LyricFilterSettings = .default) -> ParsedLyrics {
         var out = ParsedLyrics()
         out.contributor = response.lyricUser?.nickname
         out.translationContributor = response.transUser?.nickname
@@ -173,7 +173,9 @@ enum LyricsParser {
                 return out
             }
         }
-        main.removeAll { $0.text.range(of: #"^作(词|曲)\s*[:：]\s*无$"#, options: .regularExpression) != nil }
+        // (The old `作词/作曲：无` strip lived here; it is now the
+        // default filter rule in `LyricLineRule.defaultRules`, so it
+        // applies to verbatim lines too instead of lrc lines only.)
 
         // Prefer verbatim (word-by-word) lines when the song has them — some
         // ship them without an lrc body. Otherwise each lrc line gets its
@@ -222,6 +224,13 @@ enum LyricsParser {
 
         merge(response.ytlrc?.lyric ?? response.tlyric?.lyric, into: \.translation)
         merge(response.yromalrc?.lyric ?? response.romalrc?.lyric, into: \.romaji)
+
+        // Folia 歌词过滤：逐行规则先，制作人员策略后，两套机制按此
+        // 顺序组合。过滤在解析时跑，而不是显示时——离线缓存存的是
+        // 解析前的歌词响应，缓存与新鲜歌词必须看到同样的行。
+        lines = LyricFilter.applyRules(lines, settings: filter)
+        lines = LyricStaffCredits.applyPolicy(lines, settings: filter)
+        guard !lines.isEmpty else { return out }
 
         // Readings are only meaningful for Japanese lyrics: fill the romaji
         // gaps the service left, annotate the kanji, and drop stray annotations on

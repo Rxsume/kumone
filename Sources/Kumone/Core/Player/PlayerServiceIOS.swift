@@ -1584,13 +1584,13 @@ final class PlayerService: ObservableObject {
         let scope = offlineAccountScope
         if let scope, let saved = await OfflineMetadataStore.shared.lyrics(trackID: track.id, scope: scope) {
             guard generation == resolveGeneration else { return }
-            lyrics = LyricsParser.parse(saved).applyingOffset(lyricOffsetSeconds)
+            lyrics = LyricsParser.parse(saved, filter: LyricFilterSettings.effective(for: track)).applyingOffset(lyricOffsetSeconds)
             updateLyricsCursor(at: progress)
         }
         guard !usesOfflineQueue else { return }
         let response = await MusicAPI.lyric(for: track)
         guard generation == resolveGeneration, let response else { return }
-        lyrics = LyricsParser.parse(response).applyingOffset(lyricOffsetSeconds)
+        lyrics = LyricsParser.parse(response, filter: LyricFilterSettings.effective(for: track)).applyingOffset(lyricOffsetSeconds)
         updateLyricsCursor(at: progress)
         if let scope, SettingsManager.shared.enableAudioCache || DownloadManager.shared.isDownloaded(trackID: track.id) {
             await OfflineMetadataStore.shared.keepPlaybackData(track: track, lyrics: response, scope: scope)
