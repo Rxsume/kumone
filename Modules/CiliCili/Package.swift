@@ -18,7 +18,7 @@ import PackageDescription
 // (GlassEffectContainer, ToolbarSpacer, .glass button style), so it
 // cannot build against a lower target.
 let package = Package(
-    name: "CiliCiliKit",
+    name: "CiliCili",
     platforms: [.iOS("26.1")],
     products: [
         .library(name: "CiliCiliKit", type: .dynamic, targets: ["CiliCiliKit"]),

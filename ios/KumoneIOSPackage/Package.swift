@@ -23,7 +23,7 @@ let package = Package(
             name: "KumoneIOSFeature",
             dependencies: [
                 .product(name: "KumoneCore", package: "kumone"),
-                .product(name: "CiliCiliKit", package: "CiliCiliKit"),
+                .product(name: "CiliCiliKit", package: "CiliCili"),
             ],
             path: "Sources/KumoneIOSFeature"
         ),
