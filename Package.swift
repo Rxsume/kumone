@@ -37,7 +37,9 @@ let cltTestingLinkerSettings: [LinkerSetting] = cltHasTesting
 let package = Package(
     name: "Kumone",
     defaultLocalization: "zh-Hans",
-    platforms: [.macOS("15.0"), .iOS("16.0")],
+    // iOS 26.1 (was 16.0): the vendored CiliCiliKit module (Bilibili
+    // video client) uses unguarded iOS 26 APIs. macOS is untouched.
+    platforms: [.macOS("15.0"), .iOS("26.1")],
     products: [
         .executable(name: "Kumone", targets: ["KumoneLauncher"]),
         .library(name: "KumoneCore", targets: ["KumoneCore"]),

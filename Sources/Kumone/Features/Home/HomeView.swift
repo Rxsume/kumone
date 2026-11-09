@@ -78,6 +78,16 @@ final class HomeViewModel: ObservableObject {
             return
         }
 
+        // Bilibili (phase 1): entry point only — no feed yet, so there
+        // is nothing to fetch. Mark loaded so the placeholder renders
+        // instead of the platform-sections error state.
+        if platform == .bilibili {
+            platformPlaylists = []
+            platformToplists = []
+            state = .loaded
+            return
+        }
+
         // QQ: recommended songs (radar) + recommended playlists +
         // hot songs + charts + hot artists. Kugou: recommended
         // playlists + charts only — it has no verified endpoint for
@@ -111,6 +121,8 @@ final class HomeViewModel: ObservableObject {
         switch platform {
         case .netease:
             return []
+        case .bilibili:
+            return []
         case .qqmusic:
             return (try? await QQMusicAPI.shared.recommendPlaylists(limit: 12))?.map {
                 PlatformPlaylistSummary(source: .qqmusic, platformID: $0.id, name: $0.name,
@@ -127,6 +139,8 @@ final class HomeViewModel: ObservableObject {
     private func fetchPlatformToplists(platform: HomePlatform) async -> [PlatformToplistItem] {
         switch platform {
         case .netease:
+            return []
+        case .bilibili:
             return []
         case .qqmusic:
             return (try? await QQMusicAPI.shared.topLists())?.map {
@@ -206,6 +220,9 @@ struct HomeView: View {
     @EnvironmentObject private var player: PlayerService
     @StateObject private var model = HomeViewModel.shared
     @ObservedObject private var settings = SettingsManager.shared
+    /// Bilibili login state for the phase-1 home placeholder.
+    @ObservedObject private var blAuth = BilibiliAuth.shared
+    @State private var showBilibiliLogin = false
 
     /// `.task(id:)` needs an `Equatable` id; tuples cannot conform to
     /// `Equatable` in Swift, so the (loggedIn, platform) pair gets a
@@ -268,6 +285,9 @@ struct HomeView: View {
         .task(id: FeedTaskID(loggedIn: account.isLoggedIn, platform: settings.homePlatform)) {
             await model.load(platform: settings.homePlatform, loggedIn: account.isLoggedIn)
         }
+        .sheet(isPresented: $showBilibiliLogin) {
+            LoginSheet(initialProvider: .bilibili)
+        }
     }
 
     /// Switching home platform also opts into that platform's content:
@@ -305,6 +325,8 @@ struct HomeView: View {
         LazyVStack(alignment: .leading, spacing: Theme.Layout.sectionSpacing) {
             if settings.homePlatform == .netease {
                 netEaseSections
+            } else if settings.homePlatform == .bilibili {
+                bilibiliPlaceholderSections
             } else {
                 platformSections
             }
@@ -314,6 +336,30 @@ struct HomeView: View {
         .padding(.top, Theme.Layout.pageTopPadding)
         .padding(.bottom, Theme.Layout.contentInset - 8)
         .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    /// Bilibili home (phase 1): entry point only. The video feed
+    /// lands in phase 3; until then this shows the login state and
+    /// what is coming, instead of the platform-sections error state.
+    private var bilibiliPlaceholderSections: some View {
+        Group {
+            VStack(alignment: .leading, spacing: 12) {
+                Text("哔哩哔哩")
+                    .font(.title2.weight(.bold))
+                Text("视频首页正在搬运中，稍后上线。")
+                    .foregroundStyle(.secondary)
+                if blAuth.isLoggedIn {
+                    Text("已登录：\(blAuth.nickname.isEmpty ? "B站账号" : blAuth.nickname)")
+                    Button("退出登录", role: .destructive) { blAuth.logout() }
+                } else {
+                    Button("登录哔哩哔哩") { showBilibiliLogin = true }
+                    Text("扫码登录后可看 720P 以上清晰度视频。")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+            }
+            .padding(.vertical, 8)
+        }
     }
 
     /// Today's NetEase feed, byte-identical behaviour: feature cards,

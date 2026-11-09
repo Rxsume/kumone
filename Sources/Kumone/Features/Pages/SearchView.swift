@@ -377,13 +377,17 @@ final class SearchViewModel: ObservableObject {
     /// Merged songs, deduped on normalized (title + first artist).
     /// The home platform's songs come first: NetEase → QQ → Kugou by
     /// default, QQ → NetEase → Kugou when QQ is the home platform,
-    /// Kugou → NetEase → QQ when Kugou is.
+    /// Kugou → NetEase → QQ when Kugou is. Bilibili contributes no
+    /// songs to this merge (video platform), so it uses the default
+    /// NetEase-first order.
     private func mergePlatformSongs(netEase: [Track], qq: [Track], kugou: [Track]) -> [Track] {
         let ordered: [[Track]]
         switch SettingsManager.shared.homePlatform {
         case .netease: ordered = [netEase, qq, kugou]
         case .qqmusic: ordered = [qq, netEase, kugou]
         case .kugou: ordered = [kugou, netEase, qq]
+        // Bilibili has no song list in this merge: neutral default order.
+        case .bilibili: ordered = [netEase, qq, kugou]
         }
         var seen = Set<String>()
         var merged: [Track] = []
