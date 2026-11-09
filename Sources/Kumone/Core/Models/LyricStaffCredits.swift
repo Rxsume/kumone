@@ -198,7 +198,7 @@ let text = line.text.trimmingCharacters(in:.whitespaces)
 guard!text.isEmpty else { return true}
 guard text.count <= 8 else { return false}
 return text.unicodeScalars.allSatisfy { scalar in
-!CharacterSet.letters.contains(scalar) &&!CharacterSet.decimalDigits.contains(scalar)
+!CharacterSet.letters.contains(scalar) && !CharacterSet.decimalDigits.contains(scalar)
 }
 }
 
@@ -243,7 +243,7 @@ artist: String? = nil
 ) -> StaffCreditBlock? {
 var cursor = 0
 var headerLineCount = 0
-while cursor < lines.count &&!isStaffLine(lines[cursor]) {
+while cursor < lines.count && !isStaffLine(lines[cursor]) {
 if isFillerLine(lines[cursor]) {
 cursor += 1
 continue
@@ -285,7 +285,7 @@ scan += 1
 // minimum goes back: "指挥 Conductor：X" always comes in a group,
 // a lone lyric line does not.
 var trailingStructural = 0
-while trailingStructural < accepted.count &&!accepted[accepted.count - 1 - trailingStructural].fromDictionary {
+while trailingStructural < accepted.count && !accepted[accepted.count - 1 - trailingStructural].fromDictionary {
 trailingStructural += 1
 }
 if trailingStructural > 0 && trailingStructural < minTrailingStructuralRun {
@@ -298,14 +298,14 @@ pendingFiller = []
 guard accepted.count >= minStaffLines else { return nil}
 
 let staffIndexes = accepted.map(\.index)
-var memberIndexes = accepted.flatMap { [...$0.leadingFiller, $0.index]}
+var memberIndexes = accepted.flatMap { $0.leadingFiller + [$0.index]}
 // Separator lines right after the block travel with it, or hiding
 // the block would leave a run of orphaned "#" lines behind.
 memberIndexes.append(contentsOf: pendingFiller)
 
 let lastMemberIndex = memberIndexes[memberIndexes.count - 1]
 var firstLyricIndex: Int? = nil
-for index in (lastMemberIndex + 1)..<lines.count where!isFillerLine(lines[index]) {
+for index in (lastMemberIndex + 1)..<lines.count where !isFillerLine(lines[index]) {
 firstLyricIndex = index
 break
 }
