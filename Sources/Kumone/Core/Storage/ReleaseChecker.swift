@@ -72,13 +72,34 @@ enum ReleaseChecker {
         } catch {
             // GitHub unreadable: ask the mirrors for the version only.
             // If no mirror answers either, throw GitHub's original error
-            // (Folia's `discoverUpdateVersion` does the same).
+            // (Folia's `discoverUpdateVersion` does the same). The IPA URL
+            // is rebuilt from the tag with this repo's own fixed release
+            // convention (see `ipaURLFor(version:build:)`), never taken
+            // from a mirror response — so with GitHub blocked the download
+            // buttons still work in-app (direct, or the accelerated mirror
+            // button) instead of degrading to opening the GitHub page in
+            // Safari, which is what used to happen when `ipaURL` was nil.
             if let mirrored = await fetchTagViaMirrors() {
                 return Release(version: mirrored.version, build: mirrored.build,
-                              url: releasesPage, ipaURL: nil)
+                              url: releasesPage,
+                              ipaURL: Self.ipaURLFor(version: mirrored.version, build: mirrored.build))
             }
             throw error
         }
+    }
+
+    /// The IPA asset URL for a release, from the repo's own naming
+    /// convention: the unsigned-iOS workflow publishes
+    /// `Golia-iOS-<version>-custom.ipa` under the tag
+    /// `Golia-<version>-build-<build>`. Only the tag (version + build)
+    /// comes from the caller — the shape is fixed here, so a mirror
+    /// that lies about the tag can only point at another release of
+    /// this repo, never at an arbitrary URL. Nil when there is no build
+    /// number (pre-build-number tags), in which case the caller falls
+    /// back to opening the releases page.
+    private static func ipaURLFor(version: String, build: Int?) -> URL? {
+        guard let build else { return nil }
+        return URL(string: "https://github.com/\(repo)/releases/download/Golia-\(version)-build-\(build)/Golia-iOS-\(version)-custom.ipa")
     }
 
     /// Fetch a full release (tag + page URL + IPA asset URL) from a
@@ -110,14 +131,83 @@ enum ReleaseChecker {
     /// Public GitHub proxies the version check falls back to (Folia 0.7.27,
     /// `UPDATE_CHECK_MIRROR_PREFIXES`). Each takes the full GitHub API URL
     /// after its own address. `ghfast.top` refuses requests from outside
-    /// mainland China; the others answer from anywhere — racing all four
-    /// means one refusing simply loses.
+    /// mainland China; the others answer from anywhere — racing all of
+    /// them means one refusing simply loses. `gh.ddlc.top` is an extra
+    /// documented public proxy (listed by moretools.app); it answers 429
+    /// from this VM's egress, so it is unverified for the API path — it
+    /// fails fast and the race just moves on.
     private static let mirrorPrefixes = [
         "https://ghfast.top/",
         "https://edgeone.gh-proxy.com/",
         "https://gh-proxy.com/",
         "https://ghproxy.net/",
+        "https://gh.ddlc.top/",
     ]
+
+    /// Mirrors used ONLY for the explicit "加速下载 IPA（代理镜像）"
+    /// button — never for the version check and never silently. Each
+    /// one was verified 2026-11-08 to serve the real Golia IPA asset
+    /// (HTTP 206 + ZIP magic on a ranged GET of the release file).
+    /// They are a different set from `mirrorPrefixes` on purpose:
+    /// several of them do not proxy api.github.com at all (githubproxy.cc
+    /// answers the API URL with an HTML page, cors.isteed.cc 403s it),
+    /// while `ghfast.top` refuses the API from outside mainland China
+    /// yet serves release assets fine. `ghfast.top` is first because it
+    /// is CN-optimized — the user's network — and refuses elsewhere,
+    /// which is exactly the audience for the accelerated button.
+    static let downloadMirrorPrefixes = [
+        "https://ghfast.top/",
+        "https://gh-proxy.com/",
+        "https://edgeone.gh-proxy.com/",
+        "https://ghproxy.net/",
+        "https://githubproxy.cc/",
+        "https://cors.isteed.cc/",
+    ]
+
+    /// One IPA download candidate: the URL to try, and the mirror host to
+    /// show in the progress view while trying it (nil for the direct
+    /// GitHub URL).
+    struct DownloadCandidate {
+        let url: URL
+        /// Mirror host (e.g. "ghfast.top") while this candidate is tried;
+        /// nil for the direct GitHub URL.
+        let mirrorHost: String?
+    }
+
+    /// Download candidates for an IPA, in try order. When the direct
+    /// GitHub URL is reachable, it is the only candidate; when it is not
+    /// (mainland network without a VPN), the domestic mirrors are tried
+    /// in the `downloadMirrorPrefixes` order instead. Pure function of
+    /// its inputs, so the selection is unit-testable without network.
+    static func downloadCandidates(for ipaURL: URL, directReachable: Bool) -> [DownloadCandidate] {
+        if directReachable { return [DownloadCandidate(url: ipaURL, mirrorHost: nil)] }
+        return downloadMirrorPrefixes.compactMap { prefix in
+            URL(string: prefix + ipaURL.absoluteString).map {
+                DownloadCandidate(url: $0, mirrorHost: URL(string: prefix)?.host ?? prefix)
+            }
+        }
+    }
+
+    /// Probe whether the direct GitHub asset URL answers (HEAD, 5 s).
+    /// iOS cannot read another app's VPN state, so this is the ground
+    /// truth for "no VPN": on mainland networks github.com is unreachable
+    /// and the probe fails or times out; with a VPN (or outside China) it
+    /// answers. The session follows GitHub's 302 to the asset CDN and the
+    /// final 2xx is what counts; a HEAD carries no body, so a slow or
+    /// unreachable direct link costs at most the 5 s timeout. `session`
+    /// is injectable for tests; production passes `.shared`.
+    static func isDirectReachable(_ url: URL, session: URLSession = .shared) async -> Bool {
+        var request = URLRequest(url: url)
+        request.httpMethod = "HEAD"
+        request.timeoutInterval = 5
+        do {
+            let (_, response) = try await session.data(for: request)
+            guard let http = response as? HTTPURLResponse else { return false }
+            return (200..<300).contains(http.statusCode)
+        } catch {
+            return false
+        }
+    }
 
     /// Race the mirrors for the latest tag; first plausible answer wins,
     /// nil when none answers. Only the tag is read from a mirror — never

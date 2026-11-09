@@ -14,15 +14,64 @@ concurrency:
 jobs:
   build-and-test:
     runs-on: macos-26
-    timeout-minutes: 45
+    timeout-minutes: 90
     steps:
       - uses: actions/checkout@v4
 
       - name: Build
         run: swift build
 
-      - name: Test
-        run: swift test
+      # Split in four on purpose. The two playback suites below are the only
+      # ones driving AVAudioEngine through runWithWatchdog, and on the
+      # 3-thread CI runner the whole target oversubscribes Swift's
+      # cooperative pool (upstream 9e24dc1 documents the same starvation:
+      # "CPU-heavy analyzer suites holding the rest of the pool"). A plain
+      # `swift test` timed out five times at the 45-minute cap — first in
+      # outgoingDeckStaysSilentAfterTransition's stereo case, then, once
+      # that case was dropped, in the last test of the same suite — with no
+      # watchdog timeout ever printing, i.e. the test task never got a pool
+      # thread to start on. Splitting the playback suites out did not fix
+      # it: run 42528891289 stalled again at the 60-minute cap, this time
+      # in the first group, with the whole runner frozen 41s in (935 tests
+      # passed) at AccountIsolationTests'
+      # lateResponseCannotRestoreLoggedOutCredentials — a victim of the
+      # starvation, not its cause. That suite then got its own invocation,
+      # and in run 42537537722 it PASSED alone, proving the stall is
+      # load-dependent — but the remaining ~115 suites still stalled and
+      # the run was cancelled at the cap. So the remainder is split in two
+      # by suite-name initial (A-M / N-Z, via --skip so any suite whose
+      # type name does not end in Tests still runs instead of being
+      # dropped). The 60-minute job cap above is headroom for the split's
+      # extra startup, not a fix for the hang: a stalled run is silent
+      # indefinitely, so a higher cap alone would only burn more minutes.
+      #
+      # Run 42546132121 (head c2a15ed) changed the picture: the N-Z step ran
+      # 53 minutes and passed 70 of 73 suites before the cap cancelled it —
+      # steady progress, not a stall — with the three unfinished suites
+      # (StemModelDownloaderStateTests, the "Cross-device sync" suite,
+      # ScoreRenderTests) still running, and a cluster of suites each taking
+      # ~32s. So N-Z is now split in three (N-P / Q-S / T-Z) to cut the
+      # per-invocation load, and the job cap is raised 60 -> 90 minutes:
+      # with the app + iOS build steps still to run after the tests, 60
+      # leaves no headroom for the slow suites even when nothing stalls.
+      # indefinitely, so a higher cap alone would only burn more minutes.
+      - name: Test (account isolation)
+        run: swift test --filter 'AccountIsolationTests'
+
+      - name: Test (suites A-M)
+        run: swift test --skip 'NavigationDestinationTests|NowPlayingArtworkStoreTests|OfflineArtworkTests|OfflineMetadataCleanupTests|OfflineStoreTests|OfflineUIFixtureTests|OutputRouteChangeDamperTests|OverloadTraceLineTests|PauseDrainTests|PlaybackQueuePlanTests|PlaybackRepositoryTests|PlaybackRescheduleCheckTests|PlaybackStallCheckTests|PlaybackStartErrorCheckTests|PlaybackStateStorageTests|PlaylistAddErrorTests|PlaylistLoadingTests|PlaylistPublicationTests|PlaylistSearchTests|PreparedDeckTests|ProgressiveAudioBufferTests|ProgressiveLoaderFLACTests|QueueOrderAcquisitionTests|QueueOrderTests|QueuePrefetchTests|RecommendationTests|ScoreByteIdentityTests|ScoreCompilerTests|ScoreGridSelfCheckTests|ScoreRenderTests|ScoreSegmentAdmissionTests|ScoreTemplateSelectionTests|ScoreVettingTests|SeamAlignmentTests|SeamLatencyCalibrationTests|SeamReleaseTests|SegmentTimelineAlignmentTests|SettingsBackupTests|ShortcutSettingsTests|SlamAndTensionCutCompileTests|SleepTimerTests|StemEnvelopeTests|StemModelDownloaderStateTests|StemModelSpecTests|StemModelVerificationTests|StemPrerenderFieldSampleTests|StemPrerenderStartTests|StemTechniqueTests|StorageUsageTests|StructureSegmenterTests|SyncTests|TapCaptureThreadingTests|TapWriteLedgerTests|TempoRampTests|TestWatchdogTests|TrackAnalyzerTests|TrackTableTests|TransitionAimTests|TransitionAutomationTests|TransitionIntentTests|TransitionPlannerStructureTests|TransitionPlannerTests|TransitionScoreModelTests|VinylRecordTests|VocalExchangeBothClocksTests|VocalHoldEQTests|WholeMixLaneTests|PlaybackEngineSmokeTests|TransitionSegmentTests|AccountIsolationTests'
+
+      - name: Test (suites N-P)
+        run: swift test --skip 'AdmissionGateTests|AnalysisStoreTests|AudioCacheEvictionTests|AudioCacheTests|AudioOutputDeviceTests|AudioSourceTrackMatcherTests|AuditionPlanOverrideTests|AutoMixDebugModelTests|AutoMixSettingsTests|AutomaticCacheLimitTests|BackgroundDownloadTransportTests|BedIntroCompileTests|BedSplitTests|CDNHostTests|ChainCoherenceTests|DeckChainDSPResetTests|DeckChainTimePitchBypassTests|DeviceIDTests|DistributionChannelTests|DownloadEligibilityTests|DownloadManagerTests|EngineAudioCacheDownloadTests|EngineDumpThrottleTests|EngineResurrectionSentinelTests|EngineTraceCoalesceTests|EngineTraceRenderTests|EngineTraceRingHygieneTests|EngineTraceRingTests|FoliaIOSCrossfadeTests|FoliaIOSPureLogicTests|FoliaMacPlaybackSettingsTests|FoliaMasterSwitchTests|FoliaPlaybackSettingsTests|GestureLibraryByteIdentityTests|HeadLatencyOverrideTests|HiddenAppWindowsTests|ImageCacheClearTests|ImageThumbnailTests|KumoneObjCTests|LatticePlayerTests|LayoutSizeClassTests|LoudnessCompensationTests|LoudnessMeterTests|LuminousPlayerTests|LyricsParserTests|LyricsSidecarTests|MasterLimiterTests|QueueOrderAcquisitionTests|QueueOrderTests|QueuePrefetchTests|RecommendationTests|ScoreByteIdentityTests|ScoreCompilerTests|ScoreGridSelfCheckTests|ScoreRenderTests|ScoreSegmentAdmissionTests|ScoreTemplateSelectionTests|ScoreVettingTests|SeamAlignmentTests|SeamLatencyCalibrationTests|SeamReleaseTests|SegmentTimelineAlignmentTests|SettingsBackupTests|ShortcutSettingsTests|SlamAndTensionCutCompileTests|SleepTimerTests|StemEnvelopeTests|StemModelDownloaderStateTests|StemModelSpecTests|StemModelVerificationTests|StemPrerenderFieldSampleTests|StemPrerenderStartTests|StemTechniqueTests|StorageUsageTests|StructureSegmenterTests|SyncTests|TapCaptureThreadingTests|TapWriteLedgerTests|TempoRampTests|TestWatchdogTests|TrackAnalyzerTests|TrackTableTests|TransitionAimTests|TransitionAutomationTests|TransitionIntentTests|TransitionPlannerStructureTests|TransitionPlannerTests|TransitionScoreModelTests|VinylRecordTests|VocalExchangeBothClocksTests|VocalHoldEQTests|WholeMixLaneTests|PlaybackEngineSmokeTests|TransitionSegmentTests|AccountIsolationTests'
+
+      - name: Test (suites Q-S)
+        run: swift test --skip 'AdmissionGateTests|AnalysisStoreTests|AudioCacheEvictionTests|AudioCacheTests|AudioOutputDeviceTests|AudioSourceTrackMatcherTests|AuditionPlanOverrideTests|AutoMixDebugModelTests|AutoMixSettingsTests|AutomaticCacheLimitTests|BackgroundDownloadTransportTests|BedIntroCompileTests|BedSplitTests|CDNHostTests|ChainCoherenceTests|DeckChainDSPResetTests|DeckChainTimePitchBypassTests|DeviceIDTests|DistributionChannelTests|DownloadEligibilityTests|DownloadManagerTests|EngineAudioCacheDownloadTests|EngineDumpThrottleTests|EngineResurrectionSentinelTests|EngineTraceCoalesceTests|EngineTraceRenderTests|EngineTraceRingHygieneTests|EngineTraceRingTests|FoliaIOSCrossfadeTests|FoliaIOSPureLogicTests|FoliaMacPlaybackSettingsTests|FoliaMasterSwitchTests|FoliaPlaybackSettingsTests|GestureLibraryByteIdentityTests|HeadLatencyOverrideTests|HiddenAppWindowsTests|ImageCacheClearTests|ImageThumbnailTests|KumoneObjCTests|LatticePlayerTests|LayoutSizeClassTests|LoudnessCompensationTests|LoudnessMeterTests|LuminousPlayerTests|LyricsParserTests|LyricsSidecarTests|MasterLimiterTests|NavigationDestinationTests|NowPlayingArtworkStoreTests|OfflineArtworkTests|OfflineMetadataCleanupTests|OfflineStoreTests|OfflineUIFixtureTests|OutputRouteChangeDamperTests|OverloadTraceLineTests|PauseDrainTests|PlaybackQueuePlanTests|PlaybackRepositoryTests|PlaybackRescheduleCheckTests|PlaybackStallCheckTests|PlaybackStartErrorCheckTests|PlaybackStateStorageTests|PlaylistAddErrorTests|PlaylistLoadingTests|PlaylistPublicationTests|PlaylistSearchTests|PreparedDeckTests|ProgressiveAudioBufferTests|ProgressiveLoaderFLACTests|TapCaptureThreadingTests|TapWriteLedgerTests|TempoRampTests|TestWatchdogTests|TrackAnalyzerTests|TrackTableTests|TransitionAimTests|TransitionAutomationTests|TransitionIntentTests|TransitionPlannerStructureTests|TransitionPlannerTests|TransitionScoreModelTests|VinylRecordTests|VocalExchangeBothClocksTests|VocalHoldEQTests|WholeMixLaneTests|PlaybackEngineSmokeTests|TransitionSegmentTests|AccountIsolationTests'
+
+      - name: Test (suites T-Z)
+        run: swift test --skip 'AdmissionGateTests|AnalysisStoreTests|AudioCacheEvictionTests|AudioCacheTests|AudioOutputDeviceTests|AudioSourceTrackMatcherTests|AuditionPlanOverrideTests|AutoMixDebugModelTests|AutoMixSettingsTests|AutomaticCacheLimitTests|BackgroundDownloadTransportTests|BedIntroCompileTests|BedSplitTests|CDNHostTests|ChainCoherenceTests|DeckChainDSPResetTests|DeckChainTimePitchBypassTests|DeviceIDTests|DistributionChannelTests|DownloadEligibilityTests|DownloadManagerTests|EngineAudioCacheDownloadTests|EngineDumpThrottleTests|EngineResurrectionSentinelTests|EngineTraceCoalesceTests|EngineTraceRenderTests|EngineTraceRingHygieneTests|EngineTraceRingTests|FoliaIOSCrossfadeTests|FoliaIOSPureLogicTests|FoliaMacPlaybackSettingsTests|FoliaMasterSwitchTests|FoliaPlaybackSettingsTests|GestureLibraryByteIdentityTests|HeadLatencyOverrideTests|HiddenAppWindowsTests|ImageCacheClearTests|ImageThumbnailTests|KumoneObjCTests|LatticePlayerTests|LayoutSizeClassTests|LoudnessCompensationTests|LoudnessMeterTests|LuminousPlayerTests|LyricsParserTests|LyricsSidecarTests|MasterLimiterTests|NavigationDestinationTests|NowPlayingArtworkStoreTests|OfflineArtworkTests|OfflineMetadataCleanupTests|OfflineStoreTests|OfflineUIFixtureTests|OutputRouteChangeDamperTests|OverloadTraceLineTests|PauseDrainTests|PlaybackQueuePlanTests|PlaybackRepositoryTests|PlaybackRescheduleCheckTests|PlaybackStallCheckTests|PlaybackStartErrorCheckTests|PlaybackStateStorageTests|PlaylistAddErrorTests|PlaylistLoadingTests|PlaylistPublicationTests|PlaylistSearchTests|PreparedDeckTests|ProgressiveAudioBufferTests|ProgressiveLoaderFLACTests|QueueOrderAcquisitionTests|QueueOrderTests|QueuePrefetchTests|RecommendationTests|ScoreByteIdentityTests|ScoreCompilerTests|ScoreGridSelfCheckTests|ScoreRenderTests|ScoreSegmentAdmissionTests|ScoreTemplateSelectionTests|ScoreVettingTests|SeamAlignmentTests|SeamLatencyCalibrationTests|SeamReleaseTests|SegmentTimelineAlignmentTests|SettingsBackupTests|ShortcutSettingsTests|SlamAndTensionCutCompileTests|SleepTimerTests|StemEnvelopeTests|StemModelDownloaderStateTests|StemModelSpecTests|StemModelVerificationTests|StemPrerenderFieldSampleTests|StemPrerenderStartTests|StemTechniqueTests|StorageUsageTests|StructureSegmenterTests|SyncTests|PlaybackEngineSmokeTests|TransitionSegmentTests|AccountIsolationTests'
+
+      - name: Test (playback suites)
+        run: swift test --filter 'PlaybackEngineSmokeTests|TransitionSegmentTests'
 
       # Same invocation as release.yml, minus signing / notarization: the
       # script's own ad-hoc signature is all an unsigned build gets.
