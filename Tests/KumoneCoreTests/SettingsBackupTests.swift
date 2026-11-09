@@ -20,7 +20,7 @@ struct SettingsBackupTests {
         var audioQuality: AudioQuality
         var enableAudioCache: Bool
         var audioCacheSizeMB: Int
-        var themePresetID: String
+        var subtitleCustomFont: String?
 
         @MainActor static func take() -> Snapshot {
             let s = SettingsManager.shared
@@ -28,7 +28,7 @@ struct SettingsBackupTests {
                 audioQuality: s.audioQuality,
                 enableAudioCache: s.enableAudioCache,
                 audioCacheSizeMB: s.audioCacheSizeMB,
-                themePresetID: s.themePresetID
+                subtitleCustomFont: s.subtitleCustomFont
             )
         }
 
@@ -37,7 +37,7 @@ struct SettingsBackupTests {
             s.audioQuality = audioQuality
             s.enableAudioCache = enableAudioCache
             s.audioCacheSizeMB = audioCacheSizeMB
-            s.themePresetID = themePresetID
+            s.subtitleCustomFont = subtitleCustomFont
         }
     }
 
@@ -86,18 +86,18 @@ struct SettingsBackupTests {
         let s = SettingsManager.shared
         s.audioQuality = .hires
         s.enableAudioCache = false
-        s.themePresetID = "test-preset"
+        s.subtitleCustomFont = "test-preset"
 
         let data = try #require(SettingsBackup.exportData())
         s.audioQuality = .standard
         s.enableAudioCache = true
-        s.themePresetID = "other-preset"
+        s.subtitleCustomFont = "other-preset"
 
         let result = try SettingsBackup.importData(data)
         #expect(result.appliedCount > 0)
         #expect(s.audioQuality == .hires)
         #expect(s.enableAudioCache == false)
-        #expect(s.themePresetID == "test-preset")
+        #expect(s.subtitleCustomFont == "test-preset")
     }
 
     @Test("foreign files are rejected, unknown keys are ignored")
@@ -132,17 +132,17 @@ struct SettingsBackupTests {
         defer { snap.restore() }
         let s = SettingsManager.shared
         s.audioQuality = .exhigh
-        s.themePresetID = "before"
+        s.subtitleCustomFont = "before"
 
         // audioQuality as a number (current value is a string) is a
-        // mismatch; themePresetID as a string is fine.
+        // mismatch; subtitleCustomFont as a string is fine.
         let doc = backupDoc(settings: [
             "settings.audioQuality": 123,
-            "settings.themePreset": "restored-preset",
+            "settings.subtitleCustomFont": "restored-preset",
         ])
         let result = try SettingsBackup.importData(doc)
         #expect(result.skippedTypeMismatchCount == 1)
         #expect(s.audioQuality == .exhigh)
-        #expect(s.themePresetID == "restored-preset")
+        #expect(s.subtitleCustomFont == "restored-preset")
     }
 }

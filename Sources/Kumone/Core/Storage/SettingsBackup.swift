@@ -45,8 +45,11 @@ enum SettingsBackup {
 
     /// Every settings key a backup may carry: the full `Keys` enum
     /// (generated from SettingsManager.swift) plus the updater's
-    /// dismissal key. A restore silently ignores any key not in
-    /// this set, so a foreign or hand-edited file cannot inject
+    /// dismissal key — minus the 7 keys the Folia rollback deleted
+    /// (themePreset, customTheme, preferCustomTheme,
+    /// songThemeAutoSwitch, preferredLyricSource, autoHidePlayerChrome,
+    /// iosCrossfadeEnabled), which must never be re-added here.
+    /// A restore silently ignores any key not in this set, so a foreign or hand-edited file cannot inject
     /// anything the app does not already know. The FN / Spotify /
     /// Apple Music credential keys no longer exist in the app, so they
     /// cannot appear here either.
@@ -59,7 +62,6 @@ enum SettingsBackup {
         "settings.audioCacheSizeMB",
         "settings.audioQuality",
         "settings.autoCheckUpdates",
-        "settings.autoHidePlayerChrome",
         "settings.autoSkipUnplayable",
         "settings.automixEnabled",
         "settings.automixOrder",
@@ -74,7 +76,6 @@ enum SettingsBackup {
         "settings.commonOpacity",
         "settings.commonUseCoverColorBg",
         "settings.crossfadeMaxSeconds",
-        "settings.customTheme",
         "settings.desktopLyricsCentered",
         "settings.dismissedUpdateRelease",
         "settings.enableAudioCache",
@@ -87,7 +88,6 @@ enum SettingsBackup {
         "settings.hideTranslationSubtitle",
         "settings.homeDynamicBackground",
         "settings.homePlatform",
-        "settings.iosCrossfadeEnabled",
         "settings.landscapeNowPlayingStyle",
         "settings.latentColorSource",
         "settings.latentDisplayMode",
@@ -156,8 +156,6 @@ enum SettingsBackup {
         "settings.playerControlSlots",
         "settings.playerPageNativeBlur",
         "settings.playerPageTintIntensity",
-        "settings.preferCustomTheme",
-        "settings.preferredLyricSource",
         "settings.preventDisplaySleepDuringPlayback",
         "settings.queueAddBehavior",
         "settings.reduceMotionBackground",
@@ -169,7 +167,6 @@ enum SettingsBackup {
         "settings.showLyricsTranslation",
         "settings.showMainWindowAmbientBackground",
         "settings.showMenuBarPlayer",
-        "settings.songThemeAutoSwitch",
         "settings.soraBlank",
         "settings.stageTrackCardEnabled",
         "settings.staticMode",
@@ -184,7 +181,6 @@ enum SettingsBackup {
         "settings.subtitleOverlayOpacity",
         "settings.subtitleUpcomingLineCount",
         "settings.subtitleUpcomingLyricsBlur",
-        "settings.themePreset",
         "settings.transitionAnimationCard",
         "settings.transitionAnimationRing",
         "settings.transitionMode",

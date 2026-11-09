@@ -2407,14 +2407,8 @@ final class SettingsManager: ObservableObject {
         foliaEnabled = defaults.object(forKey: Keys.foliaEnabled) as? Bool ?? true
         lyricAnimationStyle = defaults.string(forKey: Keys.lyricAnimationStyle)
             .flatMap(LyricAnimationStyle.init) ?? .fade
-        preferredLyricSource = defaults.string(forKey: Keys.preferredLyricSource)
-            .flatMap(LyricSource.init) ?? .netease
         homePlatform = defaults.string(forKey: Keys.homePlatform)
             .flatMap(HomePlatform.init) ?? .netease
-        themePresetID = defaults.string(forKey: Keys.themePreset) ?? "default"
-        customThemeJSON = defaults.string(forKey: Keys.customTheme) ?? ""
-        preferCustomTheme = defaults.object(forKey: Keys.preferCustomTheme) as? Bool ?? false
-        songThemeAutoSwitch = defaults.object(forKey: Keys.songThemeAutoSwitch) as? Bool ?? true
         homeDynamicBackground = defaults.object(forKey: Keys.homeDynamicBackground) as? Bool ?? true
         playerPageNativeBlur = defaults.object(forKey: Keys.playerPageNativeBlur) as? Bool ?? true
         staticMode = defaults.object(forKey: Keys.staticMode) as? Bool ?? false
@@ -2433,7 +2427,6 @@ final class SettingsManager: ObservableObject {
             Self.playerPageTintIntensityRange.upperBound
         )
         hidePlayerProgressBar = defaults.object(forKey: Keys.hidePlayerProgressBar) as? Bool ?? false
-        autoHidePlayerChrome = defaults.object(forKey: Keys.autoHidePlayerChrome) as? Bool ?? false
         alwaysShowPlayerBackButton =
             defaults.object(forKey: Keys.alwaysShowPlayerBackButton) as? Bool ?? false
         alwaysShowTrackSwitchButtons =
@@ -2446,8 +2439,6 @@ final class SettingsManager: ObservableObject {
         #if os(iOS)
         preventDisplaySleepDuringPlayback =
             defaults.object(forKey: Keys.preventDisplaySleep) as? Bool ?? true
-        iosCrossfadeEnabled =
-            defaults.object(forKey: Keys.iosCrossfadeEnabled) as? Bool ?? false
         #endif
         transitionMode = defaults.string(forKey: Keys.transitionMode)
             .flatMap(TransitionMode.init) ?? .automix
