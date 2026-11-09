@@ -135,6 +135,7 @@ private extension HomePlatform {
         case .netease: return "music.note"
         case .qqmusic: return "music.note.list"
         case .kugou: return "waveform"
+        case .bilibili: return "play.rectangle"
         }
     }
 }

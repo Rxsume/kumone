@@ -195,6 +195,8 @@ final class HomeViewModel: ObservableObject {
         switch platform {
         case .netease:
             return []
+        case .bilibili:
+            return []
         case .qqmusic:
             return (try? await QQMusicAPI.shared.recommendSongs(limit: 30))?.compactMap(Track.fromQQSong) ?? []
         case .kugou:
