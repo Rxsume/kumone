@@ -28,6 +28,8 @@ struct NowPlayingView: View {
     @State private var isUserScrolling = false
     @State private var showLyricsOnMobile = false
     @State private var showQueueOnMobile = false
+    /// Horizontal swipe offset on the classic cover (Beans swipe-to-switch).
+    @State private var classicSwipeOffset: CGFloat = 0
     /// Auto-hide model for the page chrome (Folia 3s idle fade).
     #if os(iOS)
     /// Folia lyric-style window (VisPlayground) sheet, opened from the
@@ -271,6 +273,28 @@ struct NowPlayingView: View {
         player.transitionInProgress
     }
 
+    /// Beans player-page palette, derived from the cover's dominant colour
+    /// (hue-bucket extraction, cached per artwork — see
+    /// `BeansPaletteExtractor`). The page always renders dark
+    /// (`.preferredColorScheme(.dark)`), so the palette is built for
+    /// `.dark`; with no artwork it falls back to the neutral colours +
+    /// fixed theme accent.
+    private var beansPalette: BeansCoverPalette {
+        let dominant: BeansRGBColor?
+        #if os(iOS)
+        if let image = artworkImage, let urlString = player.currentTrack?.album.picUrl {
+            dominant = BeansPaletteExtractor.dominantColor(from: image, cacheKey: urlString)
+        } else {
+            dominant = nil
+        }
+        #else
+        dominant = artworkStore.artwork.flatMap {
+            BeansPaletteExtractor.dominantColor(from: $0, cacheKey: String(player.currentTrack?.id ?? 0))
+        }
+        #endif
+        return BeansCoverPalette.make(dominant: dominant, colorScheme: .dark)
+    }
+
     /// Scales an artwork palette toward the neutral fallback (intensity < 1)
     /// or past it (intensity > 1), so 1.0 returns the extracted colours
     /// unchanged. Component math, not opacity: the backdrop gradient is
@@ -477,10 +501,39 @@ struct NowPlayingView: View {
 
     private var gradientBackdrop: some View {
         ZStack {
+            #if os(iOS)
+            // Beans blurred-cover layer, gated by the existing native-blur
+            // setting: the cover itself, pre-blurred once per track, washed
+            // with its own gradient. Off, the plain artwork gradient below
+            // shows (the pre-Beans behaviour).
+            if settings.effectivePlayerPageNativeBlur, let artworkImage {
+                BeansCoverBlurBackground(
+                    image: artworkImage,
+                    cacheKey: player.currentTrack?.album.picUrl ?? "",
+                    primary: colors.primary,
+                    secondary: colors.secondary,
+                    scheme: .dark,
+                    isStatic: backgroundIsStatic
+                )
+            }
+            #endif
             LinearGradient(
                 colors: [colors.primary, colors.secondary],
                 startPoint: .topLeading, endPoint: .bottomTrailing
             )
+            // Beans ambient glow: two cover-coloured blobs drifting behind
+            // the content. Still in static mode / Reduce Motion background.
+            if !backgroundIsStatic {
+                BeansAmbientGlowView(
+                    accent: beansPalette.accent,
+                    secondary: beansPalette.secondary,
+                    isPlaying: player.isPlaying,
+                    dustMode: .off,
+                    dustDensity: 1,
+                    dustSize: 1,
+                    breath: 0.6
+                )
+            }
             RadialGradient(
                 colors: [.white.opacity(0.12), .clear],
                 center: .topLeading, startRadius: 0, endRadius: 700
@@ -1099,7 +1152,7 @@ struct NowPlayingView: View {
     }
 
     private func classicCompactLayout(size: CGSize) -> some View {
-        let artworkDim = min(size.width - 64, size.height * 0.38, 300)
+        let artworkDim = BeansPlayerLayout.coverSize(for: size)
         return VStack(spacing: 20) {
             Spacer().frame(height: 44)
             if showLyricsOnMobile {
@@ -1108,7 +1161,7 @@ struct NowPlayingView: View {
                     .transition(.opacity)
             } else {
                 VStack(spacing: 20) {
-                    artworkView(size: artworkDim)
+                    beansCoverPresentation(size: artworkDim)
                     trackMetaView
                     MiniLyricsView {
                         withAnimation(AppAnimation.standard) {
@@ -1117,12 +1170,18 @@ struct NowPlayingView: View {
                     }
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
                 }
+                // Beans swipe-to-switch: the whole album panel slides with
+                // the finger and fades slightly; past the threshold the
+                // track changes and the panel springs back.
+                .offset(x: classicSwipeOffset)
+                .opacity(1 - min(abs(classicSwipeOffset) / BeansPlayerLayout.swipeFadeDistance, 0.35))
+                .gesture(classicSwipeGesture)
                 .transition(.opacity)
             }
-            VStack(spacing: 12) {
+            VStack(spacing: BeansPlayerLayout.deckSpacing) {
                 // C6: the progress bar hides with the setting.
                 if !settings.effectiveHidePlayerProgressBar {
-                    NowPlayingScrubber()
+                    NowPlayingScrubber(accent: beansPalette.accent, showsSeekPills: true)
                         .padding(.horizontal, 24)
                 }
                 controls
@@ -1130,6 +1189,68 @@ struct NowPlayingView: View {
             .padding(.bottom, 24)
         }
         .padding(.horizontal, 16)
+    }
+
+    /// Beans cover presentation (Beans' `classicAlbumPanel`): the artwork
+    /// with its accent/secondary halo glow and a glass tray behind it.
+    /// The halos are static — Beans holds them still in its current code.
+    private func beansCoverPresentation(size: CGFloat) -> some View {
+        ZStack {
+            Circle()
+                .fill(beansPalette.accent.opacity(0.24))
+                .frame(
+                    width: size * BeansPlayerLayout.haloAccentScale,
+                    height: size * BeansPlayerLayout.haloAccentScale
+                )
+                .blur(radius: 46)
+            Circle()
+                .fill(beansPalette.secondary.opacity(0.15))
+                .frame(
+                    width: size * BeansPlayerLayout.haloSecondaryScale,
+                    height: size * BeansPlayerLayout.haloSecondaryScale
+                )
+                .blur(radius: 40)
+            RoundedRectangle(
+                cornerRadius: BeansPlayerLayout.coverCornerRadius(for: size),
+                style: .continuous
+            )
+            .fill(.ultraThinMaterial)
+            .frame(
+                width: size * BeansPlayerLayout.coverTrayScale,
+                height: size * BeansPlayerLayout.coverTrayScale
+            )
+            .shadow(color: .black.opacity(0.28), radius: 26, y: 12)
+            artworkView(size: size)
+        }
+    }
+
+    /// Horizontal swipe on the classic cover switches tracks (Beans'
+    /// swipe-to-switch): left = next, right = previous. Only a mostly
+    /// horizontal drag past the threshold counts; anything else springs
+    /// the panel back to place.
+    private var classicSwipeGesture: some Gesture {
+        DragGesture(minimumDistance: 15)
+            .onChanged { value in
+                let x = value.translation.width
+                if abs(x) > abs(value.translation.height) {
+                    classicSwipeOffset = x
+                }
+            }
+            .onEnded { value in
+                let x = value.translation.width
+                defer {
+                    withAnimation(.spring(response: 0.34, dampingFraction: 0.86)) {
+                        classicSwipeOffset = 0
+                    }
+                }
+                guard abs(x) > BeansPlayerLayout.swipeThreshold,
+                      abs(x) > abs(value.translation.height) else { return }
+                if x < 0 {
+                    player.next()
+                } else {
+                    player.previous()
+                }
+            }
     }
 
     #if os(iOS)
@@ -1197,7 +1318,7 @@ struct NowPlayingView: View {
         VStack(spacing: 17) {
             // C6: the progress bar hides with the setting.
             if !settings.effectiveHidePlayerProgressBar {
-                NowPlayingScrubber()
+                NowPlayingScrubber(accent: beansPalette.accent)
             }
             CompactTransportControls()
             CompactSecondaryControls(
@@ -1366,7 +1487,7 @@ struct NowPlayingView: View {
             .frame(height: 44)
             // C6: the progress bar hides with the setting.
             if !settings.effectiveHidePlayerProgressBar {
-                NowPlayingScrubber()
+                NowPlayingScrubber(accent: beansPalette.accent)
                     .padding(.horizontal, 2)
                     .padding(.top, 16)
             }
@@ -1453,6 +1574,21 @@ struct NowPlayingView: View {
             }
         }
         .frame(width: size, height: size)
+        .overlay {
+            // Beans cover presentation: a hairline border plus the top
+            // glass highlight over the artwork.
+            RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
+                .strokeBorder(.white.opacity(0.28), lineWidth: 1)
+        }
+        .overlay {
+            RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
+                .fill(
+                    LinearGradient(
+                        colors: [.white.opacity(0.28), .white.opacity(0.03), .clear],
+                        startPoint: .top, endPoint: .center
+                    )
+                )
+        }
         .clipShape(RoundedRectangle(cornerRadius: cornerRadius, style: .continuous))
         .shadow(color: .black.opacity(0.45), radius: shadowRadius, y: shadowRadius * 0.5)
         .animation(
@@ -1473,9 +1609,10 @@ struct NowPlayingView: View {
         VStack(spacing: 5) {
             HStack(spacing: 8) {
                 Text(player.currentTrack?.name ?? "")
-                    .font(.system(size: 21, weight: .bold))
+                    .font(.system(size: 22, weight: .bold))
                     .foregroundStyle(.white)
-                    .lineLimit(1)
+                    .lineLimit(2)
+                    .multilineTextAlignment(.center)
                 if player.currentTrack?.fee == 1 {
                     VIPBadge()
                 }
@@ -3354,6 +3491,11 @@ struct NowPlayingScrubber: View {
     @EnvironmentObject private var player: PlayerService
     @ObservedObject private var clock = PlayerService.shared.clock
 
+    /// Beans accent fill for the played portion (nil keeps the white fill).
+    var accent: Color? = nil
+    /// Beans ±15s seek pills flanking the time labels.
+    var showsSeekPills: Bool = false
+
     @State private var isHovering = false
     @State private var isDragging = false
     @State private var dragProgress: Double = 0
@@ -3364,6 +3506,8 @@ struct NowPlayingScrubber: View {
         return min(max(value / player.duration, 0), 1)
     }
 
+    private var fillColor: Color { accent ?? .white }
+
     var body: some View {
         VStack(spacing: 5) {
             GeometryReader { geo in
@@ -3373,7 +3517,7 @@ struct NowPlayingScrubber: View {
                         .fill(.white.opacity(0.25))
                         .frame(height: 4)
                     Capsule()
-                        .fill(.white)
+                        .fill(fillColor)
                         .frame(width: max(4, width * fraction), height: 4)
                     Circle()
                         .fill(.white)
@@ -3406,10 +3550,16 @@ struct NowPlayingScrubber: View {
                 withAnimation(AppAnimation.quick) { isHovering = hovering }
             }
 
-            HStack {
+            HStack(spacing: 6) {
+                if showsSeekPills {
+                    seekPill("gobackward.15") { seekBy(-15) }
+                }
                 Text(Formatters.duration(isDragging ? dragProgress : clock.progress))
                 Spacer()
                 Text(Formatters.duration(player.duration))
+                if showsSeekPills {
+                    seekPill("goforward.15") { seekBy(15) }
+                }
             }
             .font(.system(size: 10.5).monospacedDigit())
             .foregroundStyle(.white.opacity(0.55))
@@ -3418,6 +3568,23 @@ struct NowPlayingScrubber: View {
 
     private var thumbDiameter: CGFloat {
         isDragging ? 13 : (isHovering ? 11 : 9)
+    }
+
+    private func seekPill(_ icon: String, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            Image(systemName: icon)
+                .font(.system(size: 12, weight: .medium))
+                .foregroundStyle(.white.opacity(0.72))
+                .frame(width: 30, height: 22)
+                .background(.white.opacity(0.08), in: Capsule())
+        }
+        .buttonStyle(.pressable)
+        .accessibilityLabel(icon == "gobackward.15" ? "后退 15 秒" : "前进 15 秒")
+    }
+
+    private func seekBy(_ seconds: TimeInterval) {
+        guard player.duration > 0 else { return }
+        player.seek(to: min(max(clock.progress + seconds, 0), player.duration))
     }
 }
 
