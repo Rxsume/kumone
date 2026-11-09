@@ -482,12 +482,21 @@ enum MusicAPI {
     /// providers were removed, so this is the single source again).
     /// Never throws, so callers keep today's `try?` behaviour: no error
     /// UI when lyrics are missing.
+    ///
+    /// Platform tracks (QQ/Kugou) carry a negative stable-hash id,
+    /// never a NetEase song id (PR #34, commit 85d4660), so they are
+    /// resolved to the same song on NetEase first and the matched
+    /// track's lyrics are loaded — the same match playback already
+    /// trusts (title-lenient, artist, duration within 5s, no
+    /// version conflict), so the lyrics sync with the audio. With
+    /// no confident match the track stays lyric-less, exactly as
+    /// before. No DES/QRC decryption and no QQ/Kugou lyric provider
+    /// are restored here; the rollback stands.
     static func lyric(for track: Track) async -> LyricResponse? {
-        // Platform tracks carry a negative stable-hash id, never a NetEase
-        // song id (PR #34, commit 85d4660): querying NetEase with it would
-        // only burn a request, and a bogus id must never be mistaken for a
-        // pure-music verdict. Platform tracks get no lyrics from here.
-        guard track.platformSource == nil else { return nil }
+        if track.platformSource != nil {
+            guard let matched = await UnblockService.matchedNetEaseTrack(for: track) else { return nil }
+            return try? await lyric(id: matched.id)
+        }
         return try? await lyric(id: track.id)
     }
 

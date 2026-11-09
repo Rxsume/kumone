@@ -189,11 +189,20 @@ enum UnblockService {
     /// (cross-platform search + match). Nil when nothing matches —
     /// the failure is surfaced, never a wrong song. Factored out of
     /// `platformTrackViaFallbacks` so the custom script step can
-    /// reuse the same match.
-    private static func matchedNetEaseTrack(for track: Track) async -> Track? {
+    /// reuse the same match. Also shared with `MusicAPI.lyric(for:)`,
+    /// which loads the matched track's lyrics for platform tracks
+    /// (QQ/Kugou have no lyric provider of their own since the
+    /// Folia rollback). The `search` closure exists for tests:
+    /// production callers use the default NetEase search.
+    static func matchedNetEaseTrack(
+        for track: Track,
+        search: (String) async throws -> MusicAPI.SearchResult = { keyword in
+            try await MusicAPI.search(keyword, type: .songs, limit: 10)
+        }
+    ) async -> Track? {
         let keyword = AudioSourceTrackMatcher.keyword(for: track)
         guard !keyword.isEmpty else { return nil }
-        guard let result = try? await MusicAPI.search(keyword, type: .songs, limit: 10),
+        guard let result = try? await search(keyword),
               let candidates = result.songs,
               let match = candidates.first(where: {
                   AudioSourceTrackMatcher.matchesNetEase(
