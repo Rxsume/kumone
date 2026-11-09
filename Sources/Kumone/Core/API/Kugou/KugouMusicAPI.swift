@@ -108,8 +108,8 @@ enum KugouMusicAPIError: LocalizedError {
 /// through the anonymous tiers while the session is cleared once.
 ///
 /// Deliberately NOT ported from Beans: personalFM, everydayRecommend,
-/// comments, lyric (lyric is PR #23's `KugouLyricProvider`),
-/// login-gated user-playlist songs, and the VIP membership probe.
+/// comments, lyric (lyrics are NetEase-only after the Folia multi-source
+/// rollback), login-gated user-playlist songs, and the VIP membership probe.
 /// Home-feed endpoints (topLists, rankSongs, recommendPlaylists,
 /// public playlist songs) ARE ported — see "Home feed" below.
 /// Artist songs are ported (detail pages need them).
