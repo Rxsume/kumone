@@ -182,11 +182,11 @@ let text = line.text.trimmingCharacters(in:.whitespaces)
 guard!text.isEmpty else { return false}
 if let custom {
 let range = NSRange(text.startIndex..., in: text)
-return custom.firstMatch(in: text, options: [], range: range)!= nil
+return custom.firstMatch(in: text, options: [], range: range) != nil
 }
 let range = NSRange(text.startIndex..., in: text)
-if let builtIn, builtIn.firstMatch(in: text, options: [], range: range)!= nil { return true}
-if let byPrefix, byPrefix.firstMatch(in: text, options: [], range: range)!= nil { return true}
+if let builtIn, builtIn.firstMatch(in: text, options: [], range: range) != nil { return true}
+if let byPrefix, byPrefix.firstMatch(in: text, options: [], range: range) != nil { return true}
 return false
 }
 }
@@ -212,7 +212,7 @@ static func isColonShaped(_ line: LyricLine) -> Bool {
 let text = line.text.trimmingCharacters(in:.whitespaces)
 guard let regex = try? NSRegularExpression(pattern: #"^[^:：，。！？；…!?]{1,60}[:：]\s*\S"#) else { return false}
 let range = NSRange(text.startIndex..., in: text)
-return regex.firstMatch(in: text, options: [], range: range)!= nil
+return regex.firstMatch(in: text, options: [], range: range) != nil
 }
 
 /// A title line often sits at index 0 ("歌名 - 歌手"), so the
@@ -220,7 +220,7 @@ return regex.firstMatch(in: text, options: [], range: range)!= nil
 private static func isHeaderLike(_ line: LyricLine, title: String?, artist: String?) -> Bool {
 let text = line.text.trimmingCharacters(in:.whitespaces)
 guard!text.isEmpty else { return true}
-if text.range(of: #"\s[-–—]\s"#, options:.regularExpression)!= nil { return true}
+if text.range(of: #"\s[-–—]\s"#, options:.regularExpression) != nil { return true}
 if let title,!title.trimmingCharacters(in:.whitespaces).isEmpty, text.contains(title.trimmingCharacters(in:.whitespaces)) { return true}
 if let artist,!artist.trimmingCharacters(in:.whitespaces).isEmpty, text.contains(artist.trimmingCharacters(in:.whitespaces)) { return true}
 return false
@@ -329,7 +329,7 @@ block: StaffCreditBlock,
 mode: LyricStaffAbsorbMode,
 maxDuration: TimeInterval
 ) -> StaffCreditBlock {
-guard mode!=.off,!block.staffIndexes.isEmpty else { return block}
+guard mode != .off,!block.staffIndexes.isEmpty else { return block}
 func isShortLine(_ line: LyricLine) -> Bool {
 !isFillerLine(line) && line.end - line.time < maxDuration
 }
@@ -347,7 +347,7 @@ index += step
 return taken
 }
 var absorbed = collectShortRun(from: blockStart - 1, step: -1)
-if mode ==.both {
+if mode == .both {
 // Keep the last line: absorbing the whole song would leave no
 // "first lyric line" and the decision would degrade to keep.
 let lastIndex = lines.count - 1
@@ -404,7 +404,7 @@ absorbedIndexes: block.absorbedIndexes
 guard let firstLyric else {
 let lastLine = lines[lines.count - 1]
 var decision = base
-decision.verdict =.keep
+decision.verdict = .keep
 decision.windowSeconds = max(0, lastLine.end - windowStart)
 return decision
 }
@@ -412,7 +412,7 @@ let windowSeconds = max(0, firstLyric.time - windowStart)
 var decision = base
 decision.windowSeconds = windowSeconds
 guard windowSeconds >= base.requiredSeconds else {
-decision.verdict =.hide
+decision.verdict = .hide
 return decision
 }
 // Only retime when the original stamps are too dense; a block
@@ -479,7 +479,7 @@ let windowEnd = firstLyric
 ? firstLyric.time - tailMarginSeconds
 : spreadLines[spreadLines.count - 1].end
 let replacement: [LyricLine]
-if decision.verdict ==.retime {
+if decision.verdict == .retime {
 replacement = spreadLines.enumerated().map { index, line in
 let slot = max((windowEnd - windowStart) / TimeInterval(spreadLines.count), minDwell)
 return retimeLine(
@@ -509,19 +509,19 @@ return next
 /// absorbs first (the budget must be computed on the absorbed block),
 /// then keeps, retimes, or hides by the intro-time budget.
 static func applyPolicy(_ lines: [LyricLine], settings: LyricFilterSettings) -> [LyricLine] {
-guard settings.staffPolicy!=.keep,!lines.isEmpty else { return lines}
+guard settings.staffPolicy != .keep,!lines.isEmpty else { return lines}
 let minDwell = LyricFilterSettings.clampedDwell(settings.staffMinDwellSeconds)
 let matcher = staffMatcher(pattern: settings.staffPattern)
 guard var block = detectLeadingStaffBlock(
 lines, isStaffLine: matcher, title: settings.title, artist: settings.artist
 ) else { return lines}
-if settings.staffPolicy ==.hide {
+if settings.staffPolicy == .hide {
 let memberIndexes = Set(block.memberIndexes)
 return lines.enumerated().filter {!memberIndexes.contains($0.offset)}.map(\.element)
 }
 block = absorbAdjacentLines(lines, block: block, mode: settings.staffAbsorbMode, maxDuration: minDwell)
 let decision = resolveDecision(lines, block: block, minDwell: minDwell)
-guard decision.verdict ==.hide || decision.verdict ==.retime else { return lines}
+guard decision.verdict == .hide || decision.verdict == .retime else { return lines}
 return rebuildLines(lines, block: block, decision: decision, minDwell: minDwell)
 }
 }
