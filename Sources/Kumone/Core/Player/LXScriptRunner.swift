@@ -650,7 +650,7 @@ final class LXScriptRuntime: @unchecked Sendable {
 
         let deadline = DispatchTime.now() + timeout
         if semaphore.wait(timeout: deadline) == .timedOut {
-            Self.log.debug("custom script invocation timed out: \(sourceID, privacy: .public) \(Int(timeout), privacy: .public)s")
+            Self.log.debug("custom script invocation timed out: \(self.sourceID, privacy: .public) \(Int(timeout), privacy: .public)s")
         }
         resultLock.lock()
         let finalResult = result
