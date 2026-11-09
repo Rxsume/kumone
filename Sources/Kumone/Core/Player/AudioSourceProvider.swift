@@ -15,6 +15,12 @@ enum AudioSourceID: String, CaseIterable, Hashable, Codable {
     // existing resolve order is untouched.
     case qqmusic
     case kugou
+    // User-imported LX script sources (see CustomAudioSourceStore):
+    // one marker for the whole step, not one case per source. Never
+    // in displayOrder and never in the default-enabled set (custom
+    // sources have their own per-source toggles); `isScriptBackend`
+    // is true so no existing default set ever contains it.
+    case customScript
 
     var displayName: String {
         switch self {
@@ -24,6 +30,7 @@ enum AudioSourceID: String, CaseIterable, Hashable, Codable {
         case .xinghai: return String(localized: "Golia3")
         case .qqmusic: return String(localized: "QQ音乐")
         case .kugou: return String(localized: "酷狗")
+        case .customScript: return String(localized: "自定义音源")
         }
     }
 
@@ -40,7 +47,7 @@ enum AudioSourceID: String, CaseIterable, Hashable, Codable {
     /// platform providers (qqmusic/kugou) alike.
     var isScriptBackend: Bool {
         switch self {
-        case .haitangw, .xinghai, .qqmusic, .kugou: return true
+        case .haitangw, .xinghai, .qqmusic, .kugou, .customScript: return true
         case .pyncmd, .ikun: return false
         }
     }

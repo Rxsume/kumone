@@ -71,6 +71,16 @@ let package = Package(
             exclude: ["Resources"],
             swiftSettings: [
                 .swiftLanguageMode(.v5),
+            ],
+            linkerSettings: [
+                // JavaScriptCore for the LX script runner (custom audio
+                // sources): a system framework on iOS/macOS, no package
+                // dependency. The iOS app consumes KumoneCore through
+                // ios/KumoneIOSPackage; confirm the first CI build links
+                // it — if SPM's linkedFramework does not propagate
+                // there, the fallback is adding JavaScriptCore in the
+                // Xcode project's "Link Binary With Libraries" phase.
+                .linkedFramework("JavaScriptCore"),
             ]
         ),
         // Objective-C exception catching for the playback engine (macOS only):
