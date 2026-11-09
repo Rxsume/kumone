@@ -42,6 +42,8 @@ final class HomeViewModel: ObservableObject {
     @Published var platformRecommendSongs: [Track] = []
     @Published var platformHotSongs: [Track] = []
     @Published var platformHotArtists: [PlatformArtistSummary] = []
+    /// QQ/Kugou daily recommendations ("每日推荐"); empty on NetEase.
+    @Published var platformDailySongs: [Track] = []
 
     func load(platform: HomePlatform, loggedIn: Bool) async {
         if case .loaded = state, platform == currentPlatform { return }
@@ -51,6 +53,7 @@ final class HomeViewModel: ObservableObject {
         platformRecommendSongs = []
         platformHotSongs = []
         platformHotArtists = []
+        platformDailySongs = []
 
         if platform == .netease {
             async let playlistsTask = fetchRecommendPlaylists(loggedIn: loggedIn)
@@ -89,13 +92,14 @@ final class HomeViewModel: ObservableObject {
         }
 
         // QQ: recommended songs (radar) + recommended playlists +
-        // hot songs + charts + hot artists. Kugou: recommended
-        // playlists + charts only — it has no verified endpoint for
-        // the other three, so those sections stay hidden instead of
-        // faked. New albums / NetEase radar playlists / feature cards
-        // are NetEase-only.
+        // hot songs + charts + hot artists. Kugou: daily
+        // recommendations + recommended playlists + charts — it has
+        // no verified endpoint for the other three, so those sections
+        // stay hidden instead of faked. New albums / NetEase radar
+        // playlists / feature cards are NetEase-only.
         async let playlistsTask = fetchPlatformPlaylists(platform: platform)
         async let toplistsTask = fetchPlatformToplists(platform: platform)
+        async let dailyTask = fetchPlatformDailySongs(platform: platform)
         if platform == .qqmusic {
             async let recommendTask = fetchPlatformRecommendSongs()
             async let hotSongsTask = fetchPlatformHotSongs()
@@ -106,9 +110,10 @@ final class HomeViewModel: ObservableObject {
         }
         platformPlaylists = await playlistsTask
         platformToplists = await toplistsTask
+        platformDailySongs = await dailyTask
         state = platformPlaylists.isEmpty && platformToplists.isEmpty
             && platformRecommendSongs.isEmpty && platformHotSongs.isEmpty
-            && platformHotArtists.isEmpty
+            && platformHotArtists.isEmpty && platformDailySongs.isEmpty
             ? .error(String(localized: "网络连接失败")) : .loaded
     }
 
@@ -179,6 +184,28 @@ final class HomeViewModel: ObservableObject {
         } ?? []
     }
 
+    /// Daily recommendations for the QQ/Kugou home feed ("每日推荐"):
+    /// QQ mixes the tops of the three charts (Beans
+    /// `QQMusicAPI.recommendSongs`); Kugou uses its daily endpoint,
+    /// with a hot-songs search fallback when it comes back empty
+    /// (Beans `DiscoverView.loadKugouDailySongs`). `Track` carries
+    /// `platformSource`, so rows play through the PR #29 ikun
+    /// fallback like any other platform track.
+    private func fetchPlatformDailySongs(platform: HomePlatform) async -> [Track] {
+        switch platform {
+        case .netease:
+            return []
+        case .qqmusic:
+            return (try? await QQMusicAPI.shared.recommendSongs(limit: 30))?.compactMap(Track.fromQQSong) ?? []
+        case .kugou:
+            if let daily = try? await KugouMusicAPI.shared.everydayRecommend(limit: 30), !daily.isEmpty {
+                return daily.compactMap(Track.fromKugouSong)
+            }
+            return (try? await KugouMusicAPI.shared.searchSongs(keyword: "热门歌曲", limit: 30))?
+                .compactMap(Track.fromKugouSong) ?? []
+        }
+    }
+
     private func loadRadarPlaylists() async {
         let briefs = await withTaskGroup(of: (Int, MusicAPI.PlaylistBrief.Body?).self) { group in
             for id in Self.radarPlaylistIDs {
@@ -224,6 +251,9 @@ struct HomeView: View {
     @ObservedObject private var blAuth = BilibiliAuth.shared
     @State private var showBilibiliLogin = false
     @ObservedObject private var platformPrefs = PlatformPreferenceStore.shared
+    /// Kugou login state, only to dim the 私人漫游 card while
+    /// logged out (the card itself is always shown, Beans-style).
+    @ObservedObject private var kugouAuth = KugouMusicAuth.shared
 
     /// `.task(id:)` needs an `Equatable` id; tuples cannot conform to
     /// `Equatable` in Swift, so the (loggedIn, platform) pair gets a
@@ -463,14 +493,23 @@ struct HomeView: View {
         }
     }
 
-    /// QQ home feed, in order: 推荐 / 推荐歌单 / 热门歌曲 / 排行榜 /
-    /// 热门歌手. Kugou keeps only 推荐歌单 + 排行榜. Song rows play
-    /// through the normal queue (PR #29 ikun fallback); playlist and
-    /// chart cards play their songs directly, as before — there is no
-    /// platform playlist/chart detail page. A section whose fetch
-    /// failed is hidden, never faked.
+    /// QQ home feed, in order: 每日推荐 / 推荐 / 推荐歌单 / 热门歌曲 /
+    /// 排行榜 / 热门歌手. Kugou, in order: 私人漫游 card / 每日推荐 /
+    /// 推荐歌单 / 排行榜. Song rows play through the normal queue
+    /// (PR #29 ikun fallback); playlist and chart cards play their
+    /// songs directly, as before — there is no platform playlist/chart
+    /// detail page. A section whose fetch failed is hidden, never
+    /// faked.
     private var platformSections: some View {
         Group {
+            if model.currentPlatform == .kugou {
+                kugouFeatureCards
+            }
+
+            if !model.platformDailySongs.isEmpty {
+                platformSongListSection(title: "每日推荐", tracks: model.platformDailySongs)
+            }
+
             if model.currentPlatform == .qqmusic, !model.platformRecommendSongs.isEmpty {
                 platformSongListSection(title: "推荐", tracks: model.platformRecommendSongs)
             }
@@ -506,7 +545,7 @@ struct HomeView: View {
         }
     }
 
-    /// QQ-only song rows ("推荐" / "热门歌曲"): compact `TrackListView`
+    /// QQ-only song rows ("每日推荐" / "推荐" / "热门歌曲"): compact `TrackListView`
     /// rows, same shape as artist hot songs — artwork, title, artist,
     /// no album column. Tapping plays the row through the normal queue.
     private func platformSongListSection(title: LocalizedStringKey, tracks: [Track]) -> some View {
@@ -515,6 +554,61 @@ struct HomeView: View {
                 .padding(.horizontal, Theme.Layout.contentInset)
             TrackListView(tracks: tracks, style: .compact)
                 .padding(.horizontal, Theme.Layout.contentInset - 10)
+        }
+    }
+
+    /// Kugou-only feature cards ("推荐" row in Beans' Kugou home):
+    /// a single 私人漫游 card. Beans shows it always and toasts
+    /// when logged out; here it is dimmed while logged out so the
+    /// state is visible before tapping, and the tap still toasts.
+    private var kugouFeatureCards: some View {
+        ScrollView(.horizontal, showsIndicators: false) {
+            HStack(spacing: 16) {
+                Color.clear.frame(width: max(0, Theme.Layout.contentInset - 16), height: 1)
+                Button {
+                    startKugouPersonalFM()
+                } label: {
+                    FeatureCard(
+                        title: "私人漫游",
+                        subtitle: "从喜欢的歌开始漫游",
+                        icon: "wave.3.right.circle.fill",
+                        gradient: [Color(red: 0.08, green: 0.46, blue: 0.82),
+                                   Color(red: 0.18, green: 0.72, blue: 0.72)]
+                    )
+                }
+                .buttonStyle(.interactiveCard)
+                .opacity(kugouAuth.isLoggedIn ? 1 : 0.45)
+                Color.clear.frame(width: max(0, Theme.Layout.contentInset - 16), height: 1)
+            }
+            .padding(.vertical, 6)
+        }
+        .compatScrollClipDisabled()
+        .shelfEdgeClip()
+    }
+
+    /// Kugou 私人漫游 (Beans `DiscoverView.startKugouPersonalFM`):
+    /// login-gated in the API itself (`personalFM` returns [] when
+    /// logged out); the toast names the missing login instead of
+    /// failing silently. An empty result means even the API's
+    /// 每日推荐 fallback came back empty.
+    private func startKugouPersonalFM() {
+        Task {
+            guard await KugouMusicAuth.shared.isLoggedIn else {
+                ToastCenter.shared.show(String(localized: "请先登录酷狗音乐"))
+                return
+            }
+            do {
+                let songs = try await KugouMusicAPI.shared.personalFM(limit: 12)
+                let tracks = songs.compactMap(Track.fromKugouSong)
+                guard !tracks.isEmpty else {
+                    ToastCenter.shared.show(String(localized: "私人漫游暂时没有推荐"))
+                    return
+                }
+                player.play(tracks: tracks, source: .none)
+                ToastCenter.shared.show(String(localized: "已开启私人漫游"))
+            } catch {
+                ToastCenter.shared.show(String(localized: "私人漫游加载失败"))
+            }
         }
     }
 

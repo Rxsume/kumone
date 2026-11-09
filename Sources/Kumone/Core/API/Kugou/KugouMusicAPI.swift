@@ -974,6 +974,125 @@ final class KugouMusicAPI: @unchecked Sendable {
         return rows.compactMap(Self.mapSong)
     }
 
+    /// Kugou daily recommendations for the home feed ("每日推荐"),
+    /// from Beans 2.0.3 `KugouMusicAPI.everydayRecommend`:
+    /// `POST /everyday_song_recommend` on the everyday-rec router.
+    /// Anonymous (no login needed); rows parse with the shared
+    /// `mapSong`, same as search results.
+    func everydayRecommend(limit: Int = 30) async throws -> [KugouMusicSong] {
+        let auth = await KugouMusicAuth.shared
+        await auth.prepareDevice()
+        let response = try await upstreamRequest(
+            "/everyday_song_recommend",
+            method: "POST",
+            params: ["platform": "ios"],
+            headers: ["x-router": "everydayrec.service.kugou.com"]
+        )
+        let rows = Self.deepArrays(
+            response.json,
+            names: ["songs", "songlist", "list", "data", "recommend", "recommend_list"]
+        )
+        return Array(rows.compactMap(Self.mapSong).prefix(max(limit, 1)))
+    }
+
+    /// Kugou personal FM ("私人漫游"), from Beans 2.0.3
+    /// `KugouMusicAPI.personalFM`: the KuGouMusicApi `personal_fm`
+    /// protocol (`POST /v2/personal_recommend` on the persnfm
+    /// router), fetching 3-song batches chained by the last batch's
+    /// hash/song id so the home feed is not stuck on the first
+    /// batch. **Login-gated: returns [] when logged out** — the
+    /// caller shows the login toast, never fake data. When the
+    /// service returns nothing for a valid login, it falls back to
+    /// `everydayRecommend` (Beans behaviour), so the feature stays
+    /// usable instead of erroring.
+    func personalFM(limit: Int = 12) async throws -> [KugouMusicSong] {
+        let auth = await KugouMusicAuth.shared
+        await auth.prepareDevice()
+        let snapshot = await authSnapshot()
+        guard snapshot.isLoggedIn else { return [] }
+
+        let target = max(limit, 1)
+        var songs: [KugouMusicSong] = []
+        var seen = Set<String>()
+        var lastHash: String?
+        var lastSongID: String?
+        let batchCount = max(1, min(8, Int(ceil(Double(target) / 3.0)) + 1))
+
+        for _ in 0..<batchCount {
+            let clientTime = Int(Date().timeIntervalSince1970 * 1000)
+            var data: [String: Any] = [
+                "appid": upstreamAppID,
+                "clienttime": clientTime,
+                "mid": snapshot.mid,
+                "action": "play",
+                "recommend_source_locked": 0,
+                "song_pool_id": 0,
+                "callerid": 0,
+                "m_type": 1,
+                "platform": "ios",
+                "area_code": 1,
+                "remain_songcnt": 0,
+                "clientver": upstreamClientVersion,
+                "is_overplay": lastHash == nil ? 0 : 1,
+                "mode": "normal",
+                "fakem": "ca981cfc583a4c37f28d2d49000013c16a0a",
+                "key": upstreamParamsKey("\(clientTime)"),
+            ]
+            if !snapshot.userID.isEmpty {
+                data["userid"] = Int(snapshot.userID) ?? 0
+                data["kguid"] = Int(snapshot.userID) ?? 0
+            }
+            if !snapshot.token.isEmpty { data["token"] = snapshot.token }
+            if snapshot.vipType > 0 { data["vip_type"] = snapshot.vipType }
+            if let lastHash, let lastSongID {
+                data["hash"] = lastHash
+                data["songid"] = lastSongID
+                data["playtime"] = max(0, Int((songs.last?.durationMS ?? 0) / 1000))
+            }
+
+            let response = try await upstreamRequest(
+                "/v2/personal_recommend",
+                method: "POST",
+                data: data,
+                headers: ["x-router": "persnfm.service.kugou.com"]
+            )
+            let rows = Self.deepArrays(
+                response.json,
+                names: ["songs", "song", "songlist", "list", "data", "recommend", "recommend_list", "recommend_song", "personal_fm", "result"]
+            )
+            let batch = rows.compactMap(Self.mapSong)
+            if batch.isEmpty {
+                let code = Self.deepInt(response.json, names: ["code", "status", "error_code", "errcode"])
+                let message = Self.deepString(response.json, names: ["msg", "message", "error_msg", "error_message"])
+                Self.log.debug("kugou personal FM returned no songs: code=\(code, privacy: .public) message=\(message.isEmpty ? "none" : message, privacy: .public)")
+                break
+            }
+            for song in batch {
+                let key = song.hash.isEmpty ? (song.albumAudioId ?? "") : song.hash
+                guard seen.insert(key).inserted else { continue }
+                songs.append(song)
+                if songs.count >= target { return Array(songs.prefix(target)) }
+            }
+            lastHash = batch.last?.hash
+            // `albumAudioId` is itself optional: flatMap flattens the
+            // double optional from chaining through `batch.last?`.
+            lastSongID = batch.last.flatMap { $0.albumAudioId }
+            if lastHash == nil && lastSongID == nil { break }
+        }
+
+        // Keep the feature usable when the personal-FM service
+        // returns an empty payload for a valid login by falling back
+        // to Kugou daily suggestions.
+        if songs.isEmpty,
+           let fallback = try? await everydayRecommend(limit: target),
+           !fallback.isEmpty {
+            Self.log.debug("kugou personal FM empty, falling back to daily recommendations: \(fallback.count, privacy: .public) songs")
+            return Array(fallback.prefix(target))
+        }
+        Self.log.debug("kugou personal FM: returning \(songs.count, privacy: .public) songs")
+        return songs
+    }
+
     private func getString(_ url: URL, ua: String) async throws -> String {
         var request = URLRequest(url: url)
         request.setValue(ua, forHTTPHeaderField: "User-Agent")
