@@ -1,0 +1,282 @@
+// Beans host adapter for CiliCili (Rone89 and contributors), GPL-3.0-only.
+import Combine
+import Foundation
+import SwiftUI
+import UIKit
+
+@MainActor
+public final class CiliCiliRuntime: ObservableObject {
+    public static let shared = CiliCiliRuntime()
+    let dependencies = AppDependencies()
+    @Published public private(set) var isDetailActive = false
+    @Published public private(set) var isVideoDetailActive = false
+    @Published public private(set) var isLiveRoomActive = false
+    @Published public private(set) var integrationError: String?
+    public var onPlaybackActivation: (() -> Void)?
+    public var onVideoListenModeChange: ((CiliCiliVideoListenRequest, Bool, TimeInterval, Bool) -> Void)?
+    public var onVideoListenPlaybackSnapshot: ((CiliCiliVideoListenRequest) -> CiliCiliListenPlaybackSnapshot?)?
+    public var onVideoListenQueueChange: ((CiliCiliVideoListenRequest) -> Void)?
+    public var onSessionChange: ((String, String, String, String?) throws -> Void)?
+    private var navigationOwners: Set<UUID> = []
+    private var videoDetailOwners: Set<UUID> = []
+    private var liveRoomOwners: Set<UUID> = []
+    private var subscriptions = Set<AnyCancellable>()
+    private var lastExportedIdentity = ""
+    private var pendingLegacySession: (cookie: String, name: String, id: String, avatar: String?)?
+
+    public var usesExternalVideoListenPlayer: Bool {
+        onVideoListenModeChange != nil
+    }
+
+    private init() {
+        let session = dependencies.sessionStore
+        Publishers.CombineLatest(session.$playbackCredentialVersion, session.$user)
+            .dropFirst()
+            .sink { [weak self] _ in
+                Task { @MainActor [weak self] in
+                    // @Published emits before mutation. Export the committed snapshot.
+                    await Task.yield()
+                    self?.exportSessionIfChanged()
+                }
+            }
+            .store(in: &subscriptions)
+    }
+
+    func setNavigationActive(_ active: Bool, owner: UUID) {
+        if active { navigationOwners.insert(owner) } else { navigationOwners.remove(owner) }
+        let value = !navigationOwners.isEmpty
+        if isDetailActive != value { isDetailActive = value }
+    }
+
+    public func setVideoDetailActive(_ active: Bool, owner: UUID) {
+        if active { videoDetailOwners.insert(owner) } else { videoDetailOwners.remove(owner) }
+        let value = !videoDetailOwners.isEmpty
+        if isVideoDetailActive != value { isVideoDetailActive = value }
+    }
+
+    public func setLiveRoomActive(_ active: Bool, owner: UUID) {
+        if active { liveRoomOwners.insert(owner) } else { liveRoomOwners.remove(owner) }
+        let value = !liveRoomOwners.isEmpty
+        if isLiveRoomActive != value { isLiveRoomActive = value }
+    }
+
+    public func stopPlaybackForMusic() {
+        ActivePlaybackCoordinator.shared.stopActivePlayback()
+    }
+
+    public nonisolated static var hasActivePlayback: Bool { CiliCiliPlaybackOwnership.shared.value }
+
+    public func pauseForBackground() {
+        ActivePlaybackCoordinator.shared.pauseActivePlaybackForAppBackground()
+    }
+
+    public var supportedOrientations: UIInterfaceOrientationMask {
+        isDetailActive ? AppOrientationLock.supportedOrientations : .allButUpsideDown
+    }
+
+    public func synchronizeLegacySession(cookie: String, name: String, userID: String, avatar: String?) {
+        let session = dependencies.sessionStore
+        let values = Self.cookieValues(cookie)
+        guard Self.credentialIdentity(values) != Self.credentialIdentity(Self.cookieValues(session.cookieHeader())) else {
+            pendingLegacySession = nil
+            return
+        }
+        do {
+            if values["SESSDATA"]?.isEmpty != false {
+                if session.isLoggedIn { try session.logout() }
+            } else {
+                try session.saveLoginCookies(values, credentialKind: .web)
+                session.updateUser(NavUserInfo(
+                    isLogin: true, face: avatar, uname: name,
+                    mid: Int(userID), wbiImg: nil
+                ))
+            }
+            lastExportedIdentity = exportIdentity
+            pendingLegacySession = nil
+            integrationError = nil
+        } catch {
+            pendingLegacySession = (cookie, name, userID, avatar)
+            integrationError = "哔哩哔哩账号同步失败：\(error.localizedDescription)"
+        }
+    }
+
+    public func retrySessionExport() {
+        if let pending = pendingLegacySession {
+            synchronizeLegacySession(cookie: pending.cookie, name: pending.name, userID: pending.id, avatar: pending.avatar)
+        } else {
+            exportSessionIfChanged()
+        }
+    }
+
+    private var exportIdentity: String {
+        let session = dependencies.sessionStore
+        return Self.credentialIdentity(Self.cookieValues(session.cookieHeader()))
+            + "|" + (session.user?.uname ?? "") + "|" + (session.user?.face ?? "")
+    }
+
+    private func exportSessionIfChanged() {
+        guard pendingLegacySession == nil, let onSessionChange, exportIdentity != lastExportedIdentity else { return }
+        let session = dependencies.sessionStore
+        do {
+            try onSessionChange(
+                session.isLoggedIn ? session.cookieHeader() : "",
+                session.user?.uname ?? "", session.mainAccountMID.map(String.init) ?? "",
+                session.user?.face
+            )
+            lastExportedIdentity = exportIdentity
+            integrationError = nil
+        } catch {
+            integrationError = "无法同步到 Beans 音乐账号：\(error.localizedDescription)"
+        }
+    }
+
+    nonisolated static func cookieValues(_ header: String) -> [String: String] {
+        header.split(separator: ";").reduce(into: [:]) { values, part in
+            let pair = part.split(separator: "=", maxSplits: 1).map {
+                $0.trimmingCharacters(in: .whitespacesAndNewlines)
+            }
+            if pair.count == 2 { values[pair[0]] = pair[1] }
+        }
+    }
+
+    nonisolated static func credentialIdentity(_ values: [String: String]) -> String {
+        ["SESSDATA", "DedeUserID", "bili_jct"].map { values[$0] ?? "" }.joined(separator: "|")
+    }
+}
+
+public struct CiliCiliVideoListenRequest: Sendable {
+    public let bvid: String
+    public let aid: Int?
+    public let cid: Int?
+    public let title: String
+    public let coverURL: String?
+    public let duration: TimeInterval
+    public let artist: String
+    public let ownerID: Int?
+    public let queue: [CiliCiliVideoListenRequest]
+    public let preservesQueueOrder: Bool
+
+    public init(
+        bvid: String,
+        aid: Int?,
+        cid: Int?,
+        title: String,
+        coverURL: String?,
+        duration: TimeInterval,
+        artist: String,
+        ownerID: Int? = nil,
+        queue: [CiliCiliVideoListenRequest] = [],
+        preservesQueueOrder: Bool = false
+    ) {
+        self.bvid = bvid
+        self.aid = aid
+        self.cid = cid
+        self.title = title
+        self.coverURL = coverURL
+        self.duration = duration
+        self.artist = artist
+        self.ownerID = ownerID
+        self.queue = queue
+        self.preservesQueueOrder = preservesQueueOrder
+    }
+}
+
+public struct CiliCiliListenPlaybackSnapshot: Sendable {
+    public let time: TimeInterval
+    public let isPlaying: Bool
+    public init(time: TimeInterval, isPlaying: Bool) { self.time = time; self.isPlaying = isPlaying }
+}
+
+/// Beans' existing player publishes from callback queues as well as main.
+/// A locked snapshot crosses that boundary without accessing MainActor state.
+final class CiliCiliPlaybackOwnership: @unchecked Sendable {
+    nonisolated static let shared = CiliCiliPlaybackOwnership()
+    private nonisolated let lock = NSLock()
+    private nonisolated(unsafe) var active = false
+    nonisolated init() {}
+    nonisolated var value: Bool {
+        get { lock.lock(); defer { lock.unlock() }; return active }
+        set { lock.lock(); defer { lock.unlock() }; active = newValue }
+    }
+}
+
+public struct CiliCiliHomeView: View {
+    private let platforms: [String]
+    private let selectPlatform: (String) -> Void
+    private let startsWithSearch: Bool
+
+    public init(platforms: [String], startsWithSearch: Bool = false, selectPlatform: @escaping (String) -> Void) {
+        self.platforms = platforms
+        self.startsWithSearch = startsWithSearch
+        self.selectPlatform = selectPlatform
+    }
+
+    public var body: some View {
+        RootTabView(platformNames: platforms, onSelectPlatform: selectPlatform, initialTab: startsWithSearch ? .search : .home)
+            .modifier(CiliCiliEnvironment())
+    }
+}
+
+struct CiliCiliEnvironment: ViewModifier {
+    @ObservedObject private var runtime = CiliCiliRuntime.shared
+    @ObservedObject private var appearance = CiliCiliHostAppearance.shared
+
+    func body(content: Content) -> some View {
+        content
+            .environmentObject(runtime.dependencies)
+            .environmentObject(runtime.dependencies.sessionStore)
+            .environmentObject(runtime.dependencies.libraryStore)
+            .environmentObject(runtime.dependencies.homeRecommendDiagnosticsStore)
+            .environment(\.appThemeTintColor, appearance.accent ?? runtime.dependencies.libraryStore.appTintColor)
+            .environment(\.showsVideoCoverDurationBadges, runtime.dependencies.libraryStore.showsVideoCoverDurationBadges)
+            .modifier(CiliCiliFontPreference(library: runtime.dependencies.libraryStore))
+            .safeAreaInset(edge: .top) {
+                if let error = runtime.integrationError {
+                    HStack {
+                        Text(error).font(.footnote)
+                        Button("重试") { runtime.retrySessionExport() }
+                    }
+                    .padding(10).background(.regularMaterial)
+                }
+            }
+            .task { runtime.dependencies.scheduleStartupWorkIfNeeded() }
+    }
+}
+
+private struct CiliCiliFontPreference: ViewModifier {
+    @ObservedObject var library: LibraryStore
+    @Environment(\.dynamicTypeSize) private var systemSize
+
+    func body(content: Content) -> some View {
+        content.environment(\.dynamicTypeSize, library.followsSystemFontSize ? systemSize : manualSize)
+    }
+
+    private var manualSize: DynamicTypeSize {
+        switch library.manualFontSize {
+        case .extraSmall: return .xSmall
+        case .small: return .small
+        case .medium: return .medium
+        case .standard: return .large
+        case .large: return .xLarge
+        case .extraLarge: return .xxLarge
+        case .extraExtraLarge: return .xxxLarge
+        case .accessibility: return .accessibility1
+        }
+    }
+}
+
+// Only foreground/background and orientation are forwarded. CiliCili's
+// standalone app delegate must not clear Beans' Now Playing or app appearance.
+public final class CiliCiliHostAppDelegate: NSObject, UIApplicationDelegate {
+    public func application(_ application: UIApplication, supportedInterfaceOrientationsFor window: UIWindow?) -> UIInterfaceOrientationMask {
+        CiliCiliRuntime.shared.supportedOrientations
+    }
+
+    public func applicationDidEnterBackground(_ application: UIApplication) {
+        CiliCiliRuntime.shared.pauseForBackground()
+    }
+
+    public func applicationProtectedDataWillBecomeUnavailable(_ application: UIApplication) {
+        CiliCiliRuntime.shared.pauseForBackground()
+    }
+}

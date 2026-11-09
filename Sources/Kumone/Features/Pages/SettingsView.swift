@@ -16,6 +16,8 @@ struct SettingsView: View {
     // these rows, so logout in LoginSheet refreshes them with no bump.
     @ObservedObject private var qqAuth = QQMusicAuth.shared
     @ObservedObject private var kgAuth = KugouMusicAuth.shared
+    // Bilibili login (full CiliCili port, phase 1): same pattern.
+    @ObservedObject private var blAuth = BilibiliAuth.shared
     #if os(macOS)
     @AppStorage(SettingsManager.Keys.menuBarPlayer) private var showMenuBarPlayer = false
     @State private var navigationPath: [SettingsPage] = []
@@ -424,6 +426,22 @@ struct SettingsView: View {
                         .foregroundStyle(.secondary)
                 }
 
+                Group {
+                    if blAuth.isLoggedIn {
+                        LabeledContent("哔哩哔哩", value: blDisplayName)
+                        Button("退出登录", role: .destructive) {
+                            blAuth.logout()
+                            accountsVersion += 1
+                        }
+                    } else {
+                        LabeledContent("哔哩哔哩", value: "未登录")
+                        Button("登录哔哩哔哩") { loginProvider = .bilibili }
+                    }
+                    Text("哔哩哔哩直连官方扫码登录，无需自托管后端。")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+
             }
 
             if showsUpdateControls {
@@ -524,6 +542,11 @@ struct SettingsView: View {
     private var kgDisplayName: String {
         let base = kgAuth.nickname.isEmpty ? "已登录" : kgAuth.nickname
         return kgAuth.vipType > 0 ? "\(base) · VIP" : base
+    }
+
+    /// Bilibili login display name.
+    private var blDisplayName: String {
+        blAuth.nickname.isEmpty ? "已登录" : blAuth.nickname
     }
 
     private var appVersion: String {
