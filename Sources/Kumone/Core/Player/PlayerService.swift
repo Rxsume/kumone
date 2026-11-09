@@ -2859,12 +2859,12 @@ final class PlayerService: ObservableObject {
         let scope = offlineAccountScope
         if let scope, let saved = await OfflineMetadataStore.shared.lyrics(trackID: track.id, scope: scope) {
             guard !Task.isCancelled, generation == resolveGeneration else { return }
-            applyLyrics(saved)
+            applyLyrics(saved, for: track)
         }
         guard !Task.isCancelled, generation == resolveGeneration, !usesOfflineQueue else { return }
         let response = await MusicAPI.lyric(for: track)
         guard !Task.isCancelled, generation == resolveGeneration, let response else { return }
-        applyLyrics(response)
+        applyLyrics(response, for: track)
         // The engine caches every song it streams, so each one may play offline.
         if let scope { await OfflineMetadataStore.shared.keepPlaybackData(track: track, lyrics: response, scope: scope) }
     }
@@ -2875,8 +2875,8 @@ final class PlayerService: ObservableObject {
         TimeInterval(SettingsManager.shared.effectiveGlobalLyricTimelineOffsetMs) / 1000
     }
 
-    private func applyLyrics(_ response: LyricResponse) {
-        lyrics = LyricsParser.parse(response).applyingOffset(lyricOffsetSeconds)
+    private func applyLyrics(_ response: LyricResponse, for track: Track) {
+        lyrics = LyricsParser.parse(response, filter: LyricFilterSettings.effective(for: track)).applyingOffset(lyricOffsetSeconds)
         updateLyricsCursor(at: livePlaybackTime)
         currentLyricLRC = response.lrc?.lyric
         persistCurrentLyricsSidecar()

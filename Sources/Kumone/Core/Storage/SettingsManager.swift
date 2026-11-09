@@ -459,6 +459,14 @@ final class SettingsManager: ObservableObject {
         // several sources match with high confidence.
         static let autoUseBestLyric = "settings.autoUseBestLyric"
         static let preferredLyricSource = "settings.preferredLyricSource"
+        // Folia 歌词过滤 (lyricLineRules + staff-credits policy):
+        // per-line regex rules, leading staff-block policy, min dwell,
+        // absorb mode, custom staff pattern.
+        static let lyricLineRules = "settings.lyricLineRules"
+        static let lyricStaffPolicy = "settings.lyricStaffPolicy"
+        static let lyricStaffMinDwellSeconds = "settings.lyricStaffMinDwellSeconds"
+        static let lyricStaffAbsorbMode = "settings.lyricStaffAbsorbMode"
+        static let lyricStaffPattern = "settings.lyricStaffPattern"
         static let volume = "settings.volume"
         static let fmMode = "settings.fmMode"
         static let unblock = "settings.enableUnblock"
@@ -710,6 +718,37 @@ final class SettingsManager: ObservableObject {
         didSet { UserDefaults.standard.set(preferredLyricSource.rawValue, forKey: Keys.preferredLyricSource) }
     }
 
+    /// Per-line filter rules (Folia "歌词过滤"): a line is removed when
+    /// any enabled rule matches its full text. Stored as a JSON array;
+    /// the defaults reproduce the strips the parser used to apply.
+    @Published var lyricLineRules: [LyricLineRule] {
+        didSet { UserDefaults.standard.set(LyricFilterSettings.encodeRules(lyricLineRules), forKey: Keys.lyricLineRules) }
+    }
+
+    /// What happens to the leading staff block (Folia 制作人员信息:
+    /// 保留 / 智能 / 隐藏, default smart).
+    @Published var lyricStaffPolicy: LyricStaffPolicy {
+        didSet { UserDefaults.standard.set(lyricStaffPolicy.rawValue, forKey: Keys.lyricStaffPolicy) }
+    }
+
+    /// Shortest time a staff line gets to stay on screen (Folia
+    /// "每行最少停留", 0.6–4 s, default 1.5 s).
+    @Published var lyricStaffMinDwellSeconds: Double {
+        didSet { UserDefaults.standard.set(lyricStaffMinDwellSeconds, forKey: Keys.lyricStaffMinDwellSeconds) }
+    }
+
+    /// Whether lines adjacent to the staff block are pulled into it
+    /// (Folia 吸收相邻行: 不吸收 / 仅之前 / 前后都吸收, default off).
+    @Published var lyricStaffAbsorbMode: LyricStaffAbsorbMode {
+        didSet { UserDefaults.standard.set(lyricStaffAbsorbMode.rawValue, forKey: Keys.lyricStaffAbsorbMode) }
+    }
+
+    /// Custom staff-detection regex; empty means the built-in word list
+    /// (Folia "自定义识别正则").
+    @Published var lyricStaffPattern: String {
+        didSet { UserDefaults.standard.set(lyricStaffPattern, forKey: Keys.lyricStaffPattern) }
+    }
+
     /// Best-lyric search with the master switch off: pre-rollback the
     /// app fetched NetEase lyrics only, so the multi-source search
     /// stays off.
@@ -721,6 +760,34 @@ final class SettingsManager: ObservableObject {
     /// the pre-folia behaviour.
     var effectivePreferredLyricSource: LyricSource {
         foliaEnabled ? preferredLyricSource : .netease
+    }
+
+    /// Filter rules with the master switch off: the built-in strips
+    /// only, the pre-filter behaviour.
+    var effectiveLyricLineRules: [LyricLineRule] {
+        foliaEnabled ? lyricLineRules : LyricLineRule.defaultRules
+    }
+
+    /// Staff policy with the master switch off: keep, the pre-filter
+    /// behaviour (no block is ever hidden or retimed).
+    var effectiveLyricStaffPolicy: LyricStaffPolicy {
+        foliaEnabled ? lyricStaffPolicy : .keep
+    }
+
+    /// Staff min dwell with the master switch off: the default (it only
+    /// matters while the policy can act).
+    var effectiveLyricStaffMinDwellSeconds: Double {
+        foliaEnabled ? lyricStaffMinDwellSeconds : LyricFilterSettings.defaultMinDwellSeconds
+    }
+
+    /// Staff absorb mode with the master switch off: off.
+    var effectiveLyricStaffAbsorbMode: LyricStaffAbsorbMode {
+        foliaEnabled ? lyricStaffAbsorbMode : .off
+    }
+
+    /// Staff pattern with the master switch off: empty (built-in list).
+    var effectiveLyricStaffPattern: String {
+        foliaEnabled ? lyricStaffPattern : ""
     }
 
     /// Resolve gray tracks from third-party sources (unblock-style).
@@ -2349,6 +2416,11 @@ final class SettingsManager: ObservableObject {
         globalLyricTimelineOffsetMs = 0
         autoUseBestLyric = true
         preferredLyricSource = .netease
+        lyricLineRules = LyricLineRule.defaultRules
+        lyricStaffPolicy = .smart
+        lyricStaffMinDwellSeconds = LyricFilterSettings.defaultMinDwellSeconds
+        lyricStaffAbsorbMode = .off
+        lyricStaffPattern = ""
         lyricsCustomFont = nil
         visualizerOpacity = Self.defaultVisualizerOpacity
         subtitleFontScale = Self.defaultSubtitleFontScale
@@ -2391,6 +2463,15 @@ final class SettingsManager: ObservableObject {
         autoUseBestLyric = defaults.object(forKey: Keys.autoUseBestLyric) as? Bool ?? true
         preferredLyricSource = defaults.string(forKey: Keys.preferredLyricSource)
             .flatMap(LyricSource.init) ?? .netease
+        lyricLineRules = LyricFilterSettings.decodeRules(defaults.string(forKey: Keys.lyricLineRules))
+        lyricStaffPolicy = defaults.string(forKey: Keys.lyricStaffPolicy)
+            .flatMap(LyricStaffPolicy.init) ?? .smart
+        lyricStaffMinDwellSeconds = LyricFilterSettings.clampedDwell(
+            defaults.object(forKey: Keys.lyricStaffMinDwellSeconds) as? Double
+                ?? LyricFilterSettings.defaultMinDwellSeconds)
+        lyricStaffAbsorbMode = defaults.string(forKey: Keys.lyricStaffAbsorbMode)
+            .flatMap(LyricStaffAbsorbMode.init) ?? .off
+        lyricStaffPattern = defaults.string(forKey: Keys.lyricStaffPattern) ?? ""
         enableUnblock = defaults.object(forKey: Keys.unblock) as? Bool ?? true
         if let rawSourceIDs = defaults.stringArray(forKey: Keys.unblockSources) {
             enabledAudioSourceIDs = Set(rawSourceIDs.compactMap(AudioSourceID.init))

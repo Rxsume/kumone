@@ -24,6 +24,7 @@ struct SettingsView: View {
     private enum SettingsPage: Hashable {
         case storage
         case lyricStyle
+        case lyricFilter
         #if os(macOS)
         case shortcuts
         #endif
@@ -185,10 +186,11 @@ struct SettingsView: View {
                 Toggle("逐字歌词（卡拉OK）", isOn: $settings.verbatimLyrics)
                 // Folia 歌词多源 (restored): auto-best search across
                 // NetEase / AMLL / QQ / Kugou, the preferred-source
-                // tie-break, and the global timeline offset. Small
-                // delimited section — re-home into the new settings
-                // page with the rest of the lyric rows when the Beans
-                // settings replacement lands.
+                // tie-break, and the global timeline offset. The lyric
+                // filter rows below belong to the same delimited section
+                // — re-home into the new settings page with the rest of
+                // the lyric rows when the Beans settings replacement
+                // lands.
                 Toggle("自动使用最佳歌词", isOn: $settings.autoUseBestLyric)
                 Text("自动检索网易云、AMLLDB、QQ 和酷狗歌词，若存在完美匹配的逐字歌词则自动优先采用")
                     .font(.caption)
@@ -212,6 +214,56 @@ struct SettingsView: View {
                 Text("为本设备的所有歌曲整体平移歌词时间轴，补偿蓝牙等输出延迟")
                     .font(.caption)
                     .foregroundStyle(.secondary)
+                // Folia 歌词过滤 (lyricLineRules + staff-credits policy):
+                // per-line rules live on their own page; the staff policy
+                // lives here. Same delimited section as the multi-source
+                // rows above — re-home together when the Beans settings
+                // replacement lands.
+                NavigationLink(value: SettingsPage.lyricFilter) {
+                    Label("歌词过滤", systemImage: "line.3.horizontal.decrease.circle")
+                }
+                Text("按规则删掉指定歌词行，并处理开头的制作人员信息")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                Picker("制作人员信息", selection: $settings.lyricStaffPolicy) {
+                    ForEach(LyricStaffPolicy.allCases) { policy in
+                        Text(policy.displayName).tag(policy)
+                    }
+                }
+                Text("歌词开头的作词、作曲等署名行：保留、智能处理或整块隐藏")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                if settings.lyricStaffPolicy != .keep {
+                    HStack {
+                        Text("每行最少停留")
+                        Spacer()
+                        Text("\(settings.lyricStaffMinDwellSeconds, specifier: "%.1f")秒")
+                            .foregroundStyle(.secondary)
+                        Stepper("", value: $settings.lyricStaffMinDwellSeconds, in: 0.6...4, step: 0.1)
+                            .labelsHidden()
+                    }
+                    Text("智能模式按这个时间算前奏放不放得下整块署名")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                    Picker("吸收相邻行", selection: $settings.lyricStaffAbsorbMode) {
+                        ForEach(LyricStaffAbsorbMode.allCases) { mode in
+                            Text(mode.displayName).tag(mode)
+                        }
+                    }
+                    Text("把署名块前后耗时过短的行并进块里一起处理")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                    TextField("自定义识别正则（留空用内置词表）", text: $settings.lyricStaffPattern)
+                        #if os(iOS)
+                        .textInputAutocapitalization(.never)
+                        #endif
+                        .autocorrectionDisabled()
+                    if let error = LyricStaffCredits.patternError(settings.lyricStaffPattern) {
+                        Text(error)
+                            .font(.caption)
+                            .foregroundStyle(.red)
+                    }
+                }
                 Picker("日文歌词读音", selection: $settings.lyricsAnnotation) {
                     ForEach(LyricsAnnotation.allCases) { annotation in
                         Text(annotation.displayName).tag(annotation)
@@ -515,6 +567,8 @@ struct SettingsView: View {
                 #endif
                 case .lyricStyle:
                     LyricStyleSettingsView()
+                case .lyricFilter:
+                    LyricFilterSettingsView()
                 }
             }
             #if os(macOS)
@@ -525,6 +579,7 @@ struct SettingsView: View {
                     switch page {
                     case .storage: Text("存储空间").font(.headline)
                     case .lyricStyle: Text("歌词样式").font(.headline)
+                    case .lyricFilter: Text("歌词过滤").font(.headline)
                     case .shortcuts: Text("快捷键").font(.headline)
                     }
                 }
