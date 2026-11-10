@@ -482,17 +482,39 @@ enum MusicAPI {
     }
 
     /// Lyric lookup for a track (Folia multi-source, restored).
+    /// A platform track is tried by its own song key first
+    /// (`LyricDirectFetch`, Beans-style): QQ by songmid, Kugou by file
+    /// hash — one direct request, no search, no match scoring. This is
+    /// what rescues the songs the search-based providers miss
+    /// on-device (QQ 青花瓷, 2026-11-10). When the direct fetch comes
+    /// back empty, the normal paths below run unchanged.
     /// When the auto-best-lyric switch is on, the four sources
     /// (NetEase, AMLL, QQ, Kugou) are tried in order — preferred
     /// source first — and the best match wins (word-by-word beats
     /// line-timed; see `LyricMultiSource`). When it is off, the
-    /// single-source path (`lyricSingleSource`) runs instead.
+    /// preferred source runs first, then the NetEase single-source
+    /// path (`lyricSingleSource`). The off path used to be
+    /// NetEase-only, so a track NetEase delisted — all of Jay Chou:
+    /// search returns covers only, so the matched-track lookup fails —
+    /// could never have lyrics even when the preferred source had
+    /// them (user-reported 青花瓷 暂无歌词， 2026-11-10). The
+    /// preferred leg runs first because that is what the "歌词匹配
+    /// 优先级" picker promises; NetEase stays second so existing
+    /// NetEase-track behaviour is unchanged.
     /// Never throws, so callers keep today's `try?` behaviour: no error
     /// UI when lyrics are missing.
     static func lyric(for track: Track) async -> LyricResponse? {
+        if let direct = await LyricDirectFetch.fetch(for: track) {
+            return direct
+        }
         if await SettingsManager.shared.effectiveAutoUseBestLyric {
             let preferred = await SettingsManager.shared.effectivePreferredLyricSource
             return await LyricMultiSource.fetch(for: track, preferred: preferred)
+        }
+        let preferred = await SettingsManager.shared.effectivePreferredLyricSource
+        if preferred != .netease,
+           let response = await LyricMultiSource.fetchFromSource(preferred, for: track) {
+            return response
         }
         return await lyricSingleSource(for: track)
     }

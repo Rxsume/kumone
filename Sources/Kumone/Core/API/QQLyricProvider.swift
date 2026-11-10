@@ -333,6 +333,91 @@ struct QQLyricProvider: LyricProvider {
         }
     }
 
+    // MARK: - Beans-style direct fetch
+
+    /// Direct lyric fetch by the track's own songmid (Beans
+    /// `QQMusicAPI.lyricPayload`): one GET to
+    /// `c.y.qq.com/lyric/fcgi-bin/fcg_query_lyric_new.fcg`, no search,
+    /// no match scoring, no DES. The endpoint returns plain LRC (and
+    /// QRC when QQ has it) — live-probed 2026-11-10, 青花瓷 (songmid
+    /// 002qU5aY3Qu24y) returns retcode 0 with 988 chars of timed LRC
+    /// while the search-based flow finds nothing on-device for the
+    /// same song. `platformKey` is the track's `platformSongKey`
+    /// (`songmid` or `songmid|mediaMid`); only the first segment is
+    /// used. Nil when the song has no lyrics here.
+    static func fetchDirect(platformKey: String) async -> LyricCandidate? {
+        let songmid = platformKey.split(separator: "|", maxSplits: 1).first.map(String.init) ?? platformKey
+        guard !songmid.isEmpty else { return nil }
+        guard let encoded = songmid.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed),
+              let url = URL(string: "https://c.y.qq.com/lyric/fcgi-bin/fcg_query_lyric_new.fcg?songmid=\(encoded)&format=json&nobase64=1&g_tk=5381")
+        else { return nil }
+        var request = URLRequest(url: url)
+        request.timeoutInterval = 10
+        request.setValue("https://y.qq.com/portal/player.html", forHTTPHeaderField: "Referer")
+        request.setValue("Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Mobile/15E148 Safari/604.1", forHTTPHeaderField: "User-Agent")
+        guard let (data, urlResponse) = try? await session.data(for: request),
+              let http = urlResponse as? HTTPURLResponse, 200..<300 ~= http.statusCode,
+              let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              (json["retcode"] as? Int) == 0
+        else { return nil }
+        if Task.isCancelled { return nil }
+        let lyric = Self.directLyricText(json["lyric"])
+        let qrc = Self.directLyricText(json["qrc"])
+        if let qrc, Self.isQRC(qrc) {
+            let lines = Self.parseQRC(qrc)
+            guard !lines.isEmpty else { return nil }
+            let lrcText = lines.map { "[\(Self.lrcTimestamp(ms: $0.startMs))]\($0.text)" }
+                .joined(separator: "\n")
+            let yrcText = lines.map { line in
+                "[\(line.startMs),\(line.durationMs)]"
+                    + line.words.map { "(\($0.startMs),\($0.durationMs),0)\($0.text)" }.joined()
+            }.joined(separator: "\n")
+            let response = LyricResponse(
+                lrc: LyricResponse.LyricBody(lyric: lrcText),
+                tlyric: nil,
+                romalrc: nil,
+                yrc: LyricResponse.LyricBody(lyric: yrcText),
+                ytlrc: nil,
+                yromalrc: nil,
+                lyricUser: nil,
+                transUser: nil,
+                nolyric: false,
+                uncollected: false)
+            return LyricCandidate(source: .qq, response: response,
+                                  isWordByWord: true, isPureMusic: false)
+        }
+        guard let lyric, Self.looksLikeLRC(lyric) else { return nil }
+        let clean = lyric.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !clean.isEmpty else { return nil }
+        let response = LyricResponse(
+            lrc: LyricResponse.LyricBody(lyric: clean),
+            tlyric: nil,
+            romalrc: nil,
+            yrc: nil,
+            ytlrc: nil,
+            yromalrc: nil,
+            lyricUser: nil,
+            transUser: nil,
+            nolyric: false,
+            uncollected: false)
+        return LyricCandidate(source: .qq, response: response,
+                              isWordByWord: false, isPureMusic: false)
+    }
+
+    /// Beans' `lyricText`: `nobase64=1` usually returns plain text,
+    /// but the field is base64 when the server ignores the flag —
+    /// decode it when it has no LRC bracket.
+    private static func directLyricText(_ value: Any?) -> String? {
+        guard let value = value as? String, !value.isEmpty else { return nil }
+        if value.contains("[") { return value }
+        if let data = Data(base64Encoded: value, options: [.ignoreUnknownCharacters]),
+           let decoded = String(data: data, encoding: .utf8),
+           decoded.contains("[") {
+            return decoded
+        }
+        return value
+    }
+
     // MARK: - QRC decryption (`qrcDecrypt.ts`)
 
     /// Decrypts one hex-encoded QRC payload with Folia's hand-rolled DES

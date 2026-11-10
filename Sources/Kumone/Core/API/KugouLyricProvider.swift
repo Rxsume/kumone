@@ -60,11 +60,46 @@ struct KugouLyricProvider: LyricProvider {
         // 3. Lyric search for the matched hash (Folia: keyword
         //    "artist - title", duration in ms, album_audio_id when the song
         //    search gave one). Folia takes the first candidate.
-        let candidate = try await searchLyrics(for: song)
+        let candidate = try await searchLyrics(
+            hash: song.fileHash, durationMS: song.duration * 1000,
+            keyword: "\(song.artistNames) - \(song.songName)",
+            albumAudioID: song.albumAudioID ?? song.mixSongID)
         try Task.checkCancellation()
         guard let candidate else { return nil }
 
         // 4. Download (fmt=krc) and decode.
+        return try await downloadAndParse(candidate: candidate)
+    }
+
+    /// Beans-style direct fetch by the track's own file hash
+    /// (`KugouMusicAPI.lyricPayload`): skips the song search and the
+    /// match gate — the hash in the track's platform key IS the song.
+    /// Lyric search + download + KRC parse run exactly as in the
+    /// search-based flow. `platformKey` is the track's
+    /// `platformSongKey` (`hash` or `hash|audioId|albumId`).
+    func fetchDirect(platformKey: String, track: Track) async -> LyricCandidate? {
+        let segments = platformKey.split(separator: "|").map(String.init)
+        guard let hash = segments.first, !hash.isEmpty else { return nil }
+        let audioID = segments.count > 1 ? Int(segments[1]) : nil
+        do {
+            let title = track.name.trimmingCharacters(in: .whitespacesAndNewlines)
+            let artist = track.artists.first?.name.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+            guard let candidate = try await searchLyrics(
+                hash: hash, durationMS: track.durationMS,
+                keyword: artist.isEmpty ? title : "\(artist) - \(title)",
+                albumAudioID: audioID)
+            else { return nil }
+            try Task.checkCancellation()
+            return try await downloadAndParse(candidate: candidate)
+        } catch {
+            return nil
+        }
+    }
+
+    /// Downloads one lyric candidate (fmt=krc) and decodes it into LRC
+    /// text and YRC word-timing text. Shared by the search-based flow
+    /// and the direct-by-hash flow.
+    private func downloadAndParse(candidate: KugouLyricCandidate) async throws -> LyricCandidate? {
         let downloaded = try await downloadLyrics(id: candidate.id, accessKey: candidate.accessKey)
         try Task.checkCancellation()
         guard let downloaded else { return nil }
@@ -103,15 +138,15 @@ struct KugouLyricProvider: LyricProvider {
 
     // MARK: - Lyric search + download
 
-    private func searchLyrics(for song: KugouSong) async throws -> KugouLyricCandidate? {
+    private func searchLyrics(hash: String, durationMS: Int, keyword: String, albumAudioID: Int?) async throws -> KugouLyricCandidate? {
         var params: [String: String] = [
-            "hash": song.fileHash.uppercased(),
-            "duration": String(song.duration * 1000),
-            "keyword": "\(song.artistNames) - \(song.songName)",
+            "hash": hash.uppercased(),
+            "duration": String(durationMS),
+            "keyword": keyword,
             "lrctxt": "1",
             "man": "no",
         ]
-        if let albumAudioID = song.albumAudioID ?? song.mixSongID {
+        if let albumAudioID {
             params["album_audio_id"] = String(albumAudioID)
         }
         let response: LyricSearchResponse = try await get(
