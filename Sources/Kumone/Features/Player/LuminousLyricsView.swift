@@ -770,7 +770,10 @@ struct LuminousLyricsView: View {
                 )
             }
         } else {
-            Text(player.currentTrack == nil ? "暂无歌曲" : "歌词加载中…")
+            // No lyrics yet: loading while the lookup is still in
+            // flight (lyrics == nil), "暂无歌词" once it finished
+            // with nothing — never pretend to load forever.
+            Text(player.currentTrack == nil ? "暂无歌曲" : (player.lyrics == nil ? "歌词加载中…" : "暂无歌词"))
                 .font(.system(size: 20, weight: .medium))
                 .foregroundColor(.white.opacity(0.6))
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
