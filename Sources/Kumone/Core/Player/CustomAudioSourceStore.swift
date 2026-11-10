@@ -4,11 +4,13 @@ import Foundation
 /// `UnblockSourceStore`.
 ///
 /// One JSON blob in UserDefaults under `storeKey`. List order is
-/// the resolve order in `UnblockService`. (The former built-in ikun
-/// source was removed 2026-11-10: nothing is auto-inserted
-/// anymore. A leftover record of it is an ordinary imported source;
-/// see `migrateLegacyBuiltInKeyIfNeeded` for the one-time key
-/// fold-back that keeps it working.)
+/// the resolve order in `UnblockService`. Two bundled scripts are
+/// seeded once (酸甜贤 + Golia贤源, see `BuiltInAudioSources`):
+/// each seeds only when no copy of the same script is already
+/// stored, and deleting a seeded record marks it dismissed so it
+/// is never re-seeded. A seeded record is otherwise an ordinary
+/// imported source; a leftover record of the removed 2026-11-10
+/// built-in is the same.
 ///
 /// Security: the blob may contain imported scripts with private keys
 /// inside them, so `storeKey` is permanently excluded from
@@ -49,7 +51,26 @@ final class CustomAudioSourceStore: ObservableObject {
         sources = saved.filter { seen.insert($0.id).inserted }
         declaredPlatforms = Self.loadDeclaredPlatforms(from: defaults)
         migrateLegacyBuiltInKeyIfNeeded()
+        seedBuiltInSourcesIfNeeded()
         save()
+    }
+
+    /// Seeds the two bundled scripts once: 酸甜贤 first, Golia
+    /// second (list order is resolve order). Each seeds only when
+    /// no copy of the same script is already stored (matched by
+    /// backend host, not id, so a user-imported copy suppresses
+    /// the seed) and the user has not deleted the seeded record.
+    private func seedBuiltInSourcesIfNeeded() {
+        var list = sources
+        if !defaults.bool(forKey: BuiltInAudioSources.ikunDismissedKey),
+           !list.contains(where: { $0.script?.contains(BuiltInAudioSources.ikunBackendHost) == true }) {
+            list.append(BuiltInAudioSources.seededIkunSource())
+        }
+        if !defaults.bool(forKey: BuiltInAudioSources.goliaDismissedKey),
+           !list.contains(where: { $0.script?.contains(BuiltInAudioSources.goliaBackendHost) == true }) {
+            list.append(BuiltInAudioSources.seededGoliaSource())
+        }
+        sources = list
     }
 
     /// One-time migration (built-in removal, 2026-11-10). The removed
@@ -216,6 +237,15 @@ final class CustomAudioSourceStore: ObservableObject {
     func removeSource(id: String) -> Bool {
         let originalCount = sources.count
         sources.removeAll { $0.id == id }
+        // Deleting a seeded record dismisses it, so the next launch
+        // does not bring it back. Deleting a user-imported copy
+        // does not dismiss anything: the seed may appear as its
+        // replacement, and deleting that seed dismisses it.
+        if id == BuiltInAudioSources.ikunSourceID {
+            defaults.set(true, forKey: BuiltInAudioSources.ikunDismissedKey)
+        } else if id == BuiltInAudioSources.goliaSourceID {
+            defaults.set(true, forKey: BuiltInAudioSources.goliaDismissedKey)
+        }
         // Drop the cached platform chips too, so the persisted cache
         // does not grow with entries for sources that no longer exist.
         if declaredPlatforms.removeValue(forKey: id) != nil {
