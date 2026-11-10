@@ -3,10 +3,14 @@ import SwiftUI
 struct SleepTimerMenu: View {
     @ObservedObject private var player: PlayerService
     @ObservedObject private var sleepTimer: SleepTimer
+    /// Icon-only label for the circular player-page buttons (no text,
+    /// same 44pt circle as the neighbouring buttons).
+    private let iconOnly: Bool
 
-    init(player: PlayerService) {
+    init(player: PlayerService, iconOnly: Bool = false) {
         _player = ObservedObject(wrappedValue: player)
         _sleepTimer = ObservedObject(wrappedValue: player.sleepTimer)
+        self.iconOnly = iconOnly
     }
 
     var body: some View {
@@ -38,7 +42,16 @@ struct SleepTimerMenu: View {
                 }
             }
         } label: {
-            Label(menuTitle, systemImage: sleepTimer.state.isActive ? "timer.circle.fill" : "timer")
+            if iconOnly {
+                Image(systemName: sleepTimer.state.isActive ? "timer.circle.fill" : "timer")
+                    .font(.system(size: 17, weight: .medium))
+                    .foregroundStyle(sleepTimer.state.isActive ? Theme.accent : .white.opacity(0.72))
+                    .frame(width: 44, height: 44)
+                    .background(.white.opacity(0.08), in: Circle())
+                    .accessibilityLabel(menuTitle)
+            } else {
+                Label(menuTitle, systemImage: sleepTimer.state.isActive ? "timer.circle.fill" : "timer")
+            }
         }
         .disabled(!player.hasCurrentTrack && !sleepTimer.state.isActive)
     }

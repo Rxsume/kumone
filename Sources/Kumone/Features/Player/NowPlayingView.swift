@@ -1018,6 +1018,10 @@ struct NowPlayingView: View {
 
                     Spacer()
 
+                    SleepTimerMenu(player: player, iconOnly: true)
+
+                    Spacer()
+
                     Button {
                         showLyricStyleSettings = true
                     } label: {
@@ -2647,6 +2651,9 @@ private struct CompactSecondaryControls: View {
                         .zIndex(1)
                 }
             }
+
+            SleepTimerMenu(player: player, iconOnly: true)
+                .frame(maxWidth: .infinity)
 
             secondaryButton(
                 icon: "list.bullet",
