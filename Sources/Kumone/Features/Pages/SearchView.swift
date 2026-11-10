@@ -42,6 +42,12 @@ final class SearchViewModel: ObservableObject {
     /// opening the platform detail pages.
     @Published var platformArtists: [PlatformArtistSummary] = []
     @Published var platformAlbums: [PlatformAlbumSummary] = []
+    /// Hot search terms for the empty search page (NetEase + QQ,
+    /// interleaved). Empty until `loadHotSearchTerms` answers, and
+    /// stays empty when both sides fail — the chips just hide.
+    @Published var hotSearchTerms: [String] = []
+    /// Guards the one-shot hot search fetch for the empty search page.
+    private var hotSearchLoaded = false
     @Published var loadedTabs: Set<Tab> = []
     @Published private var loadingTabs: Set<Tab> = []
     /// Bumped on every query change so responses to an older query are dropped.
@@ -93,6 +99,42 @@ final class SearchViewModel: ObservableObject {
         platformArtists = []
         platformAlbums = []
         if !availableTabs.contains(tab) { tab = .all }
+    }
+
+    /// Hot search chips for the empty search page: NetEase
+    /// `/search/hot/detail` interleaved with QQ `gethotkey.fcg`,
+    /// deduped. Either side failing just shrinks the list; both
+    /// failing leaves it empty and the chips stay hidden — no error
+    /// surface, no alert.
+    func loadHotSearchTerms() async {
+        guard !hotSearchLoaded else { return }
+        hotSearchLoaded = true
+        async let netEaseTerms = try? MusicAPI.hotSearchTerms(limit: 10)
+        async let qqTerms = try? QQMusicAPI.shared.hotKeys(limit: 10)
+        let (netEase, qq) = await (netEaseTerms, qqTerms)
+        hotSearchTerms = Self.mergedHotSearchTerms(netEase: netEase ?? [], qq: qq ?? [], limit: 10)
+    }
+
+    /// Interleaves the two platforms' terms (NetEase first, then
+    /// alternating), deduped on the lowercased term so the same word
+    /// from both sides shows once. Pure, so the merge is testable
+    /// without networking.
+    nonisolated static func mergedHotSearchTerms(netEase: [String], qq: [String], limit: Int) -> [String] {
+        var interleaved: [String] = []
+        for index in 0 ..< max(netEase.count, qq.count) {
+            if index < netEase.count { interleaved.append(netEase[index]) }
+            if index < qq.count { interleaved.append(qq[index]) }
+        }
+        var seen = Set<String>()
+        var merged: [String] = []
+        for term in interleaved {
+            let key = term.lowercased()
+            guard !key.isEmpty else { continue }
+            guard seen.insert(key).inserted else { continue }
+            merged.append(term)
+            if merged.count >= limit { break }
+        }
+        return merged
     }
 
     func load(tab: Tab) async {
@@ -449,6 +491,9 @@ struct SearchView: View {
         }
         #endif
         .navigationTitle(searchText.isEmpty ? "搜索" : String(localized: "搜索：\(searchText)"))
+        .task {
+            await model.loadHotSearchTerms()
+        }
         .task(id: model.tab) {
             await model.load(tab: model.tab)
         }
@@ -540,19 +585,53 @@ struct SearchView: View {
 
     private var emptySearchPrompt: some View {
         VStack(spacing: 16) {
-            Image(systemName: "magnifyingglass")
-                .font(.system(size: 48, weight: .light))
-                .foregroundStyle(.tertiary)
-                .padding(.top, 60)
-            Text("探索海量华语流行与经典音乐")
-                .font(.headline)
-                .foregroundStyle(.secondary)
-            Text("输入歌曲名称、歌手名或歌单关键字开始搜索")
-                .font(.subheadline)
-                .foregroundStyle(.tertiary)
+            VStack(spacing: 16) {
+                Image(systemName: "magnifyingglass")
+                    .font(.system(size: 48, weight: .light))
+                    .foregroundStyle(.tertiary)
+                    .padding(.top, 60)
+                Text("探索海量华语流行与经典音乐")
+                    .font(.headline)
+                    .foregroundStyle(.secondary)
+                Text("输入歌曲名称、歌手名或歌单关键字开始搜索")
+                    .font(.subheadline)
+                    .foregroundStyle(.tertiary)
+            }
+            .frame(maxWidth: .infinity)
+            .padding(.horizontal, 32)
+            if !model.hotSearchTerms.isEmpty {
+                VStack(alignment: .leading, spacing: 8) {
+                    Text("热门搜索")
+                        .font(.headline)
+                        .padding(.horizontal, Theme.Layout.contentInset)
+                    hotSearchChips
+                }
+            }
         }
         .frame(maxWidth: .infinity)
-        .padding(.horizontal, 32)
+    }
+
+    /// Hot search chips, only on the empty search page. Tapping one
+    /// fills the search field and runs the search right away through
+    /// the same `setQuery` + `load` flow as submitting text.
+    private var hotSearchChips: some View {
+        ScrollView(.horizontal, showsIndicators: false) {
+            HStack(spacing: 8) {
+                ForEach(model.hotSearchTerms, id: \.self) { term in
+                    Button {
+                        searchText = term
+                        model.setQuery(term)
+                        Task { await model.load(tab: model.tab) }
+                    } label: {
+                        Text(verbatim: term)
+                    }
+                    .buttonStyle(.chip(isSelected: false))
+                }
+            }
+            .padding(.horizontal, Theme.Layout.contentInset)
+            .padding(.vertical, 2)
+        }
+        .shelfEdgeClip()
     }
 
     private var currentEmpty: Bool {
