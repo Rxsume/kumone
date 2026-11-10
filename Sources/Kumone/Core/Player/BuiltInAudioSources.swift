@@ -13,6 +13,7 @@ import Foundation
 /// which writes it into the stored script text on device only.
 /// The Golia script ships verbatim; its key is the script's own
 /// public shared key, distributed with the script itself.
+/// The GD script ships verbatim; it calls a public API with no key.
 enum BuiltInAudioSources {
     /// Backend host of the ikun script; used to recognise any copy
     /// of it (seeded or user-imported) so it is never seeded twice.
@@ -21,13 +22,18 @@ enum BuiltInAudioSources {
     /// Backend host of the Golia script; same dedup purpose.
     static let goliaBackendHost = "lxmusicapi.onrender.com"
 
+    /// Backend host of the GD script; same dedup purpose.
+    static let gdBackendHost = "music-api.gdstudio.xyz"
+
     /// Fixed ids of the seeded records.
     static let ikunSourceID = "builtin-ikun"
     static let goliaSourceID = "builtin-golia"
+    static let gdSourceID = "builtin-gd"
 
     /// UserDefaults flags set when the user deletes a seeded record.
     static let ikunDismissedKey = "settings.builtinIkunDismissed"
     static let goliaDismissedKey = "settings.builtinGoliaDismissed"
+    static let gdDismissedKey = "settings.builtinGdDismissed"
 
     /// 酸甜贤音源 v26 (ikunshare), key blanked. Declares git/kg/kw/
     /// tx/wy; POSTs to the ikun backend with an X-Api-Key header.
@@ -246,6 +252,115 @@ on(EVENT_NAMES.request, ({ action, source, info }) => {
 send(EVENT_NAMES.inited, { status: true, openDevTools: DEV_ENABLE, sources: musicSources })
 """#
 
+    /// GD音乐台聚合音源 v1.0.0 (Pax), verbatim. Declares wy/tx/kw/
+    /// kg/mg; GETs the public GD API (music-api.gdstudio.xyz)
+    /// with no key. Third fallback backend; all five platforms
+    /// with lossless qualities (flac/flac24bit).
+    static let gdScript = #"""
+/**
+ * @name GD音乐台聚合音源
+ * @description 洛雪音乐自定义源：用 GD音乐台(music.gdstudio.xyz) 的公开聚合 API 解析播放链接，仅限个人非商业使用，使用请注明出处“GD音乐台(music.gdstudio.xyz)”。注意：TVBox 的 MTV1 / csp_MusicGuard 是闭源 jar，无法直接转成洛雪源，这里用 GD API 覆盖网易云 / QQ / 酷我 / 酷狗 / 咪咕，和你截图里的 GD音乐台是同一条线。
+ * @version 1.0.0
+ * @author Pax
+ * @homepage https://music.gdstudio.xyz
+ */
+
+const { EVENT_NAMES, request, on, send } = globalThis.lx
+
+// GD 公开 API，站长要求注明出处，个人非商业使用
+// 搜索: ?types=search&source=netease&tencent&kuwo...&name=关键词
+// 取链: ?types=url&source=netease&id=曲目ID&br=128/192/320/740/999
+// 740 = 16bit 无损，999 = 24bit 无损
+const API_BASE = 'https://music-api.gdstudio.xyz/api.php'
+
+// 洛雪音质 -> GD br
+const QUALITY_MAP = {
+  '128k': '128',
+  '320k': '320',
+  flac: '740',
+  flac24bit: '999',
+}
+
+// 洛雪源 key -> GD source 参数
+const SOURCE_MAP = {
+  wy: 'netease', // 网易云音乐，对应截图里的 GD音乐台 / 念心
+  tx: 'tencent', // QQ音乐，对应截图里的 VKeys / HYW
+  kw: 'kuwo', // 酷我音乐，对应截图里的 念心 / 星海
+  kg: 'kugou', // 酷狗音乐
+  mg: 'migu', // 咪咕音乐，对应截图里的 咪咕
+}
+
+const httpRequest = (url, options = {}) => new Promise((resolve, reject) => {
+  request(url, options, (err, resp) => {
+    if (err) return reject(err)
+    resolve(resp.body)
+  })
+})
+
+const getSongId = (musicInfo) => {
+  // 洛雪传过来的 ID 字段在不同源不一样，按顺序取
+  return musicInfo.songmid || musicInfo.hash || musicInfo.id || musicInfo.songId || ''
+}
+
+const handleGetMusicUrl = async (source, musicInfo, quality) => {
+  const gdSource = SOURCE_MAP[source]
+  if (!gdSource) throw new Error('unsupported source: ' + source)
+
+  const songId = getSongId(musicInfo)
+  if (!songId) throw new Error('no song id')
+
+  const br = QUALITY_MAP[quality] || '320'
+  const url = `${API_BASE}?types=url&source=${gdSource}&id=${encodeURIComponent(songId)}&br=${br}`
+
+  const data = await httpRequest(url, {
+    method: 'GET',
+    headers: {
+      'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+      Referer: 'https://music.gdstudio.xyz/',
+    },
+    timeout: 10000,
+  })
+
+  // GD 返回 { url, br, size }
+  const playUrl = typeof data === 'string' ? data : data && data.url
+  if (!playUrl || !/^https?:/.test(playUrl)) {
+    throw new Error('get music url failed: ' + JSON.stringify(data || ''))
+  }
+  return playUrl
+}
+
+const musicSources = {}
+for (const key of Object.keys(SOURCE_MAP)) {
+  const names = {
+    wy: '网易云音乐',
+    tx: 'QQ音乐',
+    kw: '酷我音乐',
+    kg: '酷狗音乐',
+    mg: '咪咕音乐',
+  }
+  musicSources[key] = {
+    name: names[key],
+    type: 'music',
+    actions: ['musicUrl'],
+    qualitys: ['128k', '320k', 'flac', 'flac24bit'],
+  }
+}
+
+on(EVENT_NAMES.request, ({ source, action, info }) => {
+  if (action !== 'musicUrl') return Promise.reject('action not support: ' + action)
+  return handleGetMusicUrl(source, info.musicInfo, info.type).catch((err) => {
+    console.log('[GD音乐台]', source, info.type, err)
+    return Promise.reject(err)
+  })
+})
+
+send(EVENT_NAMES.inited, {
+  status: true,
+  openDevTools: false,
+  sources: musicSources,
+})
+"""#
+
     /// The seeded ikun record: first in resolve order (paid source,
     /// widest quality ladder). Matches what the import parser
     /// produces for the same script (`@name` → name, kind script,
@@ -272,6 +387,20 @@ send(EVENT_NAMES.inited, { status: true, openDevTools: DEV_ENABLE, sources: musi
             template: "",
             quality: "320k",
             script: goliaScript,
+            enabled: true
+        )
+    }
+
+    /// The seeded GD record: third in resolve order (independent
+    /// public backend, no key needed).
+    static func seededGdSource() -> CustomAudioSource {
+        CustomAudioSource(
+            id: gdSourceID,
+            name: "GD音乐台聚合音源",
+            kind: "script",
+            template: "",
+            quality: "320k",
+            script: gdScript,
             enabled: true
         )
     }
