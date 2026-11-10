@@ -591,6 +591,43 @@ enum MusicAPI {
         try await eapi(SearchDefaultResponse.self, "/search/defaultkeyword/get").data?.showKeyword
     }
 
+    // MARK: - Hot search
+
+    struct HotSearchResponse: Decodable {
+        struct HotSearchItem: Decodable {
+            let searchWord: String
+        }
+
+        let data: [HotSearchItem]?
+    }
+
+    /// Hot search terms from `/search/hot/detail` (eapi; anonymous).
+    /// Parses through `parseHotSearchTerms` so the response shape is
+    /// unit-testable without networking.
+    static func hotSearchTerms(limit: Int = 10) async throws -> [String] {
+        let data = try await client.eapi("/search/hot/detail")
+        return parseHotSearchTerms(from: data, limit: limit)
+    }
+
+    /// Decodes a `/search/hot/detail` payload: `data` is an array of
+    /// items carrying `searchWord`. Trims, dedupes case-insensitively
+    /// and caps at `limit`; a payload that does not decode yields []
+    /// so a backend shape change hides the chips instead of breaking
+    /// search.
+    static func parseHotSearchTerms(from data: Data, limit: Int = 10) -> [String] {
+        guard let resp = try? JSONDecoder().decode(HotSearchResponse.self, from: data) else { return [] }
+        var seen = Set<String>()
+        var terms: [String] = []
+        for item in resp.data ?? [] {
+            let term = item.searchWord.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !term.isEmpty else { continue }
+            guard seen.insert(term.lowercased()).inserted else { continue }
+            terms.append(term)
+            if terms.count >= limit { break }
+        }
+        return terms
+    }
+
     // MARK: - Personalized extras
 
     struct PersonalizedNewsongResponse: Decodable {

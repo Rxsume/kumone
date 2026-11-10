@@ -263,9 +263,26 @@ final class QQMusicAPI: Sendable {
     func hotKeys(limit: Int = 10) async throws -> [String] {
         let url = "https://c.y.qq.com/splcloud/fcgi-bin/gethotkey.fcg?format=json&inCharset=utf8&outCharset=utf-8"
         let json = try await get(url)
+        return Self.parseHotKeys(json, limit: limit)
+    }
+
+    /// Parses a `gethotkey.fcg` payload (`data.hotkey[].k`). QQ ships
+    /// `k` with trailing spaces; they are trimmed, terms deduped
+    /// case-insensitively and capped at `limit`.
+    static func parseHotKeys(_ json: [String: Any], limit: Int = 10) -> [String] {
         let data = json["data"] as? [String: Any] ?? [:]
         let hots = data["hotkey"] as? [[String: Any]] ?? []
-        return hots.compactMap { $0["k"] as? String }.prefix(limit).map { $0 }
+        var seen = Set<String>()
+        var terms: [String] = []
+        for item in hots {
+            guard let raw = item["k"] as? String else { continue }
+            let term = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !term.isEmpty else { continue }
+            guard seen.insert(term.lowercased()).inserted else { continue }
+            terms.append(term)
+            if terms.count >= limit { break }
+        }
+        return terms
     }
 
     // MARK: - Artist / album detail
