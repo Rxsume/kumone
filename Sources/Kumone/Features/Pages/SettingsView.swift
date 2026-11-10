@@ -4,11 +4,55 @@ import UniformTypeIdentifiers
 import Combine
 #endif
 
+#if os(iOS)
+/// The iOS Settings sheet: its navigation stack, title and 完成 button around
+/// `SettingsView`. Present it from the app's root (`presentSettingsSheet`).
+///
+/// Presented from inside the Library tab, the sheet was re-hosted whenever
+/// the tab view updated, so changing a setting from a pushed page (picking a
+/// sound effect, say) reset the stack and popped the page back to the root.
+/// It also keeps the stack apart from `SettingsView`, which re-renders on
+/// every settings change.
+struct SettingsSheet: View {
+    var titleDisplayMode: NavigationBarItem.TitleDisplayMode = .automatic
+    @Environment(\.dismiss) private var dismiss
+    @Environment(\.openDestination) private var openDestination
+    @State private var path: [SettingsView.SettingsPage] = []
+
+    var body: some View {
+        NavigationStack(path: $path) {
+            SettingsView()
+                .navigationTitle("设置")
+                .navigationBarTitleDisplayMode(titleDisplayMode)
+                .toolbar {
+                    ToolbarItem(placement: .topBarTrailing) {
+                        Button("完成") { dismiss() }
+                    }
+                }
+                .navigationDestination(for: SettingsView.SettingsPage.self) { page in
+                    switch page {
+                    case .storage:
+                        StorageSpaceView {
+                            dismiss()
+                            openDestination(.downloaded)
+                        }
+                    case .soundEffects:
+                        SoundEffectsPage()
+                    case .lyricStyle:
+                        LyricStyleSettingsView()
+                    case .lyricFilter:
+                        LyricFilterSettingsView()
+                    }
+                }
+        }
+    }
+}
+#endif
+
 struct SettingsView: View {
     @EnvironmentObject private var settings: SettingsManager
     @EnvironmentObject private var account: AccountStore
     @Environment(\.openDestination) private var openDestination
-    @Environment(\.dismiss) private var dismiss
     @State private var showAccountHub = false
     @State private var showCustomSources = false
     // Beans 主题/平台组的可展开状态（默认收起，与 Beans 一致）。
@@ -28,8 +72,11 @@ struct SettingsView: View {
     @State private var navigationPath: [SettingsPage] = []
     #endif
 
-    private enum SettingsPage: Hashable {
+    fileprivate enum SettingsPage: Hashable {
         case storage
+        #if os(iOS)
+        case soundEffects
+        #endif
         case lyricStyle
         case lyricFilter
         #if os(macOS)
@@ -56,6 +103,7 @@ struct SettingsView: View {
             .frame(width: 520, height: 620)
             .overlay(alignment: .top) { SettingsToastOverlay() }
         #else
+        // Navigation lives in `SettingsSheet`, which observes no settings.
         settingsForm
         #endif
     }
@@ -82,6 +130,7 @@ struct SettingsView: View {
                             .foregroundStyle(.tertiary)
                     }
                 }
+
             }
 
             // Beans 主题模式组（`ProfileView.themeSection` + 深层外观
@@ -426,6 +475,18 @@ struct SettingsView: View {
                             set: { settings.audioQuality = AudioQuality(rawValue: $0) ?? .exhigh }
                         )
                     )
+                    #if os(iOS)
+                    NavigationLink(value: SettingsPage.soundEffects) {
+                        HStack {
+                            Text("音效")
+                            Spacer()
+                            Text(settings.soundEffectPreset.displayName)
+                                .foregroundStyle(.secondary)
+                        }
+                    }
+                    .accessibilityValue(settings.soundEffectPreset.displayName)
+                    .accessibilityIdentifier("settingsSoundEffectsButton")
+                    #endif
                     Toggle("第三方播放会员歌提醒", isOn: $settings.showThirdPartySourceNotice)
                     Text("第三方音源播出会员歌曲时弹出提醒")
                         .font(.caption)
@@ -821,27 +882,22 @@ struct SettingsView: View {
         }
         .formStyle(.grouped)
         .sheet(isPresented: $showAccountHub) { AccountHubSheet() }
+        #if os(macOS)
         .navigationDestination(for: SettingsPage.self) { page in
             Group {
                 switch page {
                 case .storage:
                     StorageSpaceView {
-                        #if os(iOS)
-                        dismiss()
-                        #endif
                         openDestination(.downloaded)
                     }
-                #if os(macOS)
                 case .shortcuts:
                     ShortcutSettingsView()
-                #endif
                 case .lyricStyle:
                     LyricStyleSettingsView()
                 case .lyricFilter:
                     LyricFilterSettingsView()
                 }
             }
-            #if os(macOS)
             .navigationBarBackButtonHidden()
             .toolbar(removing: .title)
             .toolbar {
@@ -854,8 +910,8 @@ struct SettingsView: View {
                     }
                 }
             }
-            #endif
         }
+        #endif
     }
 
     /// Sparkle on macOS; on iOS only sideload builds carry an updater.
