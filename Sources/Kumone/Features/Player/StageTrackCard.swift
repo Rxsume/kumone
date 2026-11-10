@@ -14,6 +14,7 @@ struct StageTrackCard: View {
     let onTap: () -> Void
 
     @EnvironmentObject private var player: PlayerService
+    @ObservedObject private var settings = SettingsManager.shared
 
     var body: some View {
         Button(action: onTap) {
@@ -46,7 +47,7 @@ struct StageTrackCard: View {
             }
             .padding(.vertical, 8)
             .padding(.horizontal, 10)
-            .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+            .compatGlass(material: settings.effectiveGlassMaterial, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
             .overlay(
                 RoundedRectangle(cornerRadius: 14, style: .continuous)
                     .strokeBorder(

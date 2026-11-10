@@ -38,6 +38,8 @@ struct SettingsSheet: View {
                         }
                     case .soundEffects:
                         SoundEffectsPage()
+                    case .playerBottomLayout:
+                        PlayerBottomLayoutEditor()
                     case .lyricStyle:
                         LyricStyleSettingsView()
                     case .lyricFilter:
@@ -75,6 +77,7 @@ struct SettingsView: View {
         case storage
         #if os(iOS)
         case soundEffects
+        case playerBottomLayout
         #endif
         case lyricStyle
         case lyricFilter
@@ -779,6 +782,30 @@ struct SettingsView: View {
                             }
                         ))
                     }
+                }.disabled(!settings.foliaEnabled)
+                Group {
+                    // Folia 玻璃材质 (Beans 的液态/磨砂切换的 Golia 版：一个
+                    // 开关，没有 Beans 的主题色着色)：液态是 iOS 26 原生
+                    // Liquid Glass，磨砂在所有系统上都用磨砂材质；底栏、
+                    // 迷你播放条、播放器面板、浮动卡片、提示与登录弹窗跟随。
+                    Picker("玻璃材质", selection: $settings.glassMaterial) {
+                        ForEach(GoliaGlassMaterial.allCases) { material in
+                            Text(material.displayName).tag(material)
+                        }
+                    }
+                    Text("液态玻璃只在 iOS 26 / macOS 26 上显示，低版本自动用磨砂；选磨砂则在所有系统上都用磨砂")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                    // Folia 底部布局自由拖动 (Beans 拖拽排版编辑器的 Golia
+                    // 版，只做进度条与控制按钮)：悬浮窗实时预览里直接拖动。
+                    #if os(iOS)
+                    NavigationLink(value: SettingsPage.playerBottomLayout) {
+                        Label("底部布局自由拖动", systemImage: "rectangle.and.hand.point.up.left")
+                    }
+                    Text("拖动进度条与控制按钮的位置、捏合缩放，实时预览，一键恢复默认")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                    #endif
                 }.disabled(!settings.foliaEnabled)
             }
 

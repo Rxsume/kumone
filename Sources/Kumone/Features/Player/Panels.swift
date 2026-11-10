@@ -18,7 +18,7 @@ struct LyricsPanel: View {
         }
         .frame(width: 320)
         .frame(maxHeight: .infinity)
-        .compatGlass(interactive: true, in: RoundedRectangle(cornerRadius: Theme.Radius.panel, style: .continuous))
+        .compatGlass(material: settings.effectiveGlassMaterial, interactive: true, in: RoundedRectangle(cornerRadius: Theme.Radius.panel, style: .continuous))
         .clipShape(RoundedRectangle(cornerRadius: Theme.Radius.panel, style: .continuous))
         .overlay(
             RoundedRectangle(cornerRadius: Theme.Radius.panel, style: .continuous)

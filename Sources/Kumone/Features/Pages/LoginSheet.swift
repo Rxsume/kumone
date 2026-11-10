@@ -53,6 +53,7 @@ struct LoginSheet: View {
     }
 
     @EnvironmentObject private var toasts: ToastCenter
+    @ObservedObject private var settings = SettingsManager.shared
     @Environment(\.dismiss) private var dismiss
 
     var body: some View {
@@ -189,7 +190,7 @@ struct LoginSheet: View {
                         }
                     }
                     .padding(12)
-                    .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+                    .compatGlass(material: settings.effectiveGlassMaterial, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
                 }
             }
 

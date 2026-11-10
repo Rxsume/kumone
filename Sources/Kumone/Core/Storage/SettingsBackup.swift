@@ -107,6 +107,8 @@ enum SettingsBackup {
         "settings.enabledHomePlatforms.v1",
         "settings.enabledUnblockSources",
         "settings.fmMode",
+        "settings.folia.glassMaterial",
+        "settings.folia.playerBottomLayoutData",
         "settings.foliaEnabled",
         "settings.globalLyricTimelineOffsetMs",
         "settings.hidePlayerProgressBar",

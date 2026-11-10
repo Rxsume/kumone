@@ -24,7 +24,7 @@ struct PlayerBar: View {
             .padding(.horizontal, 14)
         }
         .frame(height: Theme.Layout.playerBarHeight)
-        .compatGlass(interactive: true, in: Capsule())
+        .compatGlass(material: settings.effectiveGlassMaterial, interactive: true, in: Capsule())
         .overlay(Capsule().strokeBorder(.primary.opacity(0.06), lineWidth: 0.5))
         // Bar-wide tap: tapping anywhere on the bar that is
         // not a control opens the full now-playing page. The buttons

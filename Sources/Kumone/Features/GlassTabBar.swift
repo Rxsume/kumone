@@ -73,7 +73,7 @@ struct GlassTabBar: View {
         // i.e. exactly the old capsule look. Width caps at the
         // slider value (default 420 = today's full-width look);
         // offset nudges the whole bar.
-        .background { barShape.fill(.regularMaterial) }
+        .compatGlass(material: settings.effectiveGlassMaterial, in: barShape)
         .overlay {
             barShape.strokeBorder(.white.opacity(colorScheme == .dark ? 0.08 : 0.22),
                                   lineWidth: 0.5)

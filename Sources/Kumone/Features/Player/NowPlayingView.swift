@@ -54,6 +54,9 @@ struct NowPlayingView: View {
     @ObservedObject private var lyricsCursor = PlayerService.shared.lyricsCursor
     @EnvironmentObject private var account: AccountStore
     @EnvironmentObject private var settings: SettingsManager
+    /// Folia bottom-layout edits (progress + transport row): the editor
+    /// and this page share one model, so edits apply live.
+    @ObservedObject private var bottomLayout = PlayerBottomLayoutModel.shared
     #if os(macOS)
     @EnvironmentObject private var artworkStore: NowPlayingArtworkStore
     #endif
@@ -1113,8 +1116,10 @@ struct NowPlayingView: View {
                         .padding(.horizontal, 16)
                         .padding(.vertical, 10)
                         .background(.ultraThinMaterial, in: Capsule())
+                        .modifier(PlayerBottomLayoutTransform(part: .progress, entry: bottomLayout.entry(for: .progress)))
                 }
                 CompactTransportControls()
+                    .modifier(PlayerBottomLayoutTransform(part: .controls, entry: bottomLayout.entry(for: .controls)))
                 HStack(spacing: 0) {
                     Button {
                         withAnimation(AppAnimation.standard) {
@@ -1309,8 +1314,10 @@ struct NowPlayingView: View {
                 if !settings.effectiveHidePlayerProgressBar {
                     NowPlayingScrubber(accent: beansPalette.accent, showsSeekPills: true)
                         .padding(.horizontal, 24)
+                        .modifier(PlayerBottomLayoutTransform(part: .progress, entry: bottomLayout.entry(for: .progress)))
                 }
                 controls()
+                    .modifier(PlayerBottomLayoutTransform(part: .controls, entry: bottomLayout.entry(for: .controls)))
             }
             .padding(.bottom, 24)
             .opacity(chromeAutoHide.controlsVisible ? 1 : 0)
@@ -1452,8 +1459,10 @@ struct NowPlayingView: View {
             // C6: the progress bar hides with the setting.
             if !settings.effectiveHidePlayerProgressBar {
                 NowPlayingScrubber(accent: beansPalette.accent)
+                    .modifier(PlayerBottomLayoutTransform(part: .progress, entry: bottomLayout.entry(for: .progress)))
             }
             CompactTransportControls()
+                .modifier(PlayerBottomLayoutTransform(part: .controls, entry: bottomLayout.entry(for: .controls)))
             CompactSecondaryControls(
                 accent: Theme.accent,
                 showsLyrics: showLyricsOnMobile,
@@ -1630,6 +1639,7 @@ struct NowPlayingView: View {
                 NowPlayingScrubber(accent: beansPalette.accent)
                     .padding(.horizontal, 2)
                     .padding(.top, 16)
+                    .modifier(PlayerBottomLayoutTransform(part: .progress, entry: bottomLayout.entry(for: .progress)))
             }
             MinimalTransportControls(
                 accent: Theme.accent,
@@ -1638,6 +1648,7 @@ struct NowPlayingView: View {
                 onOpenDestination: onOpenDestination
             )
                 .padding(.horizontal, 2)
+                .modifier(PlayerBottomLayoutTransform(part: .controls, entry: bottomLayout.entry(for: .controls)))
         }
         .accessibilityIdentifier("immersiveControls")
     }
@@ -1799,8 +1810,10 @@ struct NowPlayingView: View {
                 if !settings.effectiveHidePlayerProgressBar {
                     NowPlayingScrubber()
                         .frame(maxWidth: 380)
+                        .modifier(PlayerBottomLayoutTransform(part: .progress, entry: bottomLayout.entry(for: .progress)))
                 }
                 controls(showsSoundEffects: true)
+                    .modifier(PlayerBottomLayoutTransform(part: .controls, entry: bottomLayout.entry(for: .controls)))
             }
 
             Spacer()
@@ -2628,7 +2641,9 @@ private struct CompactTrackHeader: View {
     }
 }
 
-private struct CompactTransportControls: View {
+/// Shared with the bottom-layout editor preview (PlayerBottomLayout.swift),
+/// so this is internal rather than private.
+struct CompactTransportControls: View {
     @EnvironmentObject private var player: PlayerService
     @EnvironmentObject private var settings: SettingsManager
 

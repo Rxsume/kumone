@@ -171,6 +171,27 @@ enum PlaybackEntryView: String, CaseIterable, Identifiable {
     }
 }
 
+/// Glass material for the shared glass surfaces (tab bar, mini player
+/// bar, player panels, floating card, toasts, login sheet). `liquid` is
+/// iOS 26 Liquid Glass with the ultraThinMaterial fallback below iOS 26;
+/// `frosted` forces ultraThinMaterial everywhere, including iOS 26.
+/// Beans' equivalent is its `beans.disableLiquidGlass` toggle plus the
+/// `BeansUIStyle` liquid/clear choice; Golia keeps one switch and no
+/// per-style tint.
+enum GoliaGlassMaterial: String, CaseIterable, Identifiable {
+    case liquid
+    case frosted
+
+    var id: String { rawValue }
+
+    var displayName: String {
+        switch self {
+        case .liquid: return String(localized: "液态玻璃")
+        case .frosted: return String(localized: "磨砂玻璃")
+        }
+    }
+}
+
 /// One transport button in the player bar / now-playing controls. The order of
 /// `allCases` is the default bar layout.
 enum PlayerControlSlot: String, CaseIterable, Identifiable {
@@ -554,6 +575,8 @@ final class SettingsManager: ObservableObject {
         static let crossfadeMaxSeconds = "settings.crossfadeMaxSeconds"
         static let replayGainMode = "settings.replayGainMode"
         static let foliaEnabled = "settings.foliaEnabled"
+        // Folia glass material (liquid vs frosted).
+        static let glassMaterial = "settings.folia.glassMaterial"
         // Folia luminous (流光) classic tuning.
         static let classicWordRotation = "settings.classicWordRotation"
         static let classicBreathingFloat = "settings.classicBreathingFloat"
@@ -1094,6 +1117,21 @@ final class SettingsManager: ObservableObject {
     /// turning it back on restores the user's choices.
     @Published var foliaEnabled: Bool {
         didSet { UserDefaults.standard.set(foliaEnabled, forKey: Keys.foliaEnabled) }
+    }
+
+    /// Glass material for the shared glass surfaces. Default `.liquid`:
+    /// that is what `compatGlass` already rendered on iOS 26, so the
+    /// existing appearance does not change; below iOS 26 both choices
+    /// render ultraThinMaterial, so the switch is safe there too.
+    @Published var glassMaterial: GoliaGlassMaterial {
+        didSet { UserDefaults.standard.set(glassMaterial.rawValue, forKey: Keys.glassMaterial) }
+    }
+
+    /// Glass material with the Folia master switch off: pre-folia the
+    /// shared surfaces always used the liquid-capable helper, so it
+    /// stays liquid.
+    var effectiveGlassMaterial: GoliaGlassMaterial {
+        foliaEnabled ? glassMaterial : .liquid
     }
 
     /// Lyric line animation style on the now-playing page.
@@ -2652,6 +2690,8 @@ final class SettingsManager: ObservableObject {
             Self.mainWindowAmbientBackgroundIntensityRange.upperBound
         )
         foliaEnabled = defaults.object(forKey: Keys.foliaEnabled) as? Bool ?? true
+        glassMaterial = defaults.string(forKey: Keys.glassMaterial)
+            .flatMap(GoliaGlassMaterial.init) ?? .liquid
         lyricAnimationStyle = defaults.string(forKey: Keys.lyricAnimationStyle)
             .flatMap(LyricAnimationStyle.init) ?? .fade
         homePlatform = defaults.string(forKey: Keys.homePlatform)
@@ -3164,6 +3204,8 @@ final class SettingsManager: ObservableObject {
             Self.mainWindowAmbientBackgroundIntensityRange.upperBound
         )
         foliaEnabled = defaults.object(forKey: Keys.foliaEnabled) as? Bool ?? true
+        glassMaterial = defaults.string(forKey: Keys.glassMaterial)
+            .flatMap(GoliaGlassMaterial.init) ?? .liquid
         lyricAnimationStyle = defaults.string(forKey: Keys.lyricAnimationStyle)
             .flatMap(LyricAnimationStyle.init) ?? .fade
         homePlatform = defaults.string(forKey: Keys.homePlatform)

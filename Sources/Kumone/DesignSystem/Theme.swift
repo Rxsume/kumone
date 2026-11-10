@@ -181,22 +181,31 @@ extension View {
     }
 
     /// Glass background with a graceful material fallback on macOS 15.
+    /// `material` follows Settings → Folia → 玻璃材质: `liquid` is
+    /// iOS 26 / macOS 26 Liquid Glass (ultraThinMaterial below that),
+    /// `frosted` forces ultraThinMaterial everywhere, including iOS 26.
+    /// Call sites pass `settings.effectiveGlassMaterial` so toggling
+    /// the setting re-renders the surface.
     @ViewBuilder
-    func compatGlass(interactive: Bool = false, in shape: some Shape) -> some View {
-        #if os(macOS)
-        if #available(macOS 26.0, *) {
-            self.glassEffect(interactive ? .regular.interactive() : .regular, in: shape)
-        } else {
+    func compatGlass(material: GoliaGlassMaterial = .liquid, interactive: Bool = false, in shape: some Shape) -> some View {
+        if material == .frosted {
             self.background(.ultraThinMaterial, in: shape)
-        }
-        #elseif os(iOS)
-        if #available(iOS 26.0, *) {
-            self.glassEffect(interactive ? .regular.interactive() : .regular, in: shape)
         } else {
+            #if os(macOS)
+            if #available(macOS 26.0, *) {
+                self.glassEffect(interactive ? .regular.interactive() : .regular, in: shape)
+            } else {
+                self.background(.ultraThinMaterial, in: shape)
+            }
+            #elseif os(iOS)
+            if #available(iOS 26.0, *) {
+                self.glassEffect(interactive ? .regular.interactive() : .regular, in: shape)
+            } else {
+                self.background(.ultraThinMaterial, in: shape)
+            }
+            #else
             self.background(.ultraThinMaterial, in: shape)
+            #endif
         }
-        #else
-        self.background(.ultraThinMaterial, in: shape)
-        #endif
     }
 }

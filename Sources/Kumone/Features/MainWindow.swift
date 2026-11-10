@@ -794,12 +794,14 @@ struct SearchFieldView: View {
 struct ToastView: View {
     let toast: Toast
 
+    @ObservedObject private var settings = SettingsManager.shared
+
     var body: some View {
         Text(toast.message)
             .font(.system(size: 12.5, weight: .medium))
             .padding(.horizontal, 16)
             .padding(.vertical, 9)
-            .compatGlass(in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+            .compatGlass(material: settings.effectiveGlassMaterial, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
             .shadow(color: .black.opacity(0.15), radius: 8, y: 4)
     }
 }
