@@ -329,6 +329,7 @@ final class PlayerService: ObservableObject {
     private var networkState = DownloadNetworkState.unknown
     private var networkObservation: AnyCancellable?
     private var autoMixSettingsObservation: AnyCancellable?
+    private var lyricSettingsObservation: AnyCancellable?
     private var offlineActivatedScope: String?
     /// Set by an automatic advance and consumed by `startPlaying`: a song that
     /// turns out to be missing offline is skipped rather than reported.
@@ -374,6 +375,19 @@ final class PlayerService: ObservableObject {
         }
         repeatMode = UserDefaults.standard.string(forKey: "player.repeat")
             .flatMap(RepeatMode.init) ?? .off
+
+        // Lyrics load once per track, so flipping the lyric-source
+        // switches mid-song left the current song lyric-less until the
+        // next track (user-reported 青花瓷 暂无歌词 after turning
+        // 自动使用最佳歌词 on, 2026-11-10). Re-run the load when the
+        // settings change and this track currently has no lyrics.
+        lyricSettingsObservation = Publishers.CombineLatest3(
+            SettingsManager.shared.$autoUseBestLyric,
+            SettingsManager.shared.$preferredLyricSource,
+            SettingsManager.shared.$foliaEnabled
+        )
+        .dropFirst()
+        .sink { [weak self] _ in self?.reloadLyricsIfEmpty() }
 
         // The playing indicator's band levels, straight off the engine's mixer:
         // installed once here and never touched again, so no track change, seek
@@ -2865,6 +2879,19 @@ final class PlayerService: ObservableObject {
                 }
             }
         }
+    }
+
+    /// Re-fetch lyrics for the current track after a lyric-source
+    /// setting changed mid-playback, but only when this track
+    /// currently shows 暂无歌词. Pure-music tracks keep their marker
+    /// (re-fetching would return the same verdict); a track still
+    /// loading (lyrics nil) already has a load in flight.
+    private func reloadLyricsIfEmpty() {
+        guard let track = currentTrack,
+              let current = lyrics,
+              current.isEmpty,
+              !current.isInstrumental else { return }
+        lyricsTask = Task { await loadLyrics(for: track, generation: resolveGeneration) }
     }
 
     private func loadLyrics(for track: Track, generation: Int) async {

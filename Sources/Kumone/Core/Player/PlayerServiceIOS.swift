@@ -375,6 +375,19 @@ final class PlayerService: ObservableObject {
         SettingsManager.shared.$preventDisplaySleepDuringPlayback.sink { [weak self] _ in
             self?.updateIdleTimerDisabled()
         }.store(in: &idleTimerObservations)
+        // Lyrics load once per track, so flipping the lyric-source
+        // switches mid-song left the current song lyric-less until the
+        // next track (user-reported 青花瓷 暂无歌词 after turning
+        // 自动使用最佳歌词 on, 2026-11-10). Re-run the load when the
+        // settings change and this track currently has no lyrics.
+        Publishers.CombineLatest3(
+            SettingsManager.shared.$autoUseBestLyric,
+            SettingsManager.shared.$preferredLyricSource,
+            SettingsManager.shared.$foliaEnabled
+        )
+        .dropFirst()
+        .sink { [weak self] _ in self?.reloadLyricsIfEmpty() }
+        .store(in: &idleTimerObservations)
         // The idle timer only matters in the foreground: release the hold on
         // backgrounding and re-apply it when coming back.
         NotificationCenter.default.addObserver(
@@ -1591,6 +1604,19 @@ final class PlayerService: ObservableObject {
     /// Folia master switch is off (see SettingsManager).
     private var lyricOffsetSeconds: TimeInterval {
         TimeInterval(SettingsManager.shared.effectiveGlobalLyricTimelineOffsetMs) / 1000
+    }
+
+    /// Re-fetch lyrics for the current track after a lyric-source
+    /// setting changed mid-playback, but only when this track
+    /// currently shows 暂无歌词. Pure-music tracks keep their marker
+    /// (re-fetching would return the same verdict); a track still
+    /// loading (lyrics nil) already has a load in flight.
+    private func reloadLyricsIfEmpty() {
+        guard let track = currentTrack,
+              let current = lyrics,
+              current.isEmpty,
+              !current.isInstrumental else { return }
+        Task { await loadLyrics(for: track, generation: resolveGeneration) }
     }
 
     private func loadLyrics(for track: Track, generation: Int) async {
