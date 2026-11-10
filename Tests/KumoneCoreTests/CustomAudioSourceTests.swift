@@ -284,4 +284,100 @@ struct CustomAudioSourceTests {
         #expect(reloaded.sources.first?.quality == "flac")
         #expect(reloaded.sources.first?.enabled == false)
     }
+
+    // MARK: - Share import (.js / .txt opened into the app)
+
+    private static let sharedScript = """
+    /*!
+     * @name Shared Source
+     * @version v1
+     */
+    const {EVENT_NAMES, on} = globalThis.lx;
+    on(EVENT_NAMES.request, ({action}) => Promise.reject("no"));
+    """
+
+    private static let unnamedScript = """
+    const {EVENT_NAMES, on} = globalThis.lx;
+    on(EVENT_NAMES.request, ({action}) => Promise.reject("no"));
+    """
+
+    @MainActor
+    private func freshShareStore(suite: String) -> (CustomAudioSourceStore, UserDefaults)? {
+        guard let defaults = UserDefaults(suiteName: suite) else {
+            Issue.record("could not create test UserDefaults suite")
+            return nil
+        }
+        defaults.removePersistentDomain(forName: suite)
+        return (CustomAudioSourceStore(defaults: defaults), defaults)
+    }
+
+    @Test @MainActor func shareImportAddsLXScript() {
+        guard let (store, defaults) = freshShareStore(suite: "com.test.ShareImportTests") else { return }
+        defer { defaults.removePersistentDomain(forName: "com.test.ShareImportTests") }
+
+        #expect(store.sources.count == 1)
+        let outcome = SharedAudioSourceImport.importScript(text: Self.sharedScript, fileName: "shared", store: store)
+        #expect(outcome == .imported(name: "Shared Source"))
+        #expect(store.sources.count == 2)
+        #expect(store.sources.last?.name == "Shared Source")
+        #expect(store.sources.last?.enabled == true)
+    }
+
+    @Test @MainActor func shareImportUsesFileNameWithoutNameHeader() {
+        guard let (store, defaults) = freshShareStore(suite: "com.test.ShareImportFileNameTests") else { return }
+        defer { defaults.removePersistentDomain(forName: "com.test.ShareImportFileNameTests") }
+
+        let outcome = SharedAudioSourceImport.importScript(text: Self.unnamedScript, fileName: "my-script", store: store)
+        #expect(outcome == .imported(name: "my-script"))
+    }
+
+    @Test @MainActor func shareImportRejectsGarbage() {
+        guard let (store, defaults) = freshShareStore(suite: "com.test.ShareImportGarbageTests") else { return }
+        defer { defaults.removePersistentDomain(forName: "com.test.ShareImportGarbageTests") }
+
+        #expect(SharedAudioSourceImport.importScript(text: "hello world this is not a source", fileName: "x", store: store) == .invalid)
+        #expect(store.sources.count == 1)
+    }
+
+    @Test @MainActor func shareImportDedupsByNameAndContent() {
+        guard let (store, defaults) = freshShareStore(suite: "com.test.ShareImportDedupTests") else { return }
+        defer { defaults.removePersistentDomain(forName: "com.test.ShareImportDedupTests") }
+
+        #expect(SharedAudioSourceImport.importScript(text: Self.sharedScript, fileName: "shared", store: store) == .imported(name: "Shared Source"))
+        #expect(store.sources.count == 2)
+        #expect(SharedAudioSourceImport.importScript(text: Self.sharedScript, fileName: "shared", store: store) == .duplicate(name: "Shared Source"))
+        #expect(store.sources.count == 2)
+        // Same script text under a different file name: the parsed name
+        // differs, but the content is identical, so it still dedups.
+        #expect(SharedAudioSourceImport.importScript(text: Self.unnamedScript, fileName: "first", store: store) == .imported(name: "first"))
+        #expect(store.sources.count == 3)
+        #expect(SharedAudioSourceImport.importScript(text: Self.unnamedScript, fileName: "second", store: store) == .duplicate(name: "second"))
+        #expect(store.sources.count == 3)
+    }
+
+    @Test @MainActor func shareImportSkipsBuiltinIkun() {
+        guard let (store, defaults) = freshShareStore(suite: "com.test.ShareImportBuiltinTests") else { return }
+        defer { defaults.removePersistentDomain(forName: "com.test.ShareImportBuiltinTests") }
+
+        let outcome = SharedAudioSourceImport.importScript(text: BuiltInAudioSources.ikunScript, fileName: "ikun", store: store)
+        #expect(outcome == .duplicate(name: BuiltInAudioSources.ikunName))
+        #expect(store.sources.count == 1)
+    }
+
+    @Test @MainActor func shareImportFileURLReadsJsFileAndRejectsPy() {
+        guard let (store, defaults) = freshShareStore(suite: "com.test.ShareImportFileTests") else { return }
+        defer { defaults.removePersistentDomain(forName: "com.test.ShareImportFileTests") }
+
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try? FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let jsURL = directory.appendingPathComponent("shared.js")
+        let pyURL = directory.appendingPathComponent("shared.py")
+        try? Self.sharedScript.write(to: jsURL, atomically: true, encoding: .utf8)
+        try? Self.sharedScript.write(to: pyURL, atomically: true, encoding: .utf8)
+
+        #expect(SharedAudioSourceImport.importFile(at: jsURL, store: store) == .imported(name: "Shared Source"))
+        #expect(SharedAudioSourceImport.importFile(at: pyURL, store: store) == .invalid)
+        #expect(store.sources.count == 2)
+    }
 }
