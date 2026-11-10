@@ -62,6 +62,8 @@ enum SettingsBackup {
     /// in the list; `settings.customAudioSources` is NOT — it is not a
     /// `SettingsManager` key and must never be backed up (the user's
     /// imported script, and its key, live only on their device).
+    /// Neither is `settings.ikunApiKey` (the sponsored key for the
+    /// built-in ikun source): device-only, same category.
     /// A restore silently ignores any key not in this set, so a foreign or hand-edited file cannot inject
     /// anything the app does not already know. The FN / Spotify /
     /// Apple Music credential keys no longer exist in the app, so they

@@ -97,7 +97,7 @@ struct CustomAudioSourcesView: View {
                 }
 
                 Section {
-                    if store.sources.isEmpty {
+                    if store.sources.filter({ !BuiltInAudioSources.isBuiltIn(id: $0.id) }).isEmpty {
                         Text("还没有导入音源。粘贴 LX 脚本后点「识别并导入」。")
                             .font(.caption)
                             .foregroundStyle(.secondary)
@@ -105,6 +105,7 @@ struct CustomAudioSourcesView: View {
                     ForEach(store.sources) { source in
                         SourceRow(
                             source: source,
+                            isBuiltIn: BuiltInAudioSources.isBuiltIn(id: source.id),
                             onToggle: { store.updateEnabled(id: source.id, enabled: $0) },
                             onEdit: { editingSource = source },
                             onMoveUp: { store.moveSource(id: source.id, by: -1) },
@@ -214,6 +215,7 @@ struct CustomAudioSourcesView: View {
 
 private struct SourceRow: View {
     let source: CustomAudioSource
+    let isBuiltIn: Bool
     let onToggle: (Bool) -> Void
     let onEdit: () -> Void
     let onMoveUp: () -> Void
@@ -234,36 +236,42 @@ private struct SourceRow: View {
                     .labelStyle(.iconOnly)
             }
             .buttonStyle(.plain)
-            Button(action: onMoveUp) {
-                Label("上移", systemImage: "chevron.up")
-                    .labelStyle(.iconOnly)
+            if !isBuiltIn {
+                Button(action: onMoveUp) {
+                    Label("上移", systemImage: "chevron.up")
+                        .labelStyle(.iconOnly)
+                }
+                .buttonStyle(.plain)
+                Button(action: onMoveDown) {
+                    Label("下移", systemImage: "chevron.down")
+                        .labelStyle(.iconOnly)
+                }
+                .buttonStyle(.plain)
+                Button(action: onDelete) {
+                    Label("删除", systemImage: "trash")
+                        .labelStyle(.iconOnly)
+                }
+                .buttonStyle(.plain)
+                .foregroundStyle(.red)
             }
-            .buttonStyle(.plain)
-            Button(action: onMoveDown) {
-                Label("下移", systemImage: "chevron.down")
-                    .labelStyle(.iconOnly)
-            }
-            .buttonStyle(.plain)
-            Button(action: onDelete) {
-                Label("删除", systemImage: "trash")
-                    .labelStyle(.iconOnly)
-            }
-            .buttonStyle(.plain)
-            .foregroundStyle(.red)
             Toggle("", isOn: Binding(get: { source.enabled }, set: onToggle))
                 .labelsHidden()
         }
     }
 
     private var subtitle: String {
+        let base: String
         if source.kind == "script" || source.script != nil {
-            return "脚本 · \(source.quality)"
+            base = "脚本 · \(source.quality)"
+        } else {
+            base = "\(source.kind) · \(source.quality)"
         }
-        return "\(source.kind) · \(source.quality)"
+        return isBuiltIn ? "内置 · \(base)" : base
     }
 }
 
 private struct SourceEditorSheet: View {
+    @ObservedObject private var settings = SettingsManager.shared
     @State private var draft: CustomAudioSource
     let onSave: (CustomAudioSource) -> Void
     @Environment(\.dismiss) private var dismiss
@@ -271,6 +279,10 @@ private struct SourceEditorSheet: View {
     init(source: CustomAudioSource, onSave: @escaping (CustomAudioSource) -> Void) {
         _draft = State(initialValue: source)
         self.onSave = onSave
+    }
+
+    private var isBuiltIn: Bool {
+        BuiltInAudioSources.isBuiltIn(id: draft.id)
     }
 
     private var qualityOptions: [(value: String, label: String)] {
@@ -286,6 +298,7 @@ private struct SourceEditorSheet: View {
             Form {
                 Section("名称") {
                     TextField("音源名称", text: $draft.name)
+                        .disabled(isBuiltIn)
                 }
                 Section("音质") {
                     Picker("音质", selection: $draft.quality) {
@@ -294,7 +307,15 @@ private struct SourceEditorSheet: View {
                         }
                     }
                 }
-                if draft.script != nil || draft.kind == "script" {
+                if isBuiltIn {
+                    Section("赞助密钥") {
+                        SecureField("粘贴赞助密钥", text: $settings.ikunApiKey)
+                        Text("只保存在本机，不会备份、同步或上传。")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                }
+                if (draft.script != nil || draft.kind == "script") && !isBuiltIn {
                     Section("脚本内容") {
                         TextEditor(text: Binding(
                             get: { draft.script ?? "" },

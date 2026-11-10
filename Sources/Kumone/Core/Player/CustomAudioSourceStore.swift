@@ -1,11 +1,13 @@
 import Foundation
 
 /// Stores user-imported custom audio sources, mirroring Beans'
-/// `UnblockSourceStore`.
+/// `UnblockSourceStore`, plus the one built-in source
+/// (`BuiltInAudioSources.ikunSource`, fixed id `builtin-ikun`,
+/// always first in the list).
 ///
-/// One JSON blob in UserDefaults under `storeKey`. No built-in sources
-/// are ever stored — the list only ever holds what the user imported.
-/// List order is the user's manual order and the resolve order in
+/// One JSON blob in UserDefaults under `storeKey`. The built-in
+/// record is stored too — its script text carries an EMPTY API key,
+/// so the blob stays key-free. List order is the resolve order in
 /// `UnblockService`.
 ///
 /// Security: the blob may contain imported scripts with private keys
@@ -45,7 +47,40 @@ final class CustomAudioSourceStore: ObservableObject {
         // Dedup by id on load (first wins).
         var seen = Set<String>()
         sources = saved.filter { seen.insert($0.id).inserted }
+        ensureBuiltInSource()
         save()
+    }
+
+    /// Guarantees the built-in ikun source exists, first in the list.
+    /// Called on every load: a user who already imported the same
+    /// script (same name, random UUID) gets no duplicate; an existing
+    /// built-in record keeps its `enabled` / `quality` / `name` but
+    /// its script is refreshed from code (source of truth), so an app
+    /// update can ship a newer script without touching the toggle.
+    func ensureBuiltInSource() {
+        if let index = sources.firstIndex(where: { $0.id == BuiltInAudioSources.ikunID }) {
+            var list = sources
+            var refreshed = list[index]
+            refreshed.script = BuiltInAudioSources.ikunScript
+            list.remove(at: index)
+            list.insert(refreshed, at: 0)
+            sources = list
+            return
+        }
+        if sources.contains(where: { $0.name == BuiltInAudioSources.ikunName }) {
+            return
+        }
+        var list = sources
+        list.insert(BuiltInAudioSources.ikunSource(), at: 0)
+        sources = list
+    }
+
+    /// True when at least one script source (built-in or imported) is
+    /// enabled. The custom-script resolve step and the
+    /// `canResolveUnblockedTracks` gate read this, so playback via
+    /// scripts does not depend on any built-in source toggle.
+    var hasEnabledScriptSources: Bool {
+        sources.contains { $0.enabled && $0.script?.isEmpty == false }
     }
 
     private func save() {
@@ -84,8 +119,15 @@ final class CustomAudioSourceStore: ObservableObject {
     }
 
     func moveSource(id: String, by offset: Int) {
+        // The built-in source stays pinned at index 0.
+        guard !BuiltInAudioSources.isBuiltIn(id: id) else { return }
         guard let index = sources.firstIndex(where: { $0.id == id }) else { return }
-        let target = min(max(0, index + offset), max(0, sources.count - 1))
+        var target = min(max(0, index + offset), max(0, sources.count - 1))
+        if let first = sources.first,
+           BuiltInAudioSources.isBuiltIn(id: first.id),
+           target == 0 {
+            target = 1
+        }
         guard target != index else { return }
         var reordered = sources
         let item = reordered.remove(at: index)
@@ -118,6 +160,9 @@ final class CustomAudioSourceStore: ObservableObject {
 
     @discardableResult
     func removeSource(id: String) -> Bool {
+        // The built-in source cannot be deleted (only switched off);
+        // otherwise a reinstall would be the only way to get it back.
+        guard !BuiltInAudioSources.isBuiltIn(id: id) else { return false }
         let originalCount = sources.count
         sources.removeAll { $0.id == id }
         save()
