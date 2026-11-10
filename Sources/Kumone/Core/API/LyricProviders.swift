@@ -314,6 +314,19 @@ enum LyricMultiSource {
         }
     }
 
+    /// Single-provider fetch for the auto-best-off path (`MusicAPI.lyric`):
+    /// the preferred source only, bounded by the per-source timeout.
+    /// A pure-music verdict is returned as-is (the player renders it as
+    /// pure music); anything without renderable lyrics is nil, so the
+    /// caller can fall through to the NetEase single-source leg.
+    static func fetchFromSource(_ source: LyricSource, for track: Track) async -> LyricResponse? {
+        guard let provider = provider(for: source) else { return nil }
+        guard let candidate = await fetchWithTimeout(provider: provider, track: track) else { return nil }
+        if candidate.isPureMusic { return candidate.response }
+        guard hasRenderableLyrics(candidate.response) else { return nil }
+        return candidate.response
+    }
+
     /// One source's fetch bounded by `perSourceTimeout`: whichever of the
     /// fetch or the timer finishes first wins, and the loser is cancelled.
     /// Providers check `Task.isCancelled` between steps, so a timed-out
