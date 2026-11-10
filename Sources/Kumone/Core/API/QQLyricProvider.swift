@@ -355,8 +355,8 @@ struct QQLyricProvider: LyricProvider {
         request.timeoutInterval = 10
         request.setValue("https://y.qq.com/portal/player.html", forHTTPHeaderField: "Referer")
         request.setValue("Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Mobile/15E148 Safari/604.1", forHTTPHeaderField: "User-Agent")
-        guard let (data, response) = try? await session.data(for: request),
-              let http = response as? HTTPURLResponse, 200..<300 ~= http.statusCode,
+        guard let (data, urlResponse) = try? await session.data(for: request),
+              let http = urlResponse as? HTTPURLResponse, 200..<300 ~= http.statusCode,
               let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
               (json["retcode"] as? Int) == 0
         else { return nil }
