@@ -37,9 +37,9 @@ let cltTestingLinkerSettings: [LinkerSetting] = cltHasTesting
 let package = Package(
     name: "Kumone",
     defaultLocalization: "zh-Hans",
-    // iOS 26.1 floor (was 16.0): kept — later code uses unguarded
-    // iOS 26 APIs. macOS is untouched.
-    platforms: [.macOS("15.0"), .iOS("26.1")],
+    // iOS 16.0 floor (was 26.1 while CiliCili was vendored; removed in
+    // PR #47, so the floor is back to 16.0). macOS is untouched.
+    platforms: [.macOS("15.0"), .iOS("16.0")],
     products: [
         .executable(name: "Kumone", targets: ["KumoneLauncher"]),
         .library(name: "KumoneCore", targets: ["KumoneCore"]),
