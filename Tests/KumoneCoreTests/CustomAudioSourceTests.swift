@@ -96,7 +96,10 @@ struct CustomAudioSourceTests {
 
     // MARK: - Store
 
-    @Test @MainActor func freshStoreHasNoAutoInsertedSource() {
+    /// A fresh store seeds the two bundled scripts (酸甜贤 first,
+    /// Golia second). The ikun script ships with its private key
+    /// blanked; the Golia script ships verbatim.
+    @Test @MainActor func freshStoreSeedsBothBuiltInSources() {
         let suite = "com.test.FreshStoreTests"
         guard let defaults = UserDefaults(suiteName: suite) else {
             Issue.record("could not create test UserDefaults suite")
@@ -105,11 +108,109 @@ struct CustomAudioSourceTests {
         defaults.removePersistentDomain(forName: suite)
         defer { defaults.removePersistentDomain(forName: suite) }
 
-        // The built-in ikun source was removed 2026-11-10: a fresh
-        // store is empty; nothing is auto-inserted.
         let store = CustomAudioSourceStore(defaults: defaults)
-        #expect(store.sources.isEmpty)
-        #expect(store.hasEnabledScriptSources == false)
+        #expect(store.sources.count == 2)
+        let ikun = store.sources[0]
+        #expect(ikun.id == BuiltInAudioSources.ikunSourceID)
+        #expect(ikun.name == "酸甜贤音源")
+        #expect(ikun.kind == "script")
+        #expect(ikun.template == "")
+        #expect(ikun.quality == "320k")
+        #expect(ikun.enabled == true)
+        #expect(ikun.script?.contains(BuiltInAudioSources.ikunBackendHost) == true)
+        #expect(ikun.script?.contains("const API_KEY = \"\"") == true)
+        let golia = store.sources[1]
+        #expect(golia.id == BuiltInAudioSources.goliaSourceID)
+        #expect(golia.name == "Golia贤源")
+        #expect(golia.kind == "script")
+        #expect(golia.script?.contains(BuiltInAudioSources.goliaBackendHost) == true)
+        #expect(store.hasEnabledScriptSources == true)
+
+        // Reloading does not seed a second copy.
+        let reloaded = CustomAudioSourceStore(defaults: defaults)
+        #expect(reloaded.sources.count == 2)
+        #expect(reloaded.sources.map(\.id) == [BuiltInAudioSources.ikunSourceID, BuiltInAudioSources.goliaSourceID])
+    }
+
+    /// A stored copy of one script suppresses only that seed; the
+    /// other still seeds. (The stored copy stands in for the user's
+    /// imported ikun script, key already inside it.)
+    @Test @MainActor func seedingSkipsScriptAlreadyStored() {
+        let suite = "com.test.SeedSkipTests"
+        guard let defaults = UserDefaults(suiteName: suite) else {
+            Issue.record("could not create test UserDefaults suite")
+            return
+        }
+        defaults.removePersistentDomain(forName: suite)
+        defer { defaults.removePersistentDomain(forName: suite) }
+
+        let imported = CustomAudioSource(
+            name: "我的酸甜贤",
+            kind: "script",
+            template: "",
+            script: "const API_URL = \"https://c.wwwweb.top\";\nconst API_KEY = \"ALREADY-IN-SCRIPT\";"
+        )
+        guard let data = try? JSONEncoder().encode([imported]) else {
+            Issue.record("could not encode imported source")
+            return
+        }
+        defaults.set(data, forKey: CustomAudioSourceStore.storeKey)
+
+        let store = CustomAudioSourceStore(defaults: defaults)
+        #expect(store.sources.count == 2)
+        #expect(store.sources[0].id == imported.id)
+        #expect(store.sources[0].script?.contains("ALREADY-IN-SCRIPT") == true)
+        #expect(store.sources[1].id == BuiltInAudioSources.goliaSourceID)
+    }
+
+    /// Deleting a seeded record dismisses it: it never comes back
+    /// on reload, while the other seed is untouched.
+    @Test @MainActor func deletingSeededSourceDismissesIt() {
+        let suite = "com.test.SeedDismissTests"
+        guard let defaults = UserDefaults(suiteName: suite) else {
+            Issue.record("could not create test UserDefaults suite")
+            return
+        }
+        defaults.removePersistentDomain(forName: suite)
+        defer { defaults.removePersistentDomain(forName: suite) }
+
+        let store = CustomAudioSourceStore(defaults: defaults)
+        #expect(store.sources.count == 2)
+        #expect(store.removeSource(id: BuiltInAudioSources.ikunSourceID) == true)
+        #expect(defaults.bool(forKey: BuiltInAudioSources.ikunDismissedKey) == true)
+
+        let reloaded = CustomAudioSourceStore(defaults: defaults)
+        #expect(reloaded.sources.count == 1)
+        #expect(reloaded.sources.first?.id == BuiltInAudioSources.goliaSourceID)
+    }
+
+    // MARK: - Built-in API_KEY helpers
+
+    /// Fake placeholder keys only, never a real key.
+    @Test func builtInApiKeyReadsAndWritesBothQuoteStyles() {
+        let ikun = BuiltInAudioSources.ikunScript
+        #expect(BuiltInAudioSources.apiKey(in: ikun) == "")
+        let keyed = BuiltInAudioSources.settingApiKey("TEST-KEY-123", in: ikun)
+        #expect(keyed?.contains("const API_KEY = \"TEST-KEY-123\"") == true)
+        #expect(BuiltInAudioSources.apiKey(in: keyed ?? "") == "TEST-KEY-123")
+
+        let golia = BuiltInAudioSources.goliaScript
+        #expect(BuiltInAudioSources.apiKey(in: golia) == "share-v3")
+        let goliaKeyed = BuiltInAudioSources.settingApiKey("TEST-KEY-456", in: golia)
+        #expect(BuiltInAudioSources.apiKey(in: goliaKeyed ?? "") == "TEST-KEY-456")
+
+        #expect(BuiltInAudioSources.apiKey(in: "const x = 1;") == nil)
+        #expect(BuiltInAudioSources.settingApiKey("TEST-KEY-123", in: "const x = 1;") == nil)
+    }
+
+    /// `$` and `\` in a key must survive the write verbatim (the
+    /// write replaces the captured value range, not a regex
+    /// template, so they cannot be reinterpreted).
+    @Test func builtInApiKeyRoundTripsSpecialCharacters() {
+        let script = "const API_KEY = \"\";"
+        let key = "A$0\\B\"C'D"
+        let keyed = BuiltInAudioSources.settingApiKey(key, in: script)
+        #expect(BuiltInAudioSources.apiKey(in: keyed ?? "") == key)
     }
 
     @Test @MainActor func storeRoundTripPreservesScript() {
@@ -128,23 +229,24 @@ struct CustomAudioSourceTests {
             script: "const x = '你好世界'; // non-ASCII must survive the blob"
         )
         let store = CustomAudioSourceStore(defaults: defaults)
-        #expect(store.sources.isEmpty)
+        // A fresh store already seeds the two built-in sources.
+        #expect(store.sources.count == 2)
         store.addSources([source])
-        #expect(store.sources.count == 1)
-        #expect(store.sources.first?.name == "测试音源")
+        #expect(store.sources.count == 3)
+        #expect(store.sources.first(where: { $0.id == source.id })?.name == "测试音源")
 
         let reloaded = CustomAudioSourceStore(defaults: defaults)
-        #expect(reloaded.sources.count == 1)
-        #expect(reloaded.sources.first?.script == source.script)
+        #expect(reloaded.sources.count == 3)
+        #expect(reloaded.sources.first(where: { $0.id == source.id })?.script == source.script)
 
         reloaded.updateEnabled(id: source.id, enabled: false)
-        #expect(reloaded.sources.first?.enabled == false)
-        // A single source cannot move.
+        #expect(reloaded.sources.first(where: { $0.id == source.id })?.enabled == false)
+        // The added source sits last, so moving it one slot down is a no-op.
         reloaded.moveSource(id: source.id, by: 1)
-        #expect(reloaded.sources.count == 1)
+        #expect(reloaded.sources.count == 3)
         #expect(reloaded.sources.first(where: { $0.id == source.id }) != nil)
         #expect(reloaded.removeSource(id: source.id) == true)
-        #expect(reloaded.sources.isEmpty)
+        #expect(reloaded.sources.count == 2)
     }
 
     // MARK: - Legacy built-in key migration (one-time, 2026-11-10)
@@ -179,7 +281,9 @@ struct CustomAudioSourceTests {
         defaults.set("TEST-KEY-123", forKey: "settings.ikunApiKey")
 
         let store = CustomAudioSourceStore(defaults: defaults)
-        #expect(store.sources.count == 1)
+        // The ikun seed is suppressed (the stored copy already has
+        // the host), but the Golia seed still appends behind it.
+        #expect(store.sources.count == 2)
         #expect(store.sources.first?.script?.contains("const API_KEY = \"TEST-KEY-123\"") == true)
         #expect(store.sources.first?.script?.contains("const API_KEY = \"\"") == false)
         #expect(defaults.string(forKey: "settings.ikunApiKey") == nil)
@@ -233,7 +337,10 @@ struct CustomAudioSourceTests {
         defaults.set("TEST-KEY-123", forKey: "settings.ikunApiKey")
 
         let store = CustomAudioSourceStore(defaults: defaults)
-        #expect(store.sources.first?.script == script)
+        // The "Other" script carries no ikun host, so both built-in
+        // seeds append behind it; the legacy key is still dropped.
+        #expect(store.sources.count == 3)
+        #expect(store.sources.first(where: { $0.name == "Other" })?.script == script)
         #expect(defaults.string(forKey: "settings.ikunApiKey") == nil)
     }
 
@@ -442,10 +549,10 @@ struct CustomAudioSourceTests {
         guard let (store, defaults) = freshShareStore(suite: "com.test.ShareImportTests") else { return }
         defer { defaults.removePersistentDomain(forName: "com.test.ShareImportTests") }
 
-        #expect(store.sources.count == 0)
+        #expect(store.sources.count == 2)
         let outcome = SharedAudioSourceImport.importScript(text: Self.sharedScript, fileName: "shared", store: store)
         #expect(outcome == .imported(name: "Shared Source"))
-        #expect(store.sources.count == 1)
+        #expect(store.sources.count == 3)
         #expect(store.sources.last?.name == "Shared Source")
         #expect(store.sources.last?.enabled == true)
     }
@@ -463,7 +570,7 @@ struct CustomAudioSourceTests {
         defer { defaults.removePersistentDomain(forName: "com.test.ShareImportGarbageTests") }
 
         #expect(SharedAudioSourceImport.importScript(text: "hello world this is not a source", fileName: "x", store: store) == .invalid)
-        #expect(store.sources.count == 0)
+        #expect(store.sources.count == 2)
     }
 
     @Test @MainActor func shareImportDedupsByNameAndContent() {
@@ -471,15 +578,15 @@ struct CustomAudioSourceTests {
         defer { defaults.removePersistentDomain(forName: "com.test.ShareImportDedupTests") }
 
         #expect(SharedAudioSourceImport.importScript(text: Self.sharedScript, fileName: "shared", store: store) == .imported(name: "Shared Source"))
-        #expect(store.sources.count == 1)
+        #expect(store.sources.count == 3)
         #expect(SharedAudioSourceImport.importScript(text: Self.sharedScript, fileName: "shared", store: store) == .duplicate(name: "Shared Source"))
-        #expect(store.sources.count == 1)
+        #expect(store.sources.count == 3)
         // Same script text under a different file name: the parsed name
         // differs, but the content is identical, so it still dedups.
         #expect(SharedAudioSourceImport.importScript(text: Self.unnamedScript, fileName: "first", store: store) == .imported(name: "first"))
-        #expect(store.sources.count == 2)
+        #expect(store.sources.count == 4)
         #expect(SharedAudioSourceImport.importScript(text: Self.unnamedScript, fileName: "second", store: store) == .duplicate(name: "second"))
-        #expect(store.sources.count == 2)
+        #expect(store.sources.count == 4)
     }
 
     @Test @MainActor func shareImportFileURLReadsJsFileAndRejectsPy() {
@@ -496,6 +603,6 @@ struct CustomAudioSourceTests {
 
         #expect(SharedAudioSourceImport.importFile(at: jsURL, store: store) == .imported(name: "Shared Source"))
         #expect(SharedAudioSourceImport.importFile(at: pyURL, store: store) == .invalid)
-        #expect(store.sources.count == 1)
+        #expect(store.sources.count == 3)
     }
 }

@@ -350,6 +350,25 @@ private struct SourceEditorSheet: View {
                                 .foregroundStyle(.secondary)
                         }
                     }
+                    if BuiltInAudioSources.apiKey(in: draft.script ?? "") != nil {
+                        Section("赞助密钥") {
+                            SecureField("粘贴赞助密钥", text: Binding(
+                                get: { BuiltInAudioSources.apiKey(in: draft.script ?? "") ?? "" },
+                                set: { newValue in
+                                    if let updated = BuiltInAudioSources.settingApiKey(newValue, in: draft.script ?? "") {
+                                        draft.script = updated
+                                    }
+                                }
+                            ))
+                            .autocorrectionDisabled()
+                            #if os(iOS)
+                            .textInputAutocapitalization(.never)
+                            #endif
+                            Text("只保存在本机，不随设置备份同步；清空后该音源无法解析需要密钥的歌曲。")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
+                    }
                     Section("脚本内容") {
                         TextEditor(text: Binding(
                             get: { draft.script ?? "" },
