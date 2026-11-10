@@ -113,19 +113,28 @@ struct CustomAudioSourceTests {
         )
         let store = CustomAudioSourceStore(defaults: defaults)
         store.addSources([source])
-        #expect(store.sources.count == 1)
+        // The built-in ikun source is always pinned first, so the
+        // store holds two sources: builtin + the imported one.
+        #expect(store.sources.count == 2)
+        #expect(store.sources.first?.id == BuiltInAudioSources.ikunID)
+        #expect(store.sources.first(where: { $0.id == source.id })?.name == "测试音源")
 
         let reloaded = CustomAudioSourceStore(defaults: defaults)
-        #expect(reloaded.sources.count == 1)
-        #expect(reloaded.sources.first?.name == "测试音源")
-        #expect(reloaded.sources.first?.script == source.script)
+        #expect(reloaded.sources.count == 2)
+        #expect(reloaded.sources.first?.id == BuiltInAudioSources.ikunID)
+        #expect(reloaded.sources.first(where: { $0.id == source.id })?.script == source.script)
 
         reloaded.updateEnabled(id: source.id, enabled: false)
-        #expect(reloaded.sources.first?.enabled == false)
+        #expect(reloaded.sources.first(where: { $0.id == source.id })?.enabled == false)
+        #expect(reloaded.sources.first?.enabled == true)
+        // The imported source is already last, so moving it down is
+        // a no-op; the built-in source stays pinned at index 0.
         reloaded.moveSource(id: source.id, by: 1)
-        #expect(reloaded.sources.count == 1)
+        #expect(reloaded.sources.count == 2)
+        #expect(reloaded.sources.first(where: { $0.id == source.id }) != nil)
         #expect(reloaded.removeSource(id: source.id) == true)
-        #expect(reloaded.sources.isEmpty)
+        #expect(reloaded.sources.count == 1)
+        #expect(reloaded.sources.first?.id == BuiltInAudioSources.ikunID)
     }
 
     // MARK: - Runner (stub script, no network)
@@ -186,16 +195,20 @@ struct CustomAudioSourceTests {
     // MARK: - Built-in ikun source
 
     @Test func builtinScriptHasEmptyKeyPlaceholder() {
-        #expect(BuiltInAudioSources.ikunScript.contains("const API_KEY = \"\";"))
+        #expect(BuiltInAudioSources.ikunScript.contains("const API_KEY = \"\""))
         #expect(BuiltInAudioSources.ikunScript.contains("@version v26"))
-        #expect(BuiltInAudioSources.ikunScript.contains("c.wwwweb.top/music/url"))
+        // The request URL is built from the API_URL constant, not a
+        // literal: `const API_URL = "https://c.wwwweb.top"` plus
+        // `` `${API_URL}/music/url` `` in the fetch call.
+        #expect(BuiltInAudioSources.ikunScript.contains("const API_URL = \"https://c.wwwweb.top\""))
+        #expect(BuiltInAudioSources.ikunScript.contains("${API_URL}/music/url"))
     }
 
     @Test func builtinKeyInjectionReplacesPlaceholderOnly() {
         let source = BuiltInAudioSources.ikunSource()
         let effective = BuiltInAudioSources.effectiveScript(for: source, apiKey: "test-key-123")
-        #expect(effective.contains("const API_KEY = \"test-key-123\";"))
-        #expect(!effective.contains("const API_KEY = \"\";"))
+        #expect(effective.contains("const API_KEY = \"test-key-123\""))
+        #expect(!effective.contains("const API_KEY = \"\""))
         #expect(effective != BuiltInAudioSources.ikunScript)
     }
 
@@ -213,7 +226,7 @@ struct CustomAudioSourceTests {
     @Test func keyEscapingKeepsScriptValid() {
         let source = BuiltInAudioSources.ikunSource()
         let effective = BuiltInAudioSources.effectiveScript(for: source, apiKey: "a\"b\\c")
-        #expect(effective.contains("const API_KEY = \"a\\\"b\\\\c\";"))
+        #expect(effective.contains("const API_KEY = \"a\\\"b\\\\c\""))
     }
 
     @Test @MainActor func builtinIkunSourceIsEnsuredFirst() {

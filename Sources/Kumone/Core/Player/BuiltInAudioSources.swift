@@ -6,7 +6,7 @@ import Foundation
 /// blob in UserDefaults).
 ///
 /// The script text is the user's v26 script verbatim, except the
-/// sponsored API key is EMPTY here (`const API_KEY = "";`). The key
+/// sponsored API key is EMPTY here (`const API_KEY = ""`). The key
 /// is never in the repo: the user pastes it once in Settings →
 /// 自定义音源 → 内置源详情 → 赞助密钥， stored only on device under
 /// `settings.ikunApiKey`, and injected into a copy of the script at
@@ -29,7 +29,7 @@ enum BuiltInAudioSources {
 
     /// The exact line in `ikunScript` holding the key placeholder.
     /// Key injection replaces this line only.
-    static let apiKeyPlaceholder = "const API_KEY = \"\";"
+    static let apiKeyPlaceholder = "const API_KEY = \"\""
 
     /// UserDefaults key for the sponsored key. Device-only: NOT in
     /// the SettingsBackup allowlist, NOT a synced preference.
@@ -78,7 +78,7 @@ enum BuiltInAudioSources {
         guard !key.isEmpty else { return script }
         return script.replacingOccurrences(
             of: apiKeyPlaceholder,
-            with: "const API_KEY = \"\(jsEscaped(key))\";"
+            with: "const API_KEY = \"\(jsEscaped(key))\""
         )
     }
 
