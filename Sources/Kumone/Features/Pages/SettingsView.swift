@@ -113,8 +113,7 @@ struct SettingsView: View {
             Section("账号") {
                 // All platform accounts live in AccountHubSheet now (the
                 // single account entry point); this section only links to
-                // it. The Bilibili workstream adds its hub row on rebase;
-                // SettingsView no longer opens LoginSheet directly.
+                // it. SettingsView no longer opens LoginSheet directly.
                 // 听歌打卡已随设置页删除（P3：Beans 无等价物，用户未把
                 // 它放进保留项；打卡的上报函数与开关 key 一并删除）。
                 Button {

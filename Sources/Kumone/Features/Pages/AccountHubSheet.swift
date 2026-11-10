@@ -14,26 +14,18 @@ import SwiftUI
 /// images are not used — Golia has no brand assets, so each card shows
 /// a first-character tile instead. No `VIPBadgeView` in Golia either;
 /// the membership badge is a plain capsule.
-///
-/// Bilibili card: added on the rebase over main 2ca91b8 (PR #39),
-/// same shape as the QQ/Kugou cards; login opens `LoginSheet` with
-/// `ProviderLogin.bilibili` (QR flow). No web-login data to clear on
-/// logout — the QR login keeps its session in the Keychain only.
 struct AccountHubSheet: View {
     @EnvironmentObject private var account: AccountStore
     @ObservedObject private var qqAuth = QQMusicAuth.shared
     @ObservedObject private var kgAuth = KugouMusicAuth.shared
-    @ObservedObject private var blAuth = BilibiliAuth.shared
     @Environment(\.dismiss) private var dismiss
 
     @State private var showNeteaseLogin = false
     @State private var showQQLogin = false
     @State private var showKugouLogin = false
-    @State private var showBilibiliLogin = false
     @State private var confirmNeteaseLogout = false
     @State private var confirmQQLogout = false
     @State private var confirmKugouLogout = false
-    @State private var confirmBilibiliLogout = false
 
     var body: some View {
         NavigationStack {
@@ -45,7 +37,6 @@ struct AccountHubSheet: View {
                     neteaseCard
                     qqCard
                     kugouCard
-                    bilibiliCard
                 }
                 .padding(16)
             }
@@ -59,7 +50,6 @@ struct AccountHubSheet: View {
         .sheet(isPresented: $showNeteaseLogin) { LoginSheet() }
         .sheet(isPresented: $showQQLogin) { LoginSheet(initialProvider: .qqmusic) }
         .sheet(isPresented: $showKugouLogin) { LoginSheet(initialProvider: .kugou) }
-        .sheet(isPresented: $showBilibiliLogin) { LoginSheet(initialProvider: .bilibili) }
         .confirmationDialog("退出网易云登录？", isPresented: $confirmNeteaseLogout, titleVisibility: .visible) {
             Button("退出登录", role: .destructive) {
                 Task {
@@ -87,13 +77,6 @@ struct AccountHubSheet: View {
                 kgAuth.logout()
                 WebLoginDataCleaner.clearKugou()
                 ToastCenter.shared.show("已退出酷狗音乐")
-            }
-            Button("取消", role: .cancel) {}
-        }
-        .confirmationDialog("退出哔哩哔哩登录？", isPresented: $confirmBilibiliLogout, titleVisibility: .visible) {
-            Button("退出登录", role: .destructive) {
-                blAuth.logout()
-                ToastCenter.shared.show("已退出哔哩哔哩账号")
             }
             Button("取消", role: .cancel) {}
         }
@@ -139,21 +122,6 @@ struct AccountHubSheet: View {
             isLoggedIn: kgAuth.isLoggedIn,
             onTap: {
                 if kgAuth.isLoggedIn { confirmKugouLogout = true } else { showKugouLogin = true }
-            }
-        )
-    }
-
-    private var bilibiliCard: some View {
-        accountCard(
-            title: "哔哩哔哩",
-            iconLetter: "哔",
-            status: blAuth.isLoggedIn
-                ? (blAuth.nickname.isEmpty ? "已登录" : blAuth.nickname)
-                : "未登录 · App 扫码登录",
-            badge: nil,
-            isLoggedIn: blAuth.isLoggedIn,
-            onTap: {
-                if blAuth.isLoggedIn { confirmBilibiliLogout = true } else { showBilibiliLogin = true }
             }
         )
     }

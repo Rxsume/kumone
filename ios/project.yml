@@ -3,8 +3,7 @@
 name: KumoneIOS
 options:
   deploymentTarget:
-    # 26.1 (was 16.0): the vendored CiliCiliKit module (Bilibili video
-    # client) uses unguarded iOS 26 APIs.
+    # 26.1 floor (was 16.0): kept — later code uses unguarded iOS 26 APIs.
     iOS: "26.1"
   createIntermediateGroups: true
 configs:

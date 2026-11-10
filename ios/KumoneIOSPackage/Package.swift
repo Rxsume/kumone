@@ -4,8 +4,8 @@ import PackageDescription
 let package = Package(
     name: "KumoneIOSFeature",
     defaultLocalization: "zh-Hans",
-    // iOS 26.1: the vendored CiliCiliKit module (Bilibili video client)
-    // uses unguarded iOS 26 APIs, so the whole iOS app targets 26.1.
+    // iOS 26.1 floor (was 16.0): kept — later code uses unguarded
+    // iOS 26 APIs.
     platforms: [.iOS("26.1")],
     products: [
         .library(
@@ -15,15 +15,12 @@ let package = Package(
     ],
     dependencies: [
         .package(path: "../.."),
-        // Vendored Bilibili client (GPL-3.0-only); see Modules/CiliCili/PORTING.md.
-        .package(path: "../../Modules/CiliCili"),
     ],
     targets: [
         .target(
             name: "KumoneIOSFeature",
             dependencies: [
                 .product(name: "KumoneCore", package: "kumone"),
-                .product(name: "CiliCiliKit", package: "CiliCili"),
             ],
             path: "Sources/KumoneIOSFeature"
         ),
