@@ -321,18 +321,15 @@ struct HomeView: View {
         }
     }
 
-    /// Switching home platform also opts into that platform's content:
-    /// its source toggle is enabled so its songs actually play (and
-    /// appear in search). NetEase has no toggle. Picking the platform
-    /// is an explicit choice, so this is the same opt-in as flipping
-    /// the toggle in Settings → 音源 by hand.
+    /// Switching home platform only changes what the home page shows.
+    /// It never touches playback sources: there is no per-platform
+    /// playback setting anymore (the Settings → 音源 toggles were
+    /// removed by the Beans settings port), and every track resolves
+    /// through the same ladder in `UnblockService` whatever platform
+    /// is selected.
     private func selectPlatform(_ platform: HomePlatform) {
         guard platform != settings.homePlatform else { return }
         settings.homePlatform = platform
-        if let source = platform.sourceID,
-           !settings.enabledAudioSourceIDs.contains(source) {
-            settings.enabledAudioSourceIDs.insert(source)
-        }
     }
 
     private var loadingBody: some View {

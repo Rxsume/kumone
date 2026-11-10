@@ -2,12 +2,19 @@ import AVFoundation
 import Foundation
 import os.log
 
-/// Resolves gray tracks, trying sources in this order: ikun first (the
-/// preferred source), then the direct pyncmd source, then the remaining
-/// providers (Haitangw / Xinghai, which resolve by NetEase ID directly
-/// with no search step, then the Beans platform providers Kugou / QQ,
-/// which resolve by cross-platform search + match and short-circuit
-/// when `track.platformSource` is their own ID).
+/// Resolves gray tracks, trying sources in this order: custom
+/// scripts first, then ikun (the preferred source), then the direct
+/// pyncmd source, then the remaining providers (Haitangw / Xinghai,
+/// which resolve by NetEase ID directly with no search step, then
+/// the Beans platform providers Kugou / QQ, which resolve by
+/// cross-platform search + match and short-circuit when
+/// `track.platformSource` is their own ID).
+///
+/// The Kugou / QQ platform providers are the fixed tail of the
+/// ladder and are NOT gated on their toggles: playback is the same
+/// chain for every track, whatever home platform is selected — there
+/// is no per-platform playback setting anymore. Haitangw / Xinghai
+/// stay gated on their toggles.
 ///
 /// Kuwo was removed: Kuwo's unauthenticated convert_url
 /// endpoint answers VIP tracks with a ~11s spoken prompt clip ("use the
@@ -115,9 +122,19 @@ enum UnblockService {
             }
         }
 
-        for provider in fallbackProviders where enabledSources.contains(provider.id)
-            && !attemptedSources.contains(provider.id) {
+        // Fixed ladder tail: the QQ / Kugou platform providers run
+        // for every track, no matter which home platform is selected
+        // — playback is not split by platform anymore (there is no
+        // per-platform playback setting; the home switcher only
+        // changes what the home page shows). Haitangw / Xinghai stay
+        // gated on their toggles. Attempted-source dedup applies to
+        // all four providers.
+        for provider in fallbackProviders {
             guard !Task.isCancelled else { break }
+            let isPlatformProvider = provider.id == .kugou || provider.id == .qqmusic
+            guard (isPlatformProvider || enabledSources.contains(provider.id))
+                    && !attemptedSources.contains(provider.id)
+            else { continue }
             newlyAttemptedSources.insert(provider.id)
             do {
                 if let resolved = try await provider.resolve(track: track),
