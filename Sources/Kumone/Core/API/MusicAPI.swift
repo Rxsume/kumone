@@ -15,6 +15,60 @@ enum MusicAPI {
         let code: Int
     }
 
+    // MARK: - Auth (NetEase QR login, restored from pre-PR #42)
+
+    struct QRKeyResponse: Decodable {
+        let code: Int
+        let unikey: String
+    }
+
+    static func qrKey() async throws -> String {
+        try await eapi(QRKeyResponse.self, "/login/qrcode/unikey", ["type": 3]).unikey
+    }
+
+    static func qrLoginURL(unikey: String) -> String? {
+        Upstream.webURL("/login?codekey=\(unikey)")?.absoluteString
+    }
+
+    struct QRCheckResponse: Decodable {
+        let code: Int
+        let message: String?
+        let nickname: String?
+        let avatarUrl: String?
+    }
+
+    /// Poll outcome for the QR check codes: 800 expired · 801 waiting ·
+    /// 802 scanned · 803 success. Pure mapping so the poll state machine
+    /// is unit-testable without network (`NetEaseQRLoginTests`).
+    enum QRStatus: Equatable {
+        case waiting
+        case scanned(nickname: String)
+        case expired
+        case success
+        case unknown(code: Int)
+
+        init(check: QRCheckResponse) {
+            switch check.code {
+            case 800: self = .expired
+            case 801: self = .waiting
+            case 802: self = .scanned(nickname: check.nickname ?? "")
+            case 803: self = .success
+            default: self = .unknown(code: check.code)
+            }
+        }
+    }
+
+    static func qrStatus(from check: QRCheckResponse) -> QRStatus {
+        QRStatus(check: check)
+    }
+
+    /// Codes: 800 expired · 801 waiting · 802 scanned · 803 success.
+    /// On 803 the auth cookies arrive via Set-Cookie and are absorbed by the client.
+    static func qrCheck(unikey: String) async throws -> QRCheckResponse {
+        let data = try await client.eapi("/login/qrcode/client/login", ["key": unikey, "type": 3])
+        return try JSONDecoder().decode(QRCheckResponse.self, from: data)
+    }
+
     // MARK: - Session maintenance
 
     /// An isolated client keeps a late logout response away from a newer login.
@@ -94,6 +148,43 @@ enum MusicAPI {
         let resp = try await eapi(PlayRecordResponse.self, "/v1/play/record",
                                   ["uid": uid, "type": week ? 1 : 0])
         return (week ? resp.weekData : resp.allData) ?? []
+    }
+
+    /// `startplay` weblog — writes the song into the 最近播放 (recent-plays)
+    /// list. The service needs this *and* the `play` weblog; sending only `play`
+    /// (as before) bumped the listening ranking but never wrote 最近播放 (#33).
+    static func scrobbleStart(trackID: Int, sourceID: Int) async {
+        await sendWeblog([[
+            "action": "startplay",
+            "json": [
+                "id": trackID, "type": "song",
+                "mainsite": "1", "mainsiteWeb": "1",
+                "content": "id=\(sourceID)",
+            ],
+        ]])
+    }
+
+    /// `play` weblog — increments the listening-ranking play count and time.
+    static func scrobbleFinish(trackID: Int, sourceID: Int, seconds: Int) async {
+        await sendWeblog([[
+            "action": "play",
+            "json": [
+                "download": 0, "end": "playend", "id": trackID,
+                "sourceId": String(sourceID), "time": seconds,
+                "type": "song", "wifi": 0, "source": "list",
+                "mainsite": "1", "mainsiteWeb": "1",
+                "content": "id=\(sourceID)",
+            ],
+        ]])
+    }
+
+    /// Routed via eapi with the desktop-client cookie (`os=osx`) to match the
+    /// reference scrobble implementation.
+    private static func sendWeblog(_ log: [[String: Any]]) async {
+        guard let data = try? JSONSerialization.data(withJSONObject: log),
+              let logs = String(data: data, encoding: .utf8) else { return }
+        _ = try? await client.eapi("/feedback/weblog", ["logs": logs],
+                                   cookieOverrides: ["os": "osx"])
     }
 
     struct CloudResponse: Decodable {
@@ -589,6 +680,43 @@ enum MusicAPI {
 
     static func searchDefaultKeyword() async throws -> String? {
         try await eapi(SearchDefaultResponse.self, "/search/defaultkeyword/get").data?.showKeyword
+    }
+
+    // MARK: - Hot search
+
+    struct HotSearchResponse: Decodable {
+        struct HotSearchItem: Decodable {
+            let searchWord: String
+        }
+
+        let data: [HotSearchItem]?
+    }
+
+    /// Hot search terms from `/search/hot/detail` (eapi; anonymous).
+    /// Parses through `parseHotSearchTerms` so the response shape is
+    /// unit-testable without networking.
+    static func hotSearchTerms(limit: Int = 10) async throws -> [String] {
+        let data = try await client.eapi("/search/hot/detail")
+        return parseHotSearchTerms(from: data, limit: limit)
+    }
+
+    /// Decodes a `/search/hot/detail` payload: `data` is an array of
+    /// items carrying `searchWord`. Trims, dedupes case-insensitively
+    /// and caps at `limit`; a payload that does not decode yields []
+    /// so a backend shape change hides the chips instead of breaking
+    /// search.
+    static func parseHotSearchTerms(from data: Data, limit: Int = 10) -> [String] {
+        guard let resp = try? JSONDecoder().decode(HotSearchResponse.self, from: data) else { return [] }
+        var seen = Set<String>()
+        var terms: [String] = []
+        for item in resp.data ?? [] {
+            let term = item.searchWord.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !term.isEmpty else { continue }
+            guard seen.insert(term.lowercased()).inserted else { continue }
+            terms.append(term)
+            if terms.count >= limit { break }
+        }
+        return terms
     }
 
     // MARK: - Personalized extras

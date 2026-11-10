@@ -380,6 +380,8 @@ struct MainWindow: View {
             DailySongsView()
         case .recents:
             RecentsView()
+        case .ranking:
+            RankingView()
         case .collections:
             CollectionsView()
         case .cloud:

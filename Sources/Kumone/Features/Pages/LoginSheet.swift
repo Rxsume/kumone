@@ -13,10 +13,18 @@ enum ProviderLogin: String, CaseIterable, Identifiable {
 }
 
 struct LoginSheet: View {
-    // NetEase sign-in is Beans' web login now (NetEaseWebLoginPanel):
-    // the Kumone QR/SMS flow (Mode/startLogin/sendCode/loginWithCode)
-    // was deleted in the Beans-settings-home port. `Phase` stays: the
-    // Kugou QR flow shares it via `platformQRCard`.
+    // NetEase sign-in offers two modes side by side: the restored QR
+    // login below and Beans' web login (`NetEaseWebLoginPanel`,
+    // untouched). QR is the default, as before PR #42.
+    private enum NetEaseLoginMode: String, CaseIterable, Identifiable {
+        case qr = "扫码登录"
+        case web = "网页登录"
+
+        var id: String { rawValue }
+    }
+
+    // `Phase` is shared by the NetEase, Kugou and QQ QR flows via
+    // `platformQRCard`.
     private enum Phase: Equatable {
         case loading
         case waiting          // 801
@@ -26,7 +34,14 @@ struct LoginSheet: View {
         case failed(String)
     }
 
-    // Folia platform login (nil = NetEase web login below).
+    // NetEase QR login (restored; PR #42 kept web login only).
+    @State private var neMode: NetEaseLoginMode = .qr
+    @State private var nePhase: Phase = .loading
+    @State private var neQRImage: PlatformImage?
+    @State private var neUnikey: String?
+    @State private var nePollTask: Task<Void, Never>?
+
+    // Folia platform login (nil = NetEase login below).
     @State private var provider: ProviderLogin?
     // QQ Music web login (Beans QQWebLoginSheet / QQLoginSheet): the
     // WKWebView holds the y.qq.com session; login is synced by reading
@@ -34,6 +49,7 @@ struct LoginSheet: View {
     // No QR poll task: nothing polls until the user taps "同步登录状态".
     private enum QQLoginMode: String, CaseIterable, Identifiable {
         case web = "网页登录"
+        case qr = "扫码登录"
         case paste = "粘贴 Cookie"
         var id: String { rawValue }
     }
@@ -42,6 +58,11 @@ struct LoginSheet: View {
     @State private var qqMessage: String?
     @State private var qqSyncing = false
     @State private var qqPageLoaded = false
+    // QQ QR login (ptqrshow / ptqrlogin in QQMusicAuth). Shares the
+    // Kugou QR card (`platformQRCard`) and `Phase`.
+    @State private var qqPhase: Phase = .loading
+    @State private var qqQRImage: PlatformImage?
+    @State private var qqPollTask: Task<Void, Never>?
     // Kugou QR login.
     @State private var kgPhase: Phase = .loading
     @State private var kgQRImage: PlatformImage?
@@ -52,8 +73,10 @@ struct LoginSheet: View {
         _provider = State(initialValue: initialProvider)
     }
 
+    @EnvironmentObject private var account: AccountStore
     @EnvironmentObject private var toasts: ToastCenter
     @Environment(\.dismiss) private var dismiss
+    @Environment(\.scenePhase) private var scenePhase
 
     var body: some View {
         VStack(spacing: 20) {
@@ -61,17 +84,29 @@ struct LoginSheet: View {
                 providerHeader(for: provider)
                 providerSection(for: provider)
             } else {
-                SyncedLoginButtons(onFinished: { signedIn in
+                // NetEase sign-in: QR login and web login side by side.
+                // The web panel keeps its own "登录账号" title, so the
+                // shared header here is just the mode switch.
+                Picker("", selection: $neMode) {
+                    ForEach(NetEaseLoginMode.allCases) { mode in
+                        Text(LocalizedStringKey(mode.rawValue)).tag(mode)
+                    }
+                }
+                .pickerStyle(.segmented)
+                .labelsHidden()
+                .frame(width: 220)
+                .padding(.top, 28)
+
+                SyncedLoginButtons(onStart: { nePollTask?.cancel() }, onFinished: { signedIn in
                     if signedIn { dismiss() }
+                    else if neMode == .qr, !account.isLoggedIn { startNetEaseQRLogin(reusingKey: true) }
                 })
                 .padding(.horizontal, 24)
 
-                // NetEase sign-in is Beans' web login (NetEaseWebLoginPanel).
-                // The sheet title lives inside the panel. There is no
-                // provider list here anymore: AccountHubSheet is the single
-                // account entry point and opens this sheet per provider.
-                NetEaseWebLoginPanel()
-                    .padding(.top, 28)
+                switch neMode {
+                case .qr: netEaseQRSection
+                case .web: NetEaseWebLoginPanel()
+                }
             }
 
             Button("取消") {
@@ -82,19 +117,46 @@ struct LoginSheet: View {
             .foregroundStyle(.secondary)
             .padding(.bottom, 20)
         }
-        .frame(width: provider == .kugou ? 320 : 480)
+        .frame(width: sheetWidth)
         .overlay(alignment: .top) {
             if let toast = toasts.current { ToastView(toast: toast).padding(.top, 8) }
         }
         .onAppear {
             if let provider { startProvider(provider) }
+            else if neMode == .qr { startNetEaseQRLogin() }
         }
         .onDisappear {
+            nePollTask?.cancel()
             kgPollTask?.cancel()
+            qqPollTask?.cancel()
+        }
+        // Coming back from the official app (single-device flow): if polling
+        // died while we were in the background, pick it up again.
+        .onChange(of: scenePhase) { _ in
+            guard provider == nil, scenePhase == .active, neMode == .qr else { return }
+            if case .failed = nePhase { startNetEaseQRLogin(reusingKey: true) }
+            else if nePollTask == nil || nePollTask?.isCancelled == true { startNetEaseQRLogin(reusingKey: true) }
+        }
+        .onChange(of: neMode) { _ in
+            guard provider == nil else { return }
+            if neMode == .qr {
+                if nePollTask == nil || nePollTask?.isCancelled == true {
+                    startNetEaseQRLogin(reusingKey: true)
+                }
+            } else {
+                nePollTask?.cancel()
+            }
         }
         .onChange(of: provider) { _ in
             if let provider { startProvider(provider) }
         }
+    }
+
+    /// QR cards are 320 wide; the web panels need 480.
+    private var sheetWidth: CGFloat {
+        if provider == .kugou { return 320 }
+        if provider != nil { return 480 }
+        return neMode == .qr ? 320 : 480
     }
 
     // MARK: - Folia platform logins
@@ -103,6 +165,7 @@ struct LoginSheet: View {
         HStack {
             Button {
                 kgPollTask?.cancel()
+                qqPollTask?.cancel()
                 provider = nil
             } label: {
                 Label("返回", systemImage: "chevron.left")
@@ -229,7 +292,86 @@ struct LoginSheet: View {
         }
     }
 
-    // MARK: - QQ Music (Beans: web login + manual Cookie paste)
+    // MARK: - NetEase QR login (restored from pre-PR #42)
+
+    /// The restored QR card reuses `platformQRCard` (same layout as the
+    /// old NetEase `qrSection`); the refresh button starts a fresh key.
+    private var netEaseQRSection: some View {
+        platformQRCard(image: neQRImage, phase: nePhase, waitingText: "使用网易云音乐 App 扫码登录") {
+            startNetEaseQRLogin()
+        }
+    }
+
+    /// Starts (or resumes) the QR login: fetch key → render QR → poll
+    /// every 1.2s until scanned/confirmed/expired. Polling tolerates
+    /// transient network errors (the app being backgrounded while the
+    /// user scans) instead of giving up on the first failure. On 803
+    /// the auth cookies arrive via Set-Cookie and are absorbed by the
+    /// shared client; `bootstrap()` then loads the profile.
+    private func startNetEaseQRLogin(reusingKey: Bool = false) {
+        nePollTask?.cancel()
+        let existingKey = reusingKey ? neUnikey : nil
+        if existingKey == nil {
+            nePhase = .loading
+            neQRImage = nil
+        } else {
+            nePhase = .waiting
+        }
+        nePollTask = Task {
+            do {
+                let key: String
+                if let existingKey {
+                    key = existingKey
+                } else {
+                    key = try await MusicAPI.qrKey()
+                    neUnikey = key
+                    guard let loginURL = MusicAPI.qrLoginURL(unikey: key) else { throw MusicAPIError.notConfigured }
+                    neQRImage = Self.generateQR(from: loginURL)
+                    nePhase = .waiting
+                }
+
+                var consecutiveErrors = 0
+                while !Task.isCancelled {
+                    try await Task.sleep(for: .seconds(1.2))
+                    let check: MusicAPI.QRCheckResponse
+                    do {
+                        check = try await MusicAPI.qrCheck(unikey: key)
+                        consecutiveErrors = 0
+                    } catch {
+                        consecutiveErrors += 1
+                        if consecutiveErrors >= 15 { throw error }
+                        continue
+                    }
+                    switch MusicAPI.qrStatus(from: check) {
+                    case .expired:
+                        nePhase = .expired
+                        neUnikey = nil
+                        return
+                    case .waiting:
+                        if case .waiting = nePhase {} else { nePhase = .waiting }
+                    case .scanned(let nickname):
+                        nePhase = .scanned(nickname)
+                    case .success:
+                        nePhase = .success
+                        await account.bootstrap()
+                        ToastCenter.shared.show(String(localized: "欢迎回来，\(account.profile?.nickname ?? "")"))
+                        dismiss()
+                        return
+                    case .unknown:
+                        break
+                    }
+                }
+            } catch {
+                if !Task.isCancelled {
+                    nePhase = .failed(error.localizedDescription)
+                }
+            }
+        }
+    }
+
+    // MARK: - QQ Music (Beans: web login + manual Cookie paste;
+    // QR scan is Golia-only — Beans ships the QR flow in QQMusicAuth
+    // but never wires it into its login sheet)
 
     private var qqSection: some View {
         VStack(spacing: 16) {
@@ -245,10 +387,18 @@ struct LoginSheet: View {
 
             switch qqLoginMode {
             case .web: qqWebPanel
+            case .qr: qqQRSection
             case .paste: qqPastePanel
             }
         }
         .frame(minHeight: 300)
+        .onChange(of: qqLoginMode) { mode in
+            if mode == .qr {
+                startQQQRLogin()
+            } else {
+                qqPollTask?.cancel()
+            }
+        }
     }
 
     /// Beans QQWebLoginPanel: WKWebView opens y.qq.com; the user logs in
@@ -373,6 +523,65 @@ struct LoginSheet: View {
         QQMusicAuth.shared.importCookies(dict, nickname: nil)
         ToastCenter.shared.show(String(localized: "QQ音乐已登录"))
         dismiss()
+    }
+
+    /// QQ QR login: `QQMusicAuth.fetchQRCode` renders the ptqrshow PNG
+    /// (the image comes from QQ itself, not generated locally like
+    /// Kugou's), then `poll()` every 3 s until confirmed/expired.
+    /// `poll()` saves the login into `QQMusicAuth` on confirmation,
+    /// so the UI only has to toast and dismiss. Transient network
+    /// errors are tolerated.
+    private var qqQRSection: some View {
+        platformQRCard(image: qqQRImage, phase: qqPhase, waitingText: "使用 QQ App 扫码登录") {
+            startQQQRLogin()
+        }
+    }
+
+    private func startQQQRLogin() {
+        qqPollTask?.cancel()
+        qqPhase = .loading
+        qqQRImage = nil
+        qqPollTask = Task {
+            do {
+                let data = try await QQMusicAuth.shared.fetchQRCode()
+                guard let image = PlatformImage(data: data) else {
+                    throw QQMusicError.loginFailed("获取 QQ 二维码失败，请检查网络后重试")
+                }
+                qqQRImage = image
+                qqPhase = .waiting
+                var consecutiveErrors = 0
+                while !Task.isCancelled {
+                    try await Task.sleep(for: .seconds(3))
+                    do {
+                        let state = try await QQMusicAuth.shared.poll()
+                        consecutiveErrors = 0
+                        switch state {
+                        case .waiting:
+                            if case .waiting = qqPhase {} else { qqPhase = .waiting }
+                        case .scanned:
+                            qqPhase = .scanned("")
+                        case .success:
+                            qqPhase = .success
+                            ToastCenter.shared.show(String(localized: "QQ音乐已登录"))
+                            dismiss()
+                            return
+                        case .expired:
+                            qqPhase = .expired
+                            return
+                        case .error(let message):
+                            qqPhase = .failed(message)
+                            return
+                        }
+                    } catch {
+                        consecutiveErrors += 1
+                        if consecutiveErrors >= 15 { throw error }
+                        continue
+                    }
+                }
+            } catch {
+                if !Task.isCancelled { qqPhase = .failed(error.localizedDescription) }
+            }
+        }
     }
 
     // MARK: - Kugou (Beans: direct QR login, no backend)
