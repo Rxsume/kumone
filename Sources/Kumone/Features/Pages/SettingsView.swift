@@ -58,6 +58,7 @@ struct SettingsView: View {
     // Beans 平台/播放组的可展开状态（默认收起，与 Beans 一致）。
     @State private var platformExpanded = false
     @State private var playbackExpanded = false
+    @State private var appearanceFoliaExpanded = false
     @ObservedObject private var customSources = CustomAudioSourceStore.shared
     #if os(macOS)
     @AppStorage(SettingsManager.Keys.menuBarPlayer) private var showMenuBarPlayer = false
@@ -270,301 +271,323 @@ struct SettingsView: View {
                 }
             }
 
-            Section("外观") {
-                // Beans 外观行已移除（自定义强调色/底栏/壁纸/字体）；
-                // 只留 Golia 自带的主题切换。
-                Picker("主题模式", selection: $settings.appearance) {
-                    ForEach(AppAppearance.allCases) { appearance in
-                        Text(appearance.displayName).tag(appearance)
+            // 外观 + Folia 合并为一格可展开卡片（与「平台显示」/
+            // 「播放设置」同一形式；默认收起）。行与 key 都不动，
+            // 只把两个 Section 的内容收进展开区。
+            Section {
+                Button {
+                    withAnimation(.easeInOut(duration: 0.22)) {
+                        appearanceFoliaExpanded.toggle()
                     }
-                }
-                .pickerStyle(.segmented)
-
-                #if os(macOS)
-                // macOS only renders two now-playing layouts — 黑胶 and the
-                // regular page; the iOS 沉浸/简洁 options all fall back to the
-                // regular page here, so offering four was misleading (#105).
-                // Map any non-vinyl value onto 经典模式 so a stored default (e.g.
-                // 沉浸模式) still shows a valid selection.
-                Picker("播放页模式", selection: Binding(
-                    get: { settings.nowPlayingMode == .vinyl ? .vinyl : .classic },
-                    set: { settings.nowPlayingMode = $0 }
-                )) {
-                    Text(NowPlayingMode.vinyl.displayName).tag(NowPlayingMode.vinyl)
-                    Text(NowPlayingMode.classic.displayName).tag(NowPlayingMode.classic)
-                }
-                #else
-                Picker("播放页模式", selection: $settings.nowPlayingMode) {
-                    // `.lattice` and `.luminous` are Folia modes: they are
-                    // not offered while the master switch is off (the
-                    // dispatch falls back to the pre-folia default then).
-                    ForEach(NowPlayingMode.allCases.filter { settings.foliaEnabled || ($0 != .lattice && $0 != .luminous) }) { mode in
-                        Text(mode.displayName).tag(mode)
-                    }
-                }
-                Picker("横屏播放页样式", selection: $settings.landscapeNowPlayingStyle) {
-                    ForEach(LandscapeNowPlayingStyle.allCases) { style in
-                        Text(style.displayName).tag(style)
-                    }
-                }
-                Text("iPhone 横放或 iPad 打开播放页时使用；竖屏仍按上面的「播放页模式」")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                #endif
-                Toggle("点击封面打开专辑", isOn: $settings.openAlbumOnArtworkClick)
-                Toggle("显示歌词翻译", isOn: $settings.showLyricsTranslation)
-                Toggle("逐字歌词（卡拉OK）", isOn: $settings.verbatimLyrics)
-                Picker("日文歌词读音", selection: $settings.lyricsAnnotation) {
-                    ForEach(LyricsAnnotation.allCases) { annotation in
-                        Text(annotation.displayName).tag(annotation)
-                    }
-                }
-                Text("罗马音在歌词上方另起一行，汉字读音把假名标在汉字正上方；缺少官方罗马音时自动生成读音")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                Toggle("主界面环境色", isOn: $settings.showMainWindowAmbientBackground)
-                if settings.showMainWindowAmbientBackground {
-                    VStack(alignment: .leading, spacing: 6) {
-                        HStack {
-                            Text("背景色强度")
-                            Spacer()
-                            Text("\(Int(settings.mainWindowAmbientBackgroundIntensity * 100))%")
-                                .foregroundStyle(.secondary)
-                        }
-                        Slider(
-                            value: $settings.mainWindowAmbientBackgroundIntensity,
-                            in: SettingsManager.mainWindowAmbientBackgroundIntensityRange,
-                            step: 0.1
-                        )
-                        HStack {
-                            Text("50%")
-                            Spacer()
-                            Text("150%")
-                        }
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                    }
-                }
-                #if os(macOS)
-                Toggle("桌面歌词", isOn: $settings.showDesktopLyrics)
-                if settings.showDesktopLyrics {
-                    Toggle("桌面歌词水平居中", isOn: $settings.desktopLyricsCentered)
-                }
-                Text("在屏幕上悬浮显示当前歌词，可拖动调整位置")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                #endif
-            }
-
-            Section("Folia") {
-                Toggle("Folia 功能", isOn: $settings.foliaEnabled)
-                Text("关闭后恢复到 Folia 功能加入前的行为；已保存的设置不会丢失，重新打开即可恢复")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                Group {
-                    // Folia 歌词过滤 (lyricLineRules + staff-credits policy):
-                    // per-line rules live on their own page; the staff policy
-                    // lives here.
-                    NavigationLink(value: SettingsPage.lyricFilter) {
-                        Label("歌词过滤", systemImage: "line.3.horizontal.decrease.circle")
-                    }
-                    Text("按规则删掉指定歌词行，并处理开头的制作人员信息")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                    Picker("制作人员信息", selection: $settings.lyricStaffPolicy) {
-                        ForEach(LyricStaffPolicy.allCases) { policy in
-                            Text(policy.displayName).tag(policy)
-                        }
-                    }
-                    Text("歌词开头的作词、作曲等署名行：保留、智能处理或整块隐藏")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                    if settings.lyricStaffPolicy != .keep {
-                        HStack {
-                            Text("每行最少停留")
-                            Spacer()
-                            Text("\(settings.lyricStaffMinDwellSeconds, specifier: "%.1f")秒")
-                                .foregroundStyle(.secondary)
-                            Stepper("", value: $settings.lyricStaffMinDwellSeconds, in: 0.6...4, step: 0.1)
-                                .labelsHidden()
-                        }
-                        Text("智能模式按这个时间算前奏放不放得下整块署名")
-                            .font(.caption)
+                } label: {
+                    HStack(spacing: 12) {
+                        Image(systemName: "paintpalette")
+                            .font(.system(size: 14))
+                            .foregroundStyle(Theme.accent)
+                            .frame(width: 28)
+                        Text("外观 / Folia")
+                        Spacer()
+                        Image(systemName: appearanceFoliaExpanded ? "chevron.up" : "chevron.down")
+                            .font(.system(size: 11, weight: .semibold))
                             .foregroundStyle(.secondary)
-                        Picker("吸收相邻行", selection: $settings.lyricStaffAbsorbMode) {
-                            ForEach(LyricStaffAbsorbMode.allCases) { mode in
-                                Text(mode.displayName).tag(mode)
-                            }
-                        }
-                        Text("把署名块前后耗时过短的行并进块里一起处理")
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                        TextField("自定义识别正则（留空用内置词表）", text: $settings.lyricStaffPattern)
-                            #if os(iOS)
-                            .textInputAutocapitalization(.never)
-                            #endif
-                            .autocorrectionDisabled()
-                        if let error = LyricStaffCredits.patternError(settings.lyricStaffPattern) {
-                            Text(error)
-                                .font(.caption)
-                                .foregroundStyle(.red)
+                    }
+                    .padding(.vertical, 6)
+                    .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                if appearanceFoliaExpanded {
+                    // Beans 外观行已移除（自定义强调色/底栏/壁纸/字体）；
+                    // 只留 Golia 自带的主题切换。
+                    Picker("主题模式", selection: $settings.appearance) {
+                        ForEach(AppAppearance.allCases) { appearance in
+                            Text(appearance.displayName).tag(appearance)
                         }
                     }
-                    Picker("歌词动画样式", selection: $settings.lyricAnimationStyle) {
-                        ForEach(LyricAnimationStyle.allCases) { style in
+                    .pickerStyle(.segmented)
+
+                    #if os(macOS)
+                    // macOS only renders two now-playing layouts — 黑胶 and the
+                    // regular page; the iOS 沉浸/简洁 options all fall back to the
+                    // regular page here, so offering four was misleading (#105).
+                    // Map any non-vinyl value onto 经典模式 so a stored default (e.g.
+                    // 沉浸模式) still shows a valid selection.
+                    Picker("播放页模式", selection: Binding(
+                        get: { settings.nowPlayingMode == .vinyl ? .vinyl : .classic },
+                        set: { settings.nowPlayingMode = $0 }
+                    )) {
+                        Text(NowPlayingMode.vinyl.displayName).tag(NowPlayingMode.vinyl)
+                        Text(NowPlayingMode.classic.displayName).tag(NowPlayingMode.classic)
+                    }
+                    #else
+                    Picker("播放页模式", selection: $settings.nowPlayingMode) {
+                        // `.lattice` and `.luminous` are Folia modes: they are
+                        // not offered while the master switch is off (the
+                        // dispatch falls back to the pre-folia default then).
+                        ForEach(NowPlayingMode.allCases.filter { settings.foliaEnabled || ($0 != .lattice && $0 != .luminous) }) { mode in
+                            Text(mode.displayName).tag(mode)
+                        }
+                    }
+                    Picker("横屏播放页样式", selection: $settings.landscapeNowPlayingStyle) {
+                        ForEach(LandscapeNowPlayingStyle.allCases) { style in
                             Text(style.displayName).tag(style)
                         }
                     }
-                    NavigationLink(value: SettingsPage.lyricStyle) {
-                        Label("歌词样式", systemImage: "textformat")
-                    }
-                // Folia 歌词多源 (restored; re-homed here from
-                // PR #40的 section on the rebase over main
-                // 2ca91b8): auto-best search across NetEase /
-                // AMLL / QQ / Kugou, the preferred-source
-                // tie-break, and the global timeline offset.
-                Toggle("自动使用最佳歌词", isOn: $settings.autoUseBestLyric)
-                Text("自动检索网易云、AMLLDB、QQ 和酷狗歌词，若存在完美匹配的逐字歌词则自动优先采用")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                Picker("歌词匹配优先级", selection: $settings.preferredLyricSource) {
-                    ForEach(LyricSource.allCases) { source in
-                        Text(source.displayName).tag(source)
-                    }
-                }
-                Text("在多个歌词源都存在高置信度匹配时，优先选择该歌词源的结果")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                HStack {
-                    Text("全局时间偏移")
-                    Spacer()
-                    Text("\(settings.globalLyricTimelineOffsetMs)ms")
-                        .foregroundStyle(.secondary)
-                    Stepper("", value: $settings.globalLyricTimelineOffsetMs, in: -2000...2000, step: 50)
-                        .labelsHidden()
-                }
-                Text("为本设备的所有歌曲整体平移歌词时间轴，补偿蓝牙等输出延迟")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                    Toggle("静态模式", isOn: $settings.staticMode)
-                    Text("关闭动态效果（环境色过渡、黑胶旋转、歌词动效）")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                    Picker("减弱动态-背景", selection: $settings.reduceMotionBackground) {
-                        Text("跟随系统").tag(nil as Bool?)
-                        Text("开").tag(true as Bool?)
-                        Text("关").tag(false as Bool?)
-                    }
-                    Picker("减弱动态-过渡", selection: $settings.reduceMotionTransitions) {
-                        Text("跟随系统").tag(nil as Bool?)
-                        Text("开").tag(true as Bool?)
-                        Text("关").tag(false as Bool?)
-                    }
-                    Picker("减弱动态-微动效", selection: $settings.reduceMotionMicroMotion) {
-                        Text("跟随系统").tag(nil as Bool?)
-                        Text("开").tag(true as Bool?)
-                        Text("关").tag(false as Bool?)
-                    }
-                    Text("未选择时跟随系统减弱动态设置")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                    Toggle("首页动态背景", isOn: $settings.homeDynamicBackground)
-                    // D6: native blur only backs the iOS karaoke backdrop
-                    // and the iOS volume popover; on macOS the toggle would
-                    // be a dead switch.
-                    #if os(iOS)
-                    Toggle("播放页原生模糊", isOn: $settings.playerPageNativeBlur)
-                    #endif
-                    VStack(alignment: .leading, spacing: 6) {
-                        HStack {
-                            Text("播放页背景着色强度")
-                            Spacer()
-                            Text("\(Int(settings.playerPageTintIntensity * 100))%")
-                                .foregroundStyle(.secondary)
-                        }
-                        Slider(
-                            value: $settings.playerPageTintIntensity,
-                            in: SettingsManager.playerPageTintIntensityRange,
-                            step: 0.1
-                        )
-                        HStack {
-                            Text("50%")
-                            Spacer()
-                            Text("150%")
-                        }
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                    }
-                    // D7: the entry view is only honoured by the iOS
-                    // player engine (PlayerServiceIOS).
-                    #if os(iOS)
-                    Picker("播放时打开", selection: $settings.playbackEntryView) {
-                        ForEach(PlaybackEntryView.allCases) { entry in
-                            Text(entry.displayName).tag(entry)
-                        }
-                    }
-                    Text("点播开始播放时打开播放页，还是留在当前页")
+                    Text("iPhone 横放或 iPad 打开播放页时使用；竖屏仍按上面的「播放页模式」")
                         .font(.caption)
                         .foregroundStyle(.secondary)
                     #endif
-                }.disabled(!settings.foliaEnabled)
-                Group {
-                    Toggle("隐藏进度条", isOn: $settings.hidePlayerProgressBar)
-                    Text("iOS 可用")
+                    Toggle("点击封面打开专辑", isOn: $settings.openAlbumOnArtworkClick)
+                    Toggle("显示歌词翻译", isOn: $settings.showLyricsTranslation)
+                    Toggle("逐字歌词（卡拉OK）", isOn: $settings.verbatimLyrics)
+                    Picker("日文歌词读音", selection: $settings.lyricsAnnotation) {
+                        ForEach(LyricsAnnotation.allCases) { annotation in
+                            Text(annotation.displayName).tag(annotation)
+                        }
+                    }
+                    Text("罗马音在歌词上方另起一行，汉字读音把假名标在汉字正上方；缺少官方罗马音时自动生成读音")
                         .font(.caption)
                         .foregroundStyle(.secondary)
-                    Toggle("自动隐藏播放控件", isOn: $settings.autoHidePlayerChrome)
-                    Text("3 秒无操作后隐藏进度条、播放按钮和顶部按钮，点一下屏幕即可恢复")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                    // D8: the back button is only gated by this setting on
-                    // iOS; the macOS page always shows its own collapse button.
-                    #if os(iOS)
-                    Toggle("始终显示返回按钮", isOn: $settings.alwaysShowPlayerBackButton)
-                    Text("iOS 可用")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                    #endif
-                    Toggle("始终显示切歌按钮", isOn: $settings.alwaysShowTrackSwitchButtons)
-                    Text("只在 FM 模式下显示切歌按钮")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                    Toggle("浮动歌曲卡片", isOn: $settings.stageTrackCardEnabled)
-                    Text("iOS 可用")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                    Toggle("过渡动画-屏幕圆环", isOn: $settings.transitionAnimationRing)
-                    // P6: 旧文案“需先打开「切歌淡入淡出」”指向的过渡模式
-                    // 选择器（AutoMixSettingsSection 的“过渡模式”）已不在
-                    // 设置页里；iOS 上 `PlayerServiceIOS.transitionInProgress`
-                    // 在 PR #36 单引擎回退后恒为 false，圆环目前只在 macOS
-                    // 的 AutoMix 切歌过渡进行时出现。
-                    Text("只在切歌过渡进行时短暂出现；iOS 单引擎播放时不产生过渡")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                    Toggle("过渡动画-卡片描边", isOn: $settings.transitionAnimationCard)
-                    Text("只在切歌过渡进行时短暂出现；iOS 单引擎播放时不产生过渡")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                }.disabled(!settings.foliaEnabled)
-                Group {
-                    ForEach(PlayerControlSlot.allCases) { slot in
-                        Toggle(slot.displayName, isOn: Binding(
-                            get: { settings.playerControlSlots.contains(slot.rawValue) },
-                            set: { isOn in
-                                var slots = Set(settings.playerControlSlots)
-                                if isOn {
-                                    slots.insert(slot.rawValue)
-                                } else {
-                                    slots.remove(slot.rawValue)
-                                }
-                                settings.playerControlSlots = PlayerControlSlot.allCases
-                                    .map(\.rawValue)
-                                    .filter { slots.contains($0) }
+                    Toggle("主界面环境色", isOn: $settings.showMainWindowAmbientBackground)
+                    if settings.showMainWindowAmbientBackground {
+                        VStack(alignment: .leading, spacing: 6) {
+                            HStack {
+                                Text("背景色强度")
+                                Spacer()
+                                Text("\(Int(settings.mainWindowAmbientBackgroundIntensity * 100))%")
+                                    .foregroundStyle(.secondary)
                             }
-                        ))
+                            Slider(
+                                value: $settings.mainWindowAmbientBackgroundIntensity,
+                                in: SettingsManager.mainWindowAmbientBackgroundIntensityRange,
+                                step: 0.1
+                            )
+                            HStack {
+                                Text("50%")
+                                Spacer()
+                                Text("150%")
+                            }
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                        }
                     }
-                }.disabled(!settings.foliaEnabled)
+                    #if os(macOS)
+                    Toggle("桌面歌词", isOn: $settings.showDesktopLyrics)
+                    if settings.showDesktopLyrics {
+                        Toggle("桌面歌词水平居中", isOn: $settings.desktopLyricsCentered)
+                    }
+                    Text("在屏幕上悬浮显示当前歌词，可拖动调整位置")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                    #endif
+                    Toggle("Folia 功能", isOn: $settings.foliaEnabled)
+                    Text("关闭后恢复到 Folia 功能加入前的行为；已保存的设置不会丢失，重新打开即可恢复")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                    Group {
+                        // Folia 歌词过滤 (lyricLineRules + staff-credits policy):
+                        // per-line rules live on their own page; the staff policy
+                        // lives here.
+                        NavigationLink(value: SettingsPage.lyricFilter) {
+                            Label("歌词过滤", systemImage: "line.3.horizontal.decrease.circle")
+                        }
+                        Text("按规则删掉指定歌词行，并处理开头的制作人员信息")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                        Picker("制作人员信息", selection: $settings.lyricStaffPolicy) {
+                            ForEach(LyricStaffPolicy.allCases) { policy in
+                                Text(policy.displayName).tag(policy)
+                            }
+                        }
+                        Text("歌词开头的作词、作曲等署名行：保留、智能处理或整块隐藏")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                        if settings.lyricStaffPolicy != .keep {
+                            HStack {
+                                Text("每行最少停留")
+                                Spacer()
+                                Text("\(settings.lyricStaffMinDwellSeconds, specifier: "%.1f")秒")
+                                    .foregroundStyle(.secondary)
+                                Stepper("", value: $settings.lyricStaffMinDwellSeconds, in: 0.6...4, step: 0.1)
+                                    .labelsHidden()
+                            }
+                            Text("智能模式按这个时间算前奏放不放得下整块署名")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                            Picker("吸收相邻行", selection: $settings.lyricStaffAbsorbMode) {
+                                ForEach(LyricStaffAbsorbMode.allCases) { mode in
+                                    Text(mode.displayName).tag(mode)
+                                }
+                            }
+                            Text("把署名块前后耗时过短的行并进块里一起处理")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                            TextField("自定义识别正则（留空用内置词表）", text: $settings.lyricStaffPattern)
+                                #if os(iOS)
+                                .textInputAutocapitalization(.never)
+                                #endif
+                                .autocorrectionDisabled()
+                            if let error = LyricStaffCredits.patternError(settings.lyricStaffPattern) {
+                                Text(error)
+                                    .font(.caption)
+                                    .foregroundStyle(.red)
+                            }
+                        }
+                        Picker("歌词动画样式", selection: $settings.lyricAnimationStyle) {
+                            ForEach(LyricAnimationStyle.allCases) { style in
+                                Text(style.displayName).tag(style)
+                            }
+                        }
+                        NavigationLink(value: SettingsPage.lyricStyle) {
+                            Label("歌词样式", systemImage: "textformat")
+                        }
+                    // Folia 歌词多源 (restored; re-homed here from
+                    // PR #40的 section on the rebase over main
+                    // 2ca91b8): auto-best search across NetEase /
+                    // AMLL / QQ / Kugou, the preferred-source
+                    // tie-break, and the global timeline offset.
+                    Toggle("自动使用最佳歌词", isOn: $settings.autoUseBestLyric)
+                    Text("自动检索网易云、AMLLDB、QQ 和酷狗歌词，若存在完美匹配的逐字歌词则自动优先采用")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                    Picker("歌词匹配优先级", selection: $settings.preferredLyricSource) {
+                        ForEach(LyricSource.allCases) { source in
+                            Text(source.displayName).tag(source)
+                        }
+                    }
+                    Text("在多个歌词源都存在高置信度匹配时，优先选择该歌词源的结果")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                    HStack {
+                        Text("全局时间偏移")
+                        Spacer()
+                        Text("\(settings.globalLyricTimelineOffsetMs)ms")
+                            .foregroundStyle(.secondary)
+                        Stepper("", value: $settings.globalLyricTimelineOffsetMs, in: -2000...2000, step: 50)
+                            .labelsHidden()
+                    }
+                    Text("为本设备的所有歌曲整体平移歌词时间轴，补偿蓝牙等输出延迟")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        Toggle("静态模式", isOn: $settings.staticMode)
+                        Text("关闭动态效果（环境色过渡、黑胶旋转、歌词动效）")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                        Picker("减弱动态-背景", selection: $settings.reduceMotionBackground) {
+                            Text("跟随系统").tag(nil as Bool?)
+                            Text("开").tag(true as Bool?)
+                            Text("关").tag(false as Bool?)
+                        }
+                        Picker("减弱动态-过渡", selection: $settings.reduceMotionTransitions) {
+                            Text("跟随系统").tag(nil as Bool?)
+                            Text("开").tag(true as Bool?)
+                            Text("关").tag(false as Bool?)
+                        }
+                        Picker("减弱动态-微动效", selection: $settings.reduceMotionMicroMotion) {
+                            Text("跟随系统").tag(nil as Bool?)
+                            Text("开").tag(true as Bool?)
+                            Text("关").tag(false as Bool?)
+                        }
+                        Text("未选择时跟随系统减弱动态设置")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                        Toggle("首页动态背景", isOn: $settings.homeDynamicBackground)
+                        // D6: native blur only backs the iOS karaoke backdrop
+                        // and the iOS volume popover; on macOS the toggle would
+                        // be a dead switch.
+                        #if os(iOS)
+                        Toggle("播放页原生模糊", isOn: $settings.playerPageNativeBlur)
+                        #endif
+                        VStack(alignment: .leading, spacing: 6) {
+                            HStack {
+                                Text("播放页背景着色强度")
+                                Spacer()
+                                Text("\(Int(settings.playerPageTintIntensity * 100))%")
+                                    .foregroundStyle(.secondary)
+                            }
+                            Slider(
+                                value: $settings.playerPageTintIntensity,
+                                in: SettingsManager.playerPageTintIntensityRange,
+                                step: 0.1
+                            )
+                            HStack {
+                                Text("50%")
+                                Spacer()
+                                Text("150%")
+                            }
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                        }
+                        // D7: the entry view is only honoured by the iOS
+                        // player engine (PlayerServiceIOS).
+                        #if os(iOS)
+                        Picker("播放时打开", selection: $settings.playbackEntryView) {
+                            ForEach(PlaybackEntryView.allCases) { entry in
+                                Text(entry.displayName).tag(entry)
+                            }
+                        }
+                        Text("点播开始播放时打开播放页，还是留在当前页")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                        #endif
+                    }.disabled(!settings.foliaEnabled)
+                    Group {
+                        Toggle("隐藏进度条", isOn: $settings.hidePlayerProgressBar)
+                        Text("iOS 可用")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                        Toggle("自动隐藏播放控件", isOn: $settings.autoHidePlayerChrome)
+                        Text("3 秒无操作后隐藏进度条、播放按钮和顶部按钮，点一下屏幕即可恢复")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                        // D8: the back button is only gated by this setting on
+                        // iOS; the macOS page always shows its own collapse button.
+                        #if os(iOS)
+                        Toggle("始终显示返回按钮", isOn: $settings.alwaysShowPlayerBackButton)
+                        Text("iOS 可用")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                        #endif
+                        Toggle("始终显示切歌按钮", isOn: $settings.alwaysShowTrackSwitchButtons)
+                        Text("只在 FM 模式下显示切歌按钮")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                        Toggle("浮动歌曲卡片", isOn: $settings.stageTrackCardEnabled)
+                        Text("iOS 可用")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                        Toggle("过渡动画-屏幕圆环", isOn: $settings.transitionAnimationRing)
+                        // P6: 旧文案“需先打开「切歌淡入淡出」”指向的过渡模式
+                        // 选择器（AutoMixSettingsSection 的“过渡模式”）已不在
+                        // 设置页里；iOS 上 `PlayerServiceIOS.transitionInProgress`
+                        // 在 PR #36 单引擎回退后恒为 false，圆环目前只在 macOS
+                        // 的 AutoMix 切歌过渡进行时出现。
+                        Text("只在切歌过渡进行时短暂出现；iOS 单引擎播放时不产生过渡")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                        Toggle("过渡动画-卡片描边", isOn: $settings.transitionAnimationCard)
+                        Text("只在切歌过渡进行时短暂出现；iOS 单引擎播放时不产生过渡")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }.disabled(!settings.foliaEnabled)
+                    Group {
+                        ForEach(PlayerControlSlot.allCases) { slot in
+                            Toggle(slot.displayName, isOn: Binding(
+                                get: { settings.playerControlSlots.contains(slot.rawValue) },
+                                set: { isOn in
+                                    var slots = Set(settings.playerControlSlots)
+                                    if isOn {
+                                        slots.insert(slot.rawValue)
+                                    } else {
+                                        slots.remove(slot.rawValue)
+                                    }
+                                    settings.playerControlSlots = PlayerControlSlot.allCases
+                                        .map(\.rawValue)
+                                        .filter { slots.contains($0) }
+                                }
+                            ))
+                        }
+                    }.disabled(!settings.foliaEnabled)
+                }
             }
 
             Section("存储") {
