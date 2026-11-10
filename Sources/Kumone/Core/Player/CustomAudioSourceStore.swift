@@ -52,11 +52,14 @@ final class CustomAudioSourceStore: ObservableObject {
     }
 
     /// Guarantees the built-in ikun source exists, first in the list.
-    /// Called on every load: a user who already imported the same
-    /// script (same name, random UUID) gets no duplicate; an existing
-    /// built-in record keeps its `enabled` / `quality` / `name` but
-    /// its script is refreshed from code (source of truth), so an app
-    /// update can ship a newer script without touching the toggle.
+    /// Called on every load: an existing built-in record keeps its
+    /// `enabled` / `quality` / `name` but its script is refreshed
+    /// from code (source of truth), so an app update can ship a newer
+    /// script without touching the toggle. A user who already imported
+    /// the same script (same name, random UUID) has that copy ADOPTED
+    /// as the built-in source — same id, same script refresh, moved
+    /// to index 0 — so the sponsored-key field exists for it instead
+    /// of the built-in row silently never appearing.
     func ensureBuiltInSource() {
         if let index = sources.firstIndex(where: { $0.id == BuiltInAudioSources.ikunID }) {
             var list = sources
@@ -67,7 +70,35 @@ final class CustomAudioSourceStore: ObservableObject {
             sources = list
             return
         }
-        if sources.contains(where: { $0.name == BuiltInAudioSources.ikunName }) {
+        if let index = sources.firstIndex(where: { $0.name == BuiltInAudioSources.ikunName }) {
+            // Adopt only a real copy of this script (same backend):
+            // an unrelated script that merely shares the name is
+            // left alone, and no built-in row is added for it.
+            guard let script = sources[index].script,
+                  script.contains(BuiltInAudioSources.ikunBackendHost) else { return }
+            var list = sources
+            var adopted = list[index]
+            // Preserve the key the user already had inside the
+            // imported text: move it to the device-only key store
+            // before the script is refreshed from code (which carries
+            // an empty key). The key field then shows it, and future
+            // rotations work from the field.
+            if let key = BuiltInAudioSources.apiKeyInScript(script), !key.isEmpty {
+                defaults.set(key, forKey: BuiltInAudioSources.apiKeyDefaultsKey)
+                if defaults === UserDefaults.standard {
+                    // Production uses UserDefaults.standard: keep the
+                    // SettingsManager-published value in sync so the
+                    // SecureField shows the moved key. Test suites use
+                    // an isolated defaults and skip this (no shared
+                    // state is touched there).
+                    SettingsManager.shared.ikunApiKey = key
+                }
+            }
+            adopted.id = BuiltInAudioSources.ikunID
+            adopted.script = BuiltInAudioSources.ikunScript
+            list.remove(at: index)
+            list.insert(adopted, at: 0)
+            sources = list
             return
         }
         var list = sources
