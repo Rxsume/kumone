@@ -4,13 +4,8 @@ import Combine
 /// 用户选择需要在首页切换器里显示的平台。只控制入口可见性，不删除
 /// 平台能力：搜索、播放、歌单仍按音源开关走（见 `HomeView.selectPlatform`
 /// 的注释）。改编自 Beans 的 `PlatformPreferenceStore`（2.0.3）：Beans
-/// 的店管五个 `SearchProvider`（含汽水/Bilibili）；Golia 的店只管三个
-/// `HomePlatform`，键用 `settings.*` 命名空间，不用 `beans.*`。
-///
-/// Bilibili 衔接：店按 `HomePlatform.allCases` 归一化，未见过的 case
-/// 默认启用，所以平行工作流加 `.bilibili` 时它自动出现在选择器里，
-/// 不用再改这个文件；`HomeView` 的切换器与本店的 `orderedEnabledPlatforms`
-/// 同步，Bilibili 行也随之出现。
+/// 的店管五个 `SearchProvider`；Golia 的店只管三个 `HomePlatform`，
+/// 键用 `settings.*` 命名空间，不用 `beans.*`。
 @MainActor
 final class PlatformPreferenceStore: ObservableObject {
     static let shared = PlatformPreferenceStore()
@@ -135,7 +130,6 @@ private extension HomePlatform {
         case .netease: return "music.note"
         case .qqmusic: return "music.note.list"
         case .kugou: return "waveform"
-        case .bilibili: return "play.rectangle"
         }
     }
 }

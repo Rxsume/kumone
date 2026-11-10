@@ -81,16 +81,6 @@ final class HomeViewModel: ObservableObject {
             return
         }
 
-        // Bilibili (phase 1): entry point only — no feed yet, so there
-        // is nothing to fetch. Mark loaded so the placeholder renders
-        // instead of the platform-sections error state.
-        if platform == .bilibili {
-            platformPlaylists = []
-            platformToplists = []
-            state = .loaded
-            return
-        }
-
         // QQ: recommended songs (radar) + recommended playlists +
         // hot songs + charts + hot artists. Kugou: daily
         // recommendations + recommended playlists + charts — it has
@@ -126,8 +116,6 @@ final class HomeViewModel: ObservableObject {
         switch platform {
         case .netease:
             return []
-        case .bilibili:
-            return []
         case .qqmusic:
             return (try? await QQMusicAPI.shared.recommendPlaylists(limit: 12))?.map {
                 PlatformPlaylistSummary(source: .qqmusic, platformID: $0.id, name: $0.name,
@@ -144,8 +132,6 @@ final class HomeViewModel: ObservableObject {
     private func fetchPlatformToplists(platform: HomePlatform) async -> [PlatformToplistItem] {
         switch platform {
         case .netease:
-            return []
-        case .bilibili:
             return []
         case .qqmusic:
             return (try? await QQMusicAPI.shared.topLists())?.map {
@@ -194,8 +180,6 @@ final class HomeViewModel: ObservableObject {
     private func fetchPlatformDailySongs(platform: HomePlatform) async -> [Track] {
         switch platform {
         case .netease:
-            return []
-        case .bilibili:
             return []
         case .qqmusic:
             return (try? await QQMusicAPI.shared.recommendSongs(limit: 30))?.compactMap(Track.fromQQSong) ?? []
@@ -249,9 +233,6 @@ struct HomeView: View {
     @EnvironmentObject private var player: PlayerService
     @StateObject private var model = HomeViewModel.shared
     @ObservedObject private var settings = SettingsManager.shared
-    /// Bilibili login state for the phase-1 home placeholder.
-    @ObservedObject private var blAuth = BilibiliAuth.shared
-    @State private var showBilibiliLogin = false
     @ObservedObject private var platformPrefs = PlatformPreferenceStore.shared
     /// Kugou login state, only to dim the 私人漫游 card while
     /// logged out (the card itself is always shown, Beans-style).
@@ -330,9 +311,6 @@ struct HomeView: View {
         .task(id: FeedTaskID(loggedIn: account.isLoggedIn, platform: settings.homePlatform)) {
             await model.load(platform: settings.homePlatform, loggedIn: account.isLoggedIn)
         }
-        .sheet(isPresented: $showBilibiliLogin) {
-            LoginSheet(initialProvider: .bilibili)
-        }
         // 当前平台在设置页被隐藏时回落到第一个可见平台（设置页改
         // 动时经 onChange 立刻生效；首页重现时经 onAppear 兜底）。
         .onAppear {
@@ -343,18 +321,15 @@ struct HomeView: View {
         }
     }
 
-    /// Switching home platform also opts into that platform's content:
-    /// its source toggle is enabled so its songs actually play (and
-    /// appear in search). NetEase has no toggle. Picking the platform
-    /// is an explicit choice, so this is the same opt-in as flipping
-    /// the toggle in Settings → 音源 by hand.
+    /// Switching home platform only changes what the home page shows.
+    /// It never touches playback sources: there is no per-platform
+    /// playback setting anymore (the Settings → 音源 toggles were
+    /// removed by the Beans settings port), and every track resolves
+    /// through the same ladder in `UnblockService` whatever platform
+    /// is selected.
     private func selectPlatform(_ platform: HomePlatform) {
         guard platform != settings.homePlatform else { return }
         settings.homePlatform = platform
-        if let source = platform.sourceID,
-           !settings.enabledAudioSourceIDs.contains(source) {
-            settings.enabledAudioSourceIDs.insert(source)
-        }
     }
 
     private var loadingBody: some View {
@@ -378,8 +353,6 @@ struct HomeView: View {
         LazyVStack(alignment: .leading, spacing: Theme.Layout.sectionSpacing) {
             if settings.homePlatform == .netease {
                 netEaseSections
-            } else if settings.homePlatform == .bilibili {
-                bilibiliPlaceholderSections
             } else {
                 platformSections
             }
@@ -389,30 +362,6 @@ struct HomeView: View {
         .padding(.top, Theme.Layout.pageTopPadding)
         .padding(.bottom, Theme.Layout.contentInset - 8)
         .frame(maxWidth: .infinity, alignment: .leading)
-    }
-
-    /// Bilibili home (phase 1): entry point only. The video feed
-    /// lands in phase 3; until then this shows the login state and
-    /// what is coming, instead of the platform-sections error state.
-    private var bilibiliPlaceholderSections: some View {
-        Group {
-            VStack(alignment: .leading, spacing: 12) {
-                Text("哔哩哔哩")
-                    .font(.title2.weight(.bold))
-                Text("视频首页正在搬运中，稍后上线。")
-                    .foregroundStyle(.secondary)
-                if blAuth.isLoggedIn {
-                    Text("已登录：\(blAuth.nickname.isEmpty ? "B站账号" : blAuth.nickname)")
-                    Button("退出登录", role: .destructive) { blAuth.logout() }
-                } else {
-                    Button("登录哔哩哔哩") { showBilibiliLogin = true }
-                    Text("扫码登录后可看 720P 以上清晰度视频。")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                }
-            }
-            .padding(.vertical, 8)
-        }
     }
 
     /// Today's NetEase feed, byte-identical behaviour: feature cards,
@@ -495,25 +444,48 @@ struct HomeView: View {
         }
     }
 
-    /// QQ home feed, in order: 每日推荐 / 推荐 / 推荐歌单 / 热门歌曲 /
-    /// 排行榜 / 热门歌手. Kugou, in order: 私人漫游 card / 每日推荐 /
-    /// 推荐歌单 / 排行榜. Song rows play through the normal queue
+    /// QQ home feed, Beans 图3 order: 每日推荐大卡 / 排行榜 / 热门歌手 /
+    /// 推荐歌单 / 推荐 / 热门歌曲. Kugou keeps its own order (私人漫游 card /
+    /// 每日推荐 / 推荐歌单 / 排行榜). Song rows play through the normal queue
     /// (PR #29 ikun fallback); playlist and chart cards play their
     /// songs directly, as before — there is no platform playlist/chart
     /// detail page. A section whose fetch failed is hidden, never
     /// faked.
     private var platformSections: some View {
         Group {
-            if model.currentPlatform == .kugou {
-                kugouFeatureCards
+            if model.currentPlatform == .qqmusic {
+                qqHomeSections
+            } else {
+                kugouHomeSections
             }
+        }
+    }
 
+    /// QQ home in Beans 图3 order: the daily hero card first, then
+    /// horizontal chart cards, then circular artists. The remaining
+    /// sections (推荐歌单 / 推荐 / 热门歌曲) keep their data and layout,
+    /// just below — only the order changed, no fetch logic.
+    private var qqHomeSections: some View {
+        Group {
             if !model.platformDailySongs.isEmpty {
-                platformSongListSection(title: "每日推荐", tracks: model.platformDailySongs)
+                qqDailyHeroCard
+                    .padding(.horizontal, Theme.Layout.contentInset)
             }
 
-            if model.currentPlatform == .qqmusic, !model.platformRecommendSongs.isEmpty {
-                platformSongListSection(title: "推荐", tracks: model.platformRecommendSongs)
+            if !model.platformToplists.isEmpty {
+                Shelf(title: "排行榜", seeAll: nil, rowHeight: Theme.Layout.coverShelfHeight) {
+                    ForEach(model.platformToplists) { toplist in
+                        platformToplistCard(toplist)
+                    }
+                }
+            }
+
+            if !model.platformHotArtists.isEmpty {
+                Shelf(title: "热门歌手", rowHeight: Theme.Layout.artistShelfHeight) {
+                    ForEach(model.platformHotArtists) { artist in
+                        platformArtistCard(artist)
+                    }
+                }
             }
 
             if !model.platformPlaylists.isEmpty {
@@ -525,22 +497,81 @@ struct HomeView: View {
                 }
             }
 
-            if model.currentPlatform == .qqmusic, !model.platformHotSongs.isEmpty {
+            if !model.platformRecommendSongs.isEmpty {
+                platformSongListSection(title: "推荐", tracks: model.platformRecommendSongs)
+            }
+
+            if !model.platformHotSongs.isEmpty {
                 platformSongListSection(title: "热门歌曲", tracks: model.platformHotSongs)
+            }
+        }
+    }
+
+    /// QQ 每日推荐大封面卡（Beans 图3）：第一首歌的封面做背景，
+    /// 点进每日推荐列表（PlatformDailySongsView，复用 TrackListView）。
+    private var qqDailyHeroCard: some View {
+        NavigationLink {
+            PlatformDailySongsView(tracks: model.platformDailySongs)
+        } label: {
+            ZStack(alignment: .bottomLeading) {
+                CachedAsyncImage(url: model.platformDailySongs.first?.album.picUrl?.resizedImageURL(1024))
+                    .frame(maxWidth: .infinity)
+                    .frame(height: 190)
+                    .clipped()
+                LinearGradient(colors: [.black.opacity(0.05), .black.opacity(0.68)],
+                               startPoint: .top, endPoint: .bottom)
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("每日推荐")
+                        .font(.system(size: 22, weight: .bold))
+                        .foregroundStyle(.white)
+                    Text("\(model.platformDailySongs.count) 首 · 每天 6:00 更新")
+                        .font(.system(size: 12))
+                        .foregroundStyle(.white.opacity(0.8))
+                }
+                .padding(16)
+                .shadow(color: .black.opacity(0.4), radius: 2, y: 1)
+                Image(systemName: "calendar")
+                    .font(.system(size: 18, weight: .medium))
+                    .foregroundStyle(.white)
+                    .shadow(color: .black.opacity(0.4), radius: 2, y: 1)
+                    .padding(16)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+            }
+            .frame(maxWidth: .infinity)
+            .frame(height: 190)
+            .clipShape(RoundedRectangle(cornerRadius: Theme.Radius.large, style: .continuous))
+            .overlay(
+                RoundedRectangle(cornerRadius: Theme.Radius.large, style: .continuous)
+                    .strokeBorder(.white.opacity(0.12), lineWidth: 0.5)
+            )
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+    }
+
+    /// Kugou home feed, unchanged order: 私人漫游 card / 每日推荐 /
+    /// 推荐歌单 / 排行榜.
+    private var kugouHomeSections: some View {
+        Group {
+            kugouFeatureCards
+
+            if !model.platformDailySongs.isEmpty {
+                platformSongListSection(title: "每日推荐", tracks: model.platformDailySongs)
+            }
+
+            if !model.platformPlaylists.isEmpty {
+                Shelf(title: "推荐歌单", rowHeight: Theme.Layout.coverShelfHeight) {
+                    ForEach(Array(model.platformPlaylists.prefix(12).enumerated()), id: \.element.id) { index, playlist in
+                        platformPlaylistCard(playlist)
+                            .staggeredAppearance(index: index, id: "home-platform-rec-\(playlist.id)")
+                    }
+                }
             }
 
             if !model.platformToplists.isEmpty {
                 Shelf(title: "排行榜", seeAll: nil, rowHeight: Theme.Layout.coverShelfHeight) {
                     ForEach(model.platformToplists) { toplist in
                         platformToplistCard(toplist)
-                    }
-                }
-            }
-
-            if model.currentPlatform == .qqmusic, !model.platformHotArtists.isEmpty {
-                Shelf(title: "热门歌手", rowHeight: Theme.Layout.artistShelfHeight) {
-                    ForEach(model.platformHotArtists) { artist in
-                        platformArtistCard(artist)
                     }
                 }
             }
@@ -636,7 +667,7 @@ struct HomeView: View {
         .buttonStyle(.plain)
     }
 
-    // MARK: - Feature cards
+// MARK: - Feature cards
 
     private var featureCards: some View {
         ScrollView(.horizontal, showsIndicators: false) {
@@ -878,6 +909,69 @@ struct HomeView: View {
             player.play(tracks: tracks, source: .playlist(id),
                         context: .playlist(id: id, name: detail.playlist.name))
         }
+    }
+}
+
+    /// QQ 每日推荐列表：从首页每日推荐大卡点进来。歌已在首页取好，
+/// 这里只展示（TrackListView）+ 播放全部，不再请求一次。
+/// Header mirrors DailySongsView (NetEase), with the QQ subtitle.
+struct PlatformDailySongsView: View {
+    let tracks: [Track]
+
+    private let player = PlayerService.shared
+
+    var body: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 20) {
+                header
+                    .padding(.horizontal, Theme.Layout.contentInset)
+                    .padding(.top, 16)
+                TrackListView(tracks: tracks, style: .compact)
+                    .padding(.horizontal, Theme.Layout.contentInset - 10)
+                PlayerClearanceSpacer()
+            }
+        }
+        .navigationTitle("每日推荐")
+    }
+
+    private var header: some View {
+        ZStack(alignment: .bottomLeading) {
+            CachedAsyncImage(url: tracks.first?.album.picUrl?.resizedImageURL(1024))
+                .frame(height: 220)
+                .frame(maxWidth: .infinity)
+                .clipped()
+            LinearGradient(colors: [.black.opacity(0.15), .black.opacity(0.72)],
+                           startPoint: .top, endPoint: .bottom)
+
+            HStack(alignment: .bottom) {
+                VStack(alignment: .leading, spacing: 6) {
+                    Text("每日推荐")
+                        .font(.system(size: 30, weight: .bold))
+                    Text("\(tracks.count) 首 · 每天 6:00 更新")
+                        .font(.system(size: 12))
+                        .opacity(0.7)
+                }
+                .foregroundStyle(.white)
+                .shadow(color: .black.opacity(0.4), radius: 3, y: 1)
+
+                Spacer()
+
+                Button {
+                    player.play(tracks: tracks, source: .none)
+                } label: {
+                    Label("播放全部", systemImage: "play.fill")
+                        .font(.system(size: 13, weight: .semibold))
+                        .foregroundStyle(.white)
+                        .padding(.horizontal, 18)
+                        .padding(.vertical, 9)
+                        .background(Theme.accentGradient, in: Capsule())
+                        .shadow(color: .black.opacity(0.3), radius: 6, y: 2)
+                }
+                .buttonStyle(.pressable)
+            }
+            .padding(20)
+        }
+        .clipShape(RoundedRectangle(cornerRadius: Theme.Radius.large, style: .continuous))
     }
 }
 

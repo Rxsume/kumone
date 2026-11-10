@@ -7,10 +7,6 @@ enum HomePlatform: String, CaseIterable, Identifiable {
     case netease
     case qqmusic
     case kugou
-    /// Bilibili video home (full CiliCili port, phase 1: entry point
-    /// only — the video feed lands in phase 3). No audio source: it
-    /// never enters the music resolve order.
-    case bilibili
 
     var id: String { rawValue }
 
@@ -19,19 +15,16 @@ enum HomePlatform: String, CaseIterable, Identifiable {
         case .netease: return String(localized: "网易云")
         case .qqmusic: return String(localized: "QQ音乐")
         case .kugou: return String(localized: "酷狗")
-        case .bilibili: return String(localized: "哔哩哔哩")
         }
     }
 
     /// The audio-source toggle that gates this platform's search
-    /// results and playback fallback. Nil for NetEase (always on)
-    /// and for Bilibili (video, not a music source).
+    /// results and playback fallback. Nil for NetEase (always on).
     var sourceID: AudioSourceID? {
         switch self {
         case .netease: return nil
         case .qqmusic: return .qqmusic
         case .kugou: return .kugou
-        case .bilibili: return nil
         }
     }
 }

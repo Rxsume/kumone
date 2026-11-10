@@ -1152,7 +1152,12 @@ final class PlayerService: ObservableObject {
         resumeAt: TimeInterval = 0
     ) async -> Bool {
         let enabledSources = SettingsManager.shared.enabledAudioSourceIDs
-        guard !enabledSources.isEmpty else { return false }
+        // The custom-script step does not depend on any built-in
+        // source toggle: with an enabled script (built-in or
+        // imported) the resolve chain must run even when
+        // `enabledSources` is empty.
+        let hasCustomSources = CustomAudioSourceStore.shared.hasEnabledScriptSources
+        guard !enabledSources.isEmpty || hasCustomSources else { return false }
 
         guard generation == resolveGeneration,
               !requiresActivePlayback || isPlaying

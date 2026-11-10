@@ -113,19 +113,28 @@ struct CustomAudioSourceTests {
         )
         let store = CustomAudioSourceStore(defaults: defaults)
         store.addSources([source])
-        #expect(store.sources.count == 1)
+        // The built-in ikun source is always pinned first, so the
+        // store holds two sources: builtin + the imported one.
+        #expect(store.sources.count == 2)
+        #expect(store.sources.first?.id == BuiltInAudioSources.ikunID)
+        #expect(store.sources.first(where: { $0.id == source.id })?.name == "测试音源")
 
         let reloaded = CustomAudioSourceStore(defaults: defaults)
-        #expect(reloaded.sources.count == 1)
-        #expect(reloaded.sources.first?.name == "测试音源")
-        #expect(reloaded.sources.first?.script == source.script)
+        #expect(reloaded.sources.count == 2)
+        #expect(reloaded.sources.first?.id == BuiltInAudioSources.ikunID)
+        #expect(reloaded.sources.first(where: { $0.id == source.id })?.script == source.script)
 
         reloaded.updateEnabled(id: source.id, enabled: false)
-        #expect(reloaded.sources.first?.enabled == false)
+        #expect(reloaded.sources.first(where: { $0.id == source.id })?.enabled == false)
+        #expect(reloaded.sources.first?.enabled == true)
+        // The imported source is already last, so moving it down is
+        // a no-op; the built-in source stays pinned at index 0.
         reloaded.moveSource(id: source.id, by: 1)
-        #expect(reloaded.sources.count == 1)
+        #expect(reloaded.sources.count == 2)
+        #expect(reloaded.sources.first(where: { $0.id == source.id }) != nil)
         #expect(reloaded.removeSource(id: source.id) == true)
-        #expect(reloaded.sources.isEmpty)
+        #expect(reloaded.sources.count == 1)
+        #expect(reloaded.sources.first?.id == BuiltInAudioSources.ikunID)
     }
 
     // MARK: - Runner (stub script, no network)
@@ -181,5 +190,207 @@ struct CustomAudioSourceTests {
             quality: "320k"
         )
         #expect(url == nil)
+    }
+
+    // MARK: - Built-in ikun source
+
+    @Test func builtinScriptHasEmptyKeyPlaceholder() {
+        #expect(BuiltInAudioSources.ikunScript.contains("const API_KEY = \"\""))
+        #expect(BuiltInAudioSources.ikunScript.contains("@version v26"))
+        // The request URL is built from the API_URL constant, not a
+        // literal: `const API_URL = "https://c.wwwweb.top"` plus
+        // `` `${API_URL}/music/url` `` in the fetch call.
+        #expect(BuiltInAudioSources.ikunScript.contains("const API_URL = \"https://c.wwwweb.top\""))
+        #expect(BuiltInAudioSources.ikunScript.contains("${API_URL}/music/url"))
+    }
+
+    @Test func builtinKeyInjectionReplacesPlaceholderOnly() {
+        let source = BuiltInAudioSources.ikunSource()
+        let effective = BuiltInAudioSources.effectiveScript(for: source, apiKey: "test-key-123")
+        #expect(effective.contains("const API_KEY = \"test-key-123\""))
+        #expect(!effective.contains("const API_KEY = \"\""))
+        #expect(effective != BuiltInAudioSources.ikunScript)
+    }
+
+    @Test func builtinScriptWithoutKeyIsUnchanged() {
+        let source = BuiltInAudioSources.ikunSource()
+        #expect(BuiltInAudioSources.effectiveScript(for: source, apiKey: "") == BuiltInAudioSources.ikunScript)
+        #expect(BuiltInAudioSources.effectiveScript(for: source, apiKey: nil) == BuiltInAudioSources.ikunScript)
+    }
+
+    @Test func keyInjectionSkipsNonBuiltinSources() {
+        let other = CustomAudioSource(name: "Other", kind: "script", template: "", script: "const API_KEY = \"\";")
+        #expect(BuiltInAudioSources.effectiveScript(for: other, apiKey: "test-key-123") == "const API_KEY = \"\";")
+    }
+
+    @Test func keyEscapingKeepsScriptValid() {
+        let source = BuiltInAudioSources.ikunSource()
+        let effective = BuiltInAudioSources.effectiveScript(for: source, apiKey: "a\"b\\c")
+        #expect(effective.contains("const API_KEY = \"a\\\"b\\\\c\""))
+    }
+
+    @Test @MainActor func builtinIkunSourceIsEnsuredFirst() {
+        let suite = "com.test.BuiltinIkunTests"
+        guard let defaults = UserDefaults(suiteName: suite) else {
+            Issue.record("could not create test UserDefaults suite")
+            return
+        }
+        defaults.removePersistentDomain(forName: suite)
+        defer { defaults.removePersistentDomain(forName: suite) }
+
+        let store = CustomAudioSourceStore(defaults: defaults)
+        #expect(store.sources.count == 1)
+        #expect(store.sources.first?.id == BuiltInAudioSources.ikunID)
+        #expect(store.sources.first?.name == BuiltInAudioSources.ikunName)
+        #expect(store.sources.first?.enabled == true)
+        #expect(store.sources.first?.script == BuiltInAudioSources.ikunScript)
+        #expect(store.hasEnabledScriptSources == true)
+        #expect(store.removeSource(id: BuiltInAudioSources.ikunID) == false)
+        #expect(store.sources.count == 1)
+        store.updateEnabled(id: BuiltInAudioSources.ikunID, enabled: false)
+        #expect(store.hasEnabledScriptSources == false)
+    }
+
+    @Test @MainActor func builtinIkunSkippedWhenSameNameAlreadyImported() {
+        let suite = "com.test.BuiltinIkunNameGateTests"
+        guard let defaults = UserDefaults(suiteName: suite) else {
+            Issue.record("could not create test UserDefaults suite")
+            return
+        }
+        defaults.removePersistentDomain(forName: suite)
+        defer { defaults.removePersistentDomain(forName: suite) }
+
+        let imported = CustomAudioSource(
+            name: BuiltInAudioSources.ikunName,
+            kind: "script",
+            template: "",
+            script: "const x = 1;"
+        )
+        guard let data = try? JSONEncoder().encode([imported]) else {
+            Issue.record("could not encode imported source")
+            return
+        }
+        defaults.set(data, forKey: CustomAudioSourceStore.storeKey)
+
+        let store = CustomAudioSourceStore(defaults: defaults)
+        #expect(store.sources.count == 1)
+        #expect(store.sources.first?.id != BuiltInAudioSources.ikunID)
+    }
+
+    @Test @MainActor func builtinIkunRefreshPreservesToggleAndQuality() {
+        let suite = "com.test.BuiltinIkunRefreshTests"
+        guard let defaults = UserDefaults(suiteName: suite) else {
+            Issue.record("could not create test UserDefaults suite")
+            return
+        }
+        defaults.removePersistentDomain(forName: suite)
+        defer { defaults.removePersistentDomain(forName: suite) }
+
+        let store = CustomAudioSourceStore(defaults: defaults)
+        var stale = BuiltInAudioSources.ikunSource(quality: "flac", enabled: false)
+        stale.script = "const stale = true;"
+        store.upsert(stale)
+
+        let reloaded = CustomAudioSourceStore(defaults: defaults)
+        #expect(reloaded.sources.count == 1)
+        #expect(reloaded.sources.first?.script == BuiltInAudioSources.ikunScript)
+        #expect(reloaded.sources.first?.quality == "flac")
+        #expect(reloaded.sources.first?.enabled == false)
+    }
+
+    // MARK: - Share import (.js / .txt opened into the app)
+
+    private static let sharedScript = """
+    /*!
+     * @name Shared Source
+     * @version v1
+     */
+    const {EVENT_NAMES, on} = globalThis.lx;
+    on(EVENT_NAMES.request, ({action}) => Promise.reject("no"));
+    """
+
+    private static let unnamedScript = """
+    const {EVENT_NAMES, on} = globalThis.lx;
+    on(EVENT_NAMES.request, ({action}) => Promise.reject("no"));
+    """
+
+    @MainActor
+    private func freshShareStore(suite: String) -> (CustomAudioSourceStore, UserDefaults)? {
+        guard let defaults = UserDefaults(suiteName: suite) else {
+            Issue.record("could not create test UserDefaults suite")
+            return nil
+        }
+        defaults.removePersistentDomain(forName: suite)
+        return (CustomAudioSourceStore(defaults: defaults), defaults)
+    }
+
+    @Test @MainActor func shareImportAddsLXScript() {
+        guard let (store, defaults) = freshShareStore(suite: "com.test.ShareImportTests") else { return }
+        defer { defaults.removePersistentDomain(forName: "com.test.ShareImportTests") }
+
+        #expect(store.sources.count == 1)
+        let outcome = SharedAudioSourceImport.importScript(text: Self.sharedScript, fileName: "shared", store: store)
+        #expect(outcome == .imported(name: "Shared Source"))
+        #expect(store.sources.count == 2)
+        #expect(store.sources.last?.name == "Shared Source")
+        #expect(store.sources.last?.enabled == true)
+    }
+
+    @Test @MainActor func shareImportUsesFileNameWithoutNameHeader() {
+        guard let (store, defaults) = freshShareStore(suite: "com.test.ShareImportFileNameTests") else { return }
+        defer { defaults.removePersistentDomain(forName: "com.test.ShareImportFileNameTests") }
+
+        let outcome = SharedAudioSourceImport.importScript(text: Self.unnamedScript, fileName: "my-script", store: store)
+        #expect(outcome == .imported(name: "my-script"))
+    }
+
+    @Test @MainActor func shareImportRejectsGarbage() {
+        guard let (store, defaults) = freshShareStore(suite: "com.test.ShareImportGarbageTests") else { return }
+        defer { defaults.removePersistentDomain(forName: "com.test.ShareImportGarbageTests") }
+
+        #expect(SharedAudioSourceImport.importScript(text: "hello world this is not a source", fileName: "x", store: store) == .invalid)
+        #expect(store.sources.count == 1)
+    }
+
+    @Test @MainActor func shareImportDedupsByNameAndContent() {
+        guard let (store, defaults) = freshShareStore(suite: "com.test.ShareImportDedupTests") else { return }
+        defer { defaults.removePersistentDomain(forName: "com.test.ShareImportDedupTests") }
+
+        #expect(SharedAudioSourceImport.importScript(text: Self.sharedScript, fileName: "shared", store: store) == .imported(name: "Shared Source"))
+        #expect(store.sources.count == 2)
+        #expect(SharedAudioSourceImport.importScript(text: Self.sharedScript, fileName: "shared", store: store) == .duplicate(name: "Shared Source"))
+        #expect(store.sources.count == 2)
+        // Same script text under a different file name: the parsed name
+        // differs, but the content is identical, so it still dedups.
+        #expect(SharedAudioSourceImport.importScript(text: Self.unnamedScript, fileName: "first", store: store) == .imported(name: "first"))
+        #expect(store.sources.count == 3)
+        #expect(SharedAudioSourceImport.importScript(text: Self.unnamedScript, fileName: "second", store: store) == .duplicate(name: "second"))
+        #expect(store.sources.count == 3)
+    }
+
+    @Test @MainActor func shareImportSkipsBuiltinIkun() {
+        guard let (store, defaults) = freshShareStore(suite: "com.test.ShareImportBuiltinTests") else { return }
+        defer { defaults.removePersistentDomain(forName: "com.test.ShareImportBuiltinTests") }
+
+        let outcome = SharedAudioSourceImport.importScript(text: BuiltInAudioSources.ikunScript, fileName: "ikun", store: store)
+        #expect(outcome == .duplicate(name: BuiltInAudioSources.ikunName))
+        #expect(store.sources.count == 1)
+    }
+
+    @Test @MainActor func shareImportFileURLReadsJsFileAndRejectsPy() {
+        guard let (store, defaults) = freshShareStore(suite: "com.test.ShareImportFileTests") else { return }
+        defer { defaults.removePersistentDomain(forName: "com.test.ShareImportFileTests") }
+
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try? FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let jsURL = directory.appendingPathComponent("shared.js")
+        let pyURL = directory.appendingPathComponent("shared.py")
+        try? Self.sharedScript.write(to: jsURL, atomically: true, encoding: .utf8)
+        try? Self.sharedScript.write(to: pyURL, atomically: true, encoding: .utf8)
+
+        #expect(SharedAudioSourceImport.importFile(at: jsURL, store: store) == .imported(name: "Shared Source"))
+        #expect(SharedAudioSourceImport.importFile(at: pyURL, store: store) == .invalid)
+        #expect(store.sources.count == 2)
     }
 }

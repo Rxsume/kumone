@@ -44,5 +44,51 @@
          into a generated copy of this plist by `make configure-carplay`, because the
          CarPlay audio entitlement they depend on requires per-app approval from Apple.
          See Scripts/configure-ios.sh and the CarPlay section of the README. -->
+    <!-- "Open in Golia" for audio-source scripts: .js (public.javascript)
+         and .txt (public.plain-text) files can be shared into the app
+         from the share sheet or the Files app, and IOSMainWindow
+         imports them via SharedAudioSourceImport (.onOpenURL). No
+         Share Extension, no App Groups. The exported LX type lets the
+         system tag shared scripts; .py is deliberately NOT declared
+         (no Python runtime in the app). -->
+    <key>CFBundleDocumentTypes</key>
+    <array>
+        <dict>
+            <key>CFBundleTypeName</key>
+            <string>LX 音源脚本</string>
+            <key>CFBundleTypeRole</key>
+            <string>Editor</string>
+            <key>LSHandlerRank</key>
+            <string>Alternate</string>
+            <key>LSItemContentTypes</key>
+            <array>
+                <string>com.golia.lx-audio-source</string>
+                <string>public.javascript</string>
+                <string>public.plain-text</string>
+            </array>
+        </dict>
+    </array>
+    <key>UTExportedTypeDeclarations</key>
+    <array>
+        <dict>
+            <key>UTTypeIdentifier</key>
+            <string>com.golia.lx-audio-source</string>
+            <key>UTTypeDescription</key>
+            <string>LX 音源脚本</string>
+            <key>UTTypeConformsTo</key>
+            <array>
+                <string>public.javascript</string>
+                <string>public.plain-text</string>
+            </array>
+            <key>UTTypeTagSpecification</key>
+            <dict>
+                <key>public.filename-extension</key>
+                <array>
+                    <string>js</string>
+                    <string>txt</string>
+                </array>
+            </dict>
+        </dict>
+    </array>
 </dict>
 </plist>

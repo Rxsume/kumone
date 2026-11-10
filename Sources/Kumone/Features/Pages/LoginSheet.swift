@@ -8,7 +8,6 @@ import WebKit
 enum ProviderLogin: String, CaseIterable, Identifiable {
     case qqmusic = "QQ音乐"
     case kugou = "酷狗"
-    case bilibili = "哔哩哔哩"
 
     var id: String { rawValue }
 }
@@ -48,11 +47,6 @@ struct LoginSheet: View {
     @State private var kgQRImage: PlatformImage?
     @State private var kgKey: String?
     @State private var kgPollTask: Task<Void, Never>?
-    // Bilibili QR login.
-    @State private var blPhase: Phase = .loading
-    @State private var blQRImage: PlatformImage?
-    @State private var blKey: String?
-    @State private var blPollTask: Task<Void, Never>?
 
     init(initialProvider: ProviderLogin? = nil) {
         _provider = State(initialValue: initialProvider)
@@ -75,9 +69,7 @@ struct LoginSheet: View {
                 // NetEase sign-in is Beans' web login (NetEaseWebLoginPanel).
                 // The sheet title lives inside the panel. There is no
                 // provider list here anymore: AccountHubSheet is the single
-                // account entry point and opens this sheet per provider
-                // (the Bilibili workstream adds its `.bilibili` case to
-                // `ProviderLogin` on top of this).
+                // account entry point and opens this sheet per provider.
                 NetEaseWebLoginPanel()
                     .padding(.top, 28)
             }
@@ -99,7 +91,6 @@ struct LoginSheet: View {
         }
         .onDisappear {
             kgPollTask?.cancel()
-            blPollTask?.cancel()
         }
         .onChange(of: provider) { _ in
             if let provider { startProvider(provider) }
@@ -112,7 +103,6 @@ struct LoginSheet: View {
         HStack {
             Button {
                 kgPollTask?.cancel()
-                blPollTask?.cancel()
                 provider = nil
             } label: {
                 Label("返回", systemImage: "chevron.left")
@@ -134,7 +124,6 @@ struct LoginSheet: View {
             switch item {
             case .qqmusic: qqSection
             case .kugou: kugouSection
-            case .bilibili: bilibiliSection
             }
         }
     }
@@ -144,66 +133,6 @@ struct LoginSheet: View {
         // QQ web login loads y.qq.com on appear; sync is manual.
         case .qqmusic: break
         case .kugou: startKugouLogin()
-        case .bilibili: startBilibiliLogin()
-        }
-    }
-    // MARK: - Bilibili (Beans: direct QR login, no backend)
-
-    private var bilibiliSection: some View {
-        platformQRCard(image: blQRImage, phase: blPhase, waitingText: "使用哔哩哔哩 App 扫码登录") {
-            startBilibiliLogin()
-        }
-    }
-
-    /// Beans BilibiliAPI: `loginQR` gives a login URL rendered as a QR
-    /// code here (Golia's `generateQR`, same as the NetEase flow), then
-    /// `pollQR` every 2s until confirmed/expired (86101 waiting,
-    /// 86090 scanned, 0 success, 86038 expired). On code 0 the cookie
-    /// is validated and saved by `BilibiliAuth.login` (Keychain only).
-    /// Transient network errors are tolerated.
-    private func startBilibiliLogin() {
-        blPollTask?.cancel()
-        blPhase = .loading
-        blQRImage = nil
-        blPollTask = Task {
-            do {
-                let login = try await BilibiliAPI.shared.loginQR()
-                blKey = login.key
-                blQRImage = Self.generateQR(from: login.url)
-                blPhase = .waiting
-                var consecutiveErrors = 0
-                while !Task.isCancelled {
-                    try await Task.sleep(for: .seconds(2))
-                    do {
-                        let (code, cookie) = try await BilibiliAPI.shared.pollQR(login.key)
-                        consecutiveErrors = 0
-                        switch code {
-                        case 86101:
-                            if case .waiting = blPhase {} else { blPhase = .waiting }
-                        case 86090:
-                            blPhase = .scanned("")
-                        case 0:
-                            try await BilibiliAuth.shared.login(cookie: cookie)
-                            blPhase = .success
-                            ToastCenter.shared.show(String(localized: "哔哩哔哩已登录"))
-                            dismiss()
-                            return
-                        case 86038:
-                            blPhase = .expired
-                            blKey = nil
-                            return
-                        default:
-                            break
-                        }
-                    } catch {
-                        consecutiveErrors += 1
-                        if consecutiveErrors >= 15 { throw error }
-                        continue
-                    }
-                }
-            } catch {
-                if !Task.isCancelled { blPhase = .failed(error.localizedDescription) }
-            }
         }
     }
 

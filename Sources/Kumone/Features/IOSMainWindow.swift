@@ -89,6 +89,14 @@ public struct IOSMainWindow: View {
                     if DownloadManager.shared.network.connected { await account.refreshLibrary() }
                 }
             }
+            .onOpenURL { url in
+                // Audio-source scripts (.js / .txt) shared via
+                // "Open in Golia": import into CustomAudioSources.
+                // No Share Extension, no App Groups.
+                Task { @MainActor in
+                    SharedAudioSourceImport.handleOpenedURL(url)
+                }
+            }
             .task(id: settings.showMainWindowAmbientBackground) {
                 artworkStore.setArtworkNeeded(settings.showMainWindowAmbientBackground)
             }

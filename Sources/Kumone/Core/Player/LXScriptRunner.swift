@@ -727,8 +727,15 @@ final class LXScriptRunner: @unchecked Sendable {
         albumID: String,
         quality: String
     ) -> URL? {
-        guard let script = source.script, !script.isEmpty else { return nil }
-        let runtime = runtime(for: source, script: script)
+        guard source.script?.isEmpty == false else { return nil }
+        // Built-in ikun: the stored sponsored key (if any) is
+        // substituted into the empty API_KEY placeholder before the
+        // script is evaluated; the substituted text is also the
+        // runtime cache key, so a key change busts the cache. The
+        // key is never logged. Without a key the script runs as-is
+        // and fails closed (403 → nil → the ladder continues).
+        let effectiveScript = BuiltInAudioSources.effectiveScript(for: source)
+        let runtime = runtime(for: source, script: effectiveScript)
         let payload: [String: Any] = [
             "action": "musicUrl",
             "source": songSource.rawValue,
