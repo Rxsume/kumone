@@ -15,6 +15,60 @@ enum MusicAPI {
         let code: Int
     }
 
+    // MARK: - Auth (NetEase QR login, restored from pre-PR #42)
+
+    struct QRKeyResponse: Decodable {
+        let code: Int
+        let unikey: String
+    }
+
+    static func qrKey() async throws -> String {
+        try await eapi(QRKeyResponse.self, "/login/qrcode/unikey", ["type": 3]).unikey
+    }
+
+    static func qrLoginURL(unikey: String) -> String? {
+        Upstream.webURL("/login?codekey=\(unikey)")?.absoluteString
+    }
+
+    struct QRCheckResponse: Decodable {
+        let code: Int
+        let message: String?
+        let nickname: String?
+        let avatarUrl: String?
+    }
+
+    /// Poll outcome for the QR check codes: 800 expired · 801 waiting ·
+    /// 802 scanned · 803 success. Pure mapping so the poll state machine
+    /// is unit-testable without network (`NetEaseQRLoginTests`).
+    enum QRStatus: Equatable {
+        case waiting
+        case scanned(nickname: String)
+        case expired
+        case success
+        case unknown(code: Int)
+
+        init(check: QRCheckResponse) {
+            switch check.code {
+            case 800: self = .expired
+            case 801: self = .waiting
+            case 802: self = .scanned(nickname: check.nickname ?? "")
+            case 803: self = .success
+            default: self = .unknown(code: check.code)
+            }
+        }
+    }
+
+    static func qrStatus(from check: QRCheckResponse) -> QRStatus {
+        QRStatus(check: check)
+    }
+
+    /// Codes: 800 expired · 801 waiting · 802 scanned · 803 success.
+    /// On 803 the auth cookies arrive via Set-Cookie and are absorbed by the client.
+    static func qrCheck(unikey: String) async throws -> QRCheckResponse {
+        let data = try await client.eapi("/login/qrcode/client/login", ["key": unikey, "type": 3])
+        return try JSONDecoder().decode(QRCheckResponse.self, from: data)
+    }
+
     // MARK: - Session maintenance
 
     /// An isolated client keeps a late logout response away from a newer login.
