@@ -55,8 +55,7 @@ struct SettingsView: View {
     @Environment(\.openDestination) private var openDestination
     @State private var showAccountHub = false
     @State private var showCustomSources = false
-    // Beans 主题/平台组的可展开状态（默认收起，与 Beans 一致）。
-    @State private var themeExpanded = false
+    // Beans 平台/播放组的可展开状态（默认收起，与 Beans 一致）。
     @State private var platformExpanded = false
     @State private var playbackExpanded = false
     // P3 3/3 深层外观：壁纸选择器、字体导入器、壁纸作用的外观。
@@ -132,259 +131,6 @@ struct SettingsView: View {
 
             }
 
-            // Beans 主题模式组（`ProfileView.themeSection` + 深层外观
-            // `appearanceSection`，P3 1/3 + 3/3）：可展开的主题行；
-            // 展开后是主题模式分段选择器与深层外观定制（强调色、
-            // 底栏文字、悬浮底栏几何、主页背景/壁纸、全局字体）。
-            // Beans 其余行无 Golia 等价物，不加死开关：沉浸详情界面
-            // 是 Beans 的详情页头功能、语言需要整套本地化基建、关
-            // 闭液态模式需要一个液态玻璃总闸——三者都不是 Golia 的
-            // `staticMode`，不得与之合并；全局 UI 样式是 Beans 玻璃
-            // 容器风格（Golia 的玻璃样式按系统版本固定在 compatGlass
-            // 里）；注释/主文字颜色是 Beans 的全局文字色（Golia 用
-            // 系统语义色，没有单一改写点）；问候定制在 Beans 里已是
-            // 死代码（`if false`）；隐藏用户名/排序按钮/平台列表/
-            // 刷新按钮/VIP 图标在 Golia 首页都没有对应 UI（首页没有
-            // 用户名、排序与刷新按钮，平台切换器是唯一的切换入口，
-            // 歌曲行不画 VIP 徽标）。
-            Section {
-                Button {
-                    withAnimation(.easeInOut(duration: 0.22)) {
-                        themeExpanded.toggle()
-                    }
-                } label: {
-                    HStack(spacing: 12) {
-                        Image(systemName: "paintpalette.fill")
-                            .font(.system(size: 14))
-                            .foregroundStyle(Theme.accent)
-                            .frame(width: 28)
-                        Text("主题模式")
-                        Spacer()
-                        Image(systemName: themeExpanded ? "chevron.up" : "chevron.down")
-                            .font(.system(size: 11, weight: .semibold))
-                            .foregroundStyle(.secondary)
-                    }
-                    .padding(.vertical, 6)
-                    .contentShape(Rectangle())
-                }
-                .buttonStyle(.plain)
-                if themeExpanded {
-                    Picker("主题模式", selection: $settings.appearance) {
-                        ForEach(AppAppearance.allCases) { appearance in
-                            Text(appearance.displayName).tag(appearance)
-                        }
-                    }
-                    .pickerStyle(.segmented)
-
-                    Divider()
-
-                    // 自定义强调色：写 `settings.customAccentHex`，
-                    // `Theme.accent` / `accentDeep` / `accentGradient`
-                    // 直接读这个 key，全 App 即时换色。
-                    HStack {
-                        Text("自定义强调色")
-                        Spacer()
-                        ColorPicker("", selection: Binding(
-                            get: { Color(hex: settings.customAccentHex) ?? Theme.accent },
-                            set: { settings.customAccentHex = $0.rgbHexString }
-                        ))
-                        .labelsHidden()
-                    }
-                    HStack {
-                        Button("恢复预设") {
-                            settings.customAccentHex = ""
-                        }
-                        .buttonStyle(.plain)
-                        .foregroundStyle(Theme.accent)
-                        Spacer()
-                        Text(settings.customAccentHex.isEmpty ? "使用预设主题" : "已自定义")
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                    }
-
-                    #if os(iOS)
-                    Divider()
-
-                    Toggle("底栏显示文字", isOn: $settings.tabLabelsVisible)
-                    Text("关闭后悬浮底栏只显示图标")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-
-                    Divider()
-
-                    // 悬浮底栏几何：Beans 的“低系统悬浮底栏”滑杆，
-                    // 作用于 Golia 的 GlassTabBar（它在所有 iOS 版本
-                    // 都是悬浮底栏；Beans 只在 iOS 26 以下用自己的悬
-                    // 浮底栏，所以那边加了 `#unavailable(iOS 26)` 门，
-                    // Golia 不加）。
-                    HStack {
-                        Text("悬浮底栏")
-                            .font(.headline)
-                        Spacer()
-                        Button("默认") {
-                            settings.legacyTabBarCornerRadius = 32
-                            settings.legacyTabBarWidth = 420
-                            settings.legacyTabBarOffsetX = 0
-                            settings.legacyTabBarOffsetY = 0
-                        }
-                        .buttonStyle(.plain)
-                        .foregroundStyle(Theme.accent)
-                    }
-                    appearanceSlider(
-                        title: "圆润度",
-                        valueText: "\(Int(settings.legacyTabBarCornerRadius))",
-                        value: $settings.legacyTabBarCornerRadius,
-                        range: SettingsManager.legacyTabBarCornerRadiusRange
-                    )
-                    appearanceSlider(
-                        title: "长度",
-                        valueText: "\(Int(settings.legacyTabBarWidth))",
-                        value: $settings.legacyTabBarWidth,
-                        range: SettingsManager.legacyTabBarWidthRange
-                    )
-                    appearanceSlider(
-                        title: "X 位置",
-                        valueText: signedIntText(settings.legacyTabBarOffsetX),
-                        value: $settings.legacyTabBarOffsetX,
-                        range: SettingsManager.legacyTabBarOffsetXRange
-                    )
-                    appearanceSlider(
-                        title: "Y 位置",
-                        valueText: signedIntText(settings.legacyTabBarOffsetY),
-                        value: $settings.legacyTabBarOffsetY,
-                        range: SettingsManager.legacyTabBarOffsetYRange
-                    )
-
-                    Divider()
-
-                    // 主页背景：背景模式（浅色/深色）+ 背景颜色 +
-                    // 上传壁纸 + 壁纸库 + 模糊度。壁纸只作用于首页
-                    // 之外的页面时看“同步”开关。
-                    Picker("背景模式", selection: $wallpaperAppearanceTarget) {
-                        ForEach(WallpaperAppearanceTarget.allCases) { target in
-                            Text(target.rawValue).tag(target)
-                        }
-                    }
-                    .pickerStyle(.segmented)
-                    HStack {
-                        Text("背景颜色")
-                        Spacer()
-                        ColorPicker("", selection: Binding(
-                            get: { wallpaperBackgroundColor },
-                            set: { setWallpaperBackgroundColor($0) }
-                        ))
-                        .labelsHidden()
-                    }
-                    HStack {
-                        Button {
-                            showWallpaperPicker = true
-                        } label: {
-                            HStack {
-                                Text("上传壁纸（可多张）")
-                                Spacer()
-                                Image(systemName: "plus.circle.fill")
-                                    .font(.system(size: 22))
-                                    .foregroundStyle(Theme.accent)
-                            }
-                        }
-                        .buttonStyle(.plain)
-                    }
-                    if !settings.wallpaperPaths.isEmpty {
-                        LazyVGrid(
-                            columns: Array(repeating: GridItem(.flexible(), spacing: 10), count: 3),
-                            spacing: 10
-                        ) {
-                            ForEach(settings.wallpaperPaths, id: \.self) { path in
-                                wallpaperCell(path: path)
-                            }
-                        }
-                    } else {
-                        Text("还没有壁纸，上传后会显示在这里")
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                    }
-                    HStack {
-                        if !wallpaperActiveImagePath.isEmpty {
-                            Button("清除当前背景") {
-                                clearWallpaperBackgroundImage()
-                            }
-                            .buttonStyle(.plain)
-                            .foregroundStyle(.red)
-                        }
-                        Spacer()
-                        Text(wallpaperActiveImagePath.isEmpty ? "当前：默认背景" : "当前：已应用壁纸")
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                    }
-                    Toggle("同步到搜索 / 音乐库 / 我的", isOn: $settings.backgroundSyncAll)
-                    HStack {
-                        Button("恢复默认背景") {
-                            settings.backgroundHexLight = ""
-                            settings.backgroundHexDark = ""
-                            settings.backgroundImagePathLight = ""
-                            settings.backgroundImagePathDark = ""
-                        }
-                        .buttonStyle(.plain)
-                        .foregroundStyle(Theme.accent)
-                        Spacer()
-                    }
-                    HStack {
-                        Text("主页壁纸模糊度")
-                        Spacer()
-                        Text("\(Int(settings.homeWallpaperBlur))")
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                    }
-                    Slider(value: $settings.homeWallpaperBlur, in: 0...30, step: 1)
-                        .tint(Theme.accent)
-                    #endif
-
-                    Divider()
-
-                    // 全局字体：上传 ttf/otf 安装并注册（`FontManager`），
-                    // 恢复默认清除。已安装字体会出现在歌词字体选择器
-                    // （系统字体选择器列出已注册字体）里；Golia 没有
-                    // Beans 那种全 App 字体入口（`BeansFont.appFont`），
-                    // 全 App 换字要另立项逐处接线，这里只做安装/注册。
-                    HStack {
-                        Text("全局字体")
-                        Spacer()
-                        Text(installedFontName ?? "系统默认")
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                    }
-                    HStack {
-                        Button("上传字体") {
-                            showFontImporter = true
-                        }
-                        .buttonStyle(.plain)
-                        .foregroundStyle(Theme.accent)
-                        Button("恢复默认字体") {
-                            FontManager.clear()
-                            installedFontName = nil
-                            ToastCenter.shared.show("已恢复系统默认字体")
-                        }
-                        .buttonStyle(.plain)
-                        .foregroundStyle(Theme.accent)
-                        Spacer()
-                    }
-                }
-            }
-            .fileImporter(
-                isPresented: $showFontImporter,
-                allowedContentTypes: [.font]
-            ) { result in
-                importFontFile(result)
-            }
-            #if os(iOS)
-            .sheet(isPresented: $showWallpaperPicker) {
-                WallpaperPhotoPicker { data in
-                    if let path = WallpaperStore.addWallpaper(data: data) {
-                        settings.wallpaperPaths.append(path)
-                    }
-                }
-            }
-            #endif
 
             // Beans 平台显示组（`ProfileView.platformSection`）：可展开
             // 的平台行；展开后是各平台显示/隐藏开关，只控制首页切换
@@ -532,6 +278,208 @@ struct SettingsView: View {
             }
 
             Section("外观") {
+                // 主题模式行已拆除（Beans 风格的可展开行），内容平铺于此；
+                // 其余 Beans 行无 Golia 等价物，不加死开关。
+                Picker("主题模式", selection: $settings.appearance) {
+                    ForEach(AppAppearance.allCases) { appearance in
+                        Text(appearance.displayName).tag(appearance)
+                    }
+                }
+                .pickerStyle(.segmented)
+
+                Divider()
+
+                // 自定义强调色：写 `settings.customAccentHex`，
+                // `Theme.accent` / `accentDeep` / `accentGradient`
+                // 直接读这个 key，全 App 即时换色。
+                HStack {
+                    Text("自定义强调色")
+                    Spacer()
+                    ColorPicker("", selection: Binding(
+                        get: { Color(hex: settings.customAccentHex) ?? Theme.accent },
+                        set: { settings.customAccentHex = $0.rgbHexString }
+                    ))
+                    .labelsHidden()
+                }
+                HStack {
+                    Button("恢复预设") {
+                        settings.customAccentHex = ""
+                    }
+                    .buttonStyle(.plain)
+                    .foregroundStyle(Theme.accent)
+                    Spacer()
+                    Text(settings.customAccentHex.isEmpty ? "使用预设主题" : "已自定义")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+
+                #if os(iOS)
+                Divider()
+
+                Toggle("底栏显示文字", isOn: $settings.tabLabelsVisible)
+                Text("关闭后悬浮底栏只显示图标")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+
+                Divider()
+
+                // 悬浮底栏几何：Beans 的“低系统悬浮底栏”滑杆，
+                // 作用于 Golia 的 GlassTabBar（它在所有 iOS 版本
+                // 都是悬浮底栏；Beans 只在 iOS 26 以下用自己的悬
+                // 浮底栏，所以那边加了 `#unavailable(iOS 26)` 门，
+                // Golia 不加）。
+                HStack {
+                    Text("悬浮底栏")
+                        .font(.headline)
+                    Spacer()
+                    Button("默认") {
+                        settings.legacyTabBarCornerRadius = 32
+                        settings.legacyTabBarWidth = 420
+                        settings.legacyTabBarOffsetX = 0
+                        settings.legacyTabBarOffsetY = 0
+                    }
+                    .buttonStyle(.plain)
+                    .foregroundStyle(Theme.accent)
+                }
+                appearanceSlider(
+                    title: "圆润度",
+                    valueText: "\(Int(settings.legacyTabBarCornerRadius))",
+                    value: $settings.legacyTabBarCornerRadius,
+                    range: SettingsManager.legacyTabBarCornerRadiusRange
+                )
+                appearanceSlider(
+                    title: "长度",
+                    valueText: "\(Int(settings.legacyTabBarWidth))",
+                    value: $settings.legacyTabBarWidth,
+                    range: SettingsManager.legacyTabBarWidthRange
+                )
+                appearanceSlider(
+                    title: "X 位置",
+                    valueText: signedIntText(settings.legacyTabBarOffsetX),
+                    value: $settings.legacyTabBarOffsetX,
+                    range: SettingsManager.legacyTabBarOffsetXRange
+                )
+                appearanceSlider(
+                    title: "Y 位置",
+                    valueText: signedIntText(settings.legacyTabBarOffsetY),
+                    value: $settings.legacyTabBarOffsetY,
+                    range: SettingsManager.legacyTabBarOffsetYRange
+                )
+
+                Divider()
+
+                // 主页背景：背景模式（浅色/深色）+ 背景颜色 +
+                // 上传壁纸 + 壁纸库 + 模糊度。壁纸只作用于首页
+                // 之外的页面时看“同步”开关。
+                Picker("背景模式", selection: $wallpaperAppearanceTarget) {
+                    ForEach(WallpaperAppearanceTarget.allCases) { target in
+                        Text(target.rawValue).tag(target)
+                    }
+                }
+                .pickerStyle(.segmented)
+                HStack {
+                    Text("背景颜色")
+                    Spacer()
+                    ColorPicker("", selection: Binding(
+                        get: { wallpaperBackgroundColor },
+                        set: { setWallpaperBackgroundColor($0) }
+                    ))
+                    .labelsHidden()
+                }
+                HStack {
+                    Button {
+                        showWallpaperPicker = true
+                    } label: {
+                        HStack {
+                            Text("上传壁纸（可多张）")
+                            Spacer()
+                            Image(systemName: "plus.circle.fill")
+                                .font(.system(size: 22))
+                                .foregroundStyle(Theme.accent)
+                        }
+                    }
+                    .buttonStyle(.plain)
+                }
+                if !settings.wallpaperPaths.isEmpty {
+                    LazyVGrid(
+                        columns: Array(repeating: GridItem(.flexible(), spacing: 10), count: 3),
+                        spacing: 10
+                    ) {
+                        ForEach(settings.wallpaperPaths, id: \.self) { path in
+                            wallpaperCell(path: path)
+                        }
+                    }
+                } else {
+                    Text("还没有壁纸，上传后会显示在这里")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+                HStack {
+                    if !wallpaperActiveImagePath.isEmpty {
+                        Button("清除当前背景") {
+                            clearWallpaperBackgroundImage()
+                        }
+                        .buttonStyle(.plain)
+                        .foregroundStyle(.red)
+                    }
+                    Spacer()
+                    Text(wallpaperActiveImagePath.isEmpty ? "当前：默认背景" : "当前：已应用壁纸")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+                Toggle("同步到搜索 / 音乐库 / 我的", isOn: $settings.backgroundSyncAll)
+                HStack {
+                    Button("恢复默认背景") {
+                        settings.backgroundHexLight = ""
+                        settings.backgroundHexDark = ""
+                        settings.backgroundImagePathLight = ""
+                        settings.backgroundImagePathDark = ""
+                    }
+                    .buttonStyle(.plain)
+                    .foregroundStyle(Theme.accent)
+                    Spacer()
+                }
+                HStack {
+                    Text("主页壁纸模糊度")
+                    Spacer()
+                    Text("\(Int(settings.homeWallpaperBlur))")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+                Slider(value: $settings.homeWallpaperBlur, in: 0...30, step: 1)
+                    .tint(Theme.accent)
+                #endif
+
+                Divider()
+
+                // 全局字体：上传 ttf/otf 安装并注册（`FontManager`），
+                // 恢复默认清除。已安装字体会出现在歌词字体选择器
+                // （系统字体选择器列出已注册字体）里；Golia 没有
+                // Beans 那种全 App 字体入口（`BeansFont.appFont`），
+                // 全 App 换字要另立项逐处接线，这里只做安装/注册。
+                HStack {
+                    Text("全局字体")
+                    Spacer()
+                    Text(installedFontName ?? "系统默认")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+                HStack {
+                    Button("上传字体") {
+                        showFontImporter = true
+                    }
+                    .buttonStyle(.plain)
+                    .foregroundStyle(Theme.accent)
+                    Button("恢复默认字体") {
+                        FontManager.clear()
+                        installedFontName = nil
+                        ToastCenter.shared.show("已恢复系统默认字体")
+                    }
+                    .buttonStyle(.plain)
+                    .foregroundStyle(Theme.accent)
+                    Spacer()
+                }
+
                 #if os(macOS)
                 // macOS only renders two now-playing layouts — 黑胶 and the
                 // regular page; the iOS 沉浸/简洁 options all fall back to the
@@ -566,54 +514,6 @@ struct SettingsView: View {
                 Toggle("点击封面打开专辑", isOn: $settings.openAlbumOnArtworkClick)
                 Toggle("显示歌词翻译", isOn: $settings.showLyricsTranslation)
                 Toggle("逐字歌词（卡拉OK）", isOn: $settings.verbatimLyrics)
-                // Folia 歌词过滤 (lyricLineRules + staff-credits policy):
-                // per-line rules live on their own page; the staff policy
-                // lives here.
-                NavigationLink(value: SettingsPage.lyricFilter) {
-                    Label("歌词过滤", systemImage: "line.3.horizontal.decrease.circle")
-                }
-                Text("按规则删掉指定歌词行，并处理开头的制作人员信息")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                Picker("制作人员信息", selection: $settings.lyricStaffPolicy) {
-                    ForEach(LyricStaffPolicy.allCases) { policy in
-                        Text(policy.displayName).tag(policy)
-                    }
-                }
-                Text("歌词开头的作词、作曲等署名行：保留、智能处理或整块隐藏")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                if settings.lyricStaffPolicy != .keep {
-                    HStack {
-                        Text("每行最少停留")
-                        Spacer()
-                        Text("\(settings.lyricStaffMinDwellSeconds, specifier: "%.1f")秒")
-                            .foregroundStyle(.secondary)
-                        Stepper("", value: $settings.lyricStaffMinDwellSeconds, in: 0.6...4, step: 0.1)
-                            .labelsHidden()
-                    }
-                    Text("智能模式按这个时间算前奏放不放得下整块署名")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                    Picker("吸收相邻行", selection: $settings.lyricStaffAbsorbMode) {
-                        ForEach(LyricStaffAbsorbMode.allCases) { mode in
-                            Text(mode.displayName).tag(mode)
-                        }
-                    }
-                    Text("把署名块前后耗时过短的行并进块里一起处理")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                    TextField("自定义识别正则（留空用内置词表）", text: $settings.lyricStaffPattern)
-                        #if os(iOS)
-                        .textInputAutocapitalization(.never)
-                        #endif
-                        .autocorrectionDisabled()
-                    if let error = LyricStaffCredits.patternError(settings.lyricStaffPattern) {
-                        Text(error)
-                            .font(.caption)
-                            .foregroundStyle(.red)
-                    }
-                }
                 Picker("日文歌词读音", selection: $settings.lyricsAnnotation) {
                     ForEach(LyricsAnnotation.allCases) { annotation in
                         Text(annotation.displayName).tag(annotation)
@@ -654,11 +554,77 @@ struct SettingsView: View {
                     .font(.caption)
                     .foregroundStyle(.secondary)
                 #endif
+            }
+            .fileImporter(
+                isPresented: $showFontImporter,
+                allowedContentTypes: [.font]
+            ) { result in
+                importFontFile(result)
+            }
+            #if os(iOS)
+            .sheet(isPresented: $showWallpaperPicker) {
+                WallpaperPhotoPicker { data in
+                    if let path = WallpaperStore.addWallpaper(data: data) {
+                        settings.wallpaperPaths.append(path)
+                    }
+                }
+            }
+            #endif
+
+            Section("Folia") {
                 Toggle("Folia 功能", isOn: $settings.foliaEnabled)
                 Text("关闭后恢复到 Folia 功能加入前的行为；已保存的设置不会丢失，重新打开即可恢复")
                     .font(.caption)
                     .foregroundStyle(.secondary)
                 Group {
+                    // Folia 歌词过滤 (lyricLineRules + staff-credits policy):
+                    // per-line rules live on their own page; the staff policy
+                    // lives here.
+                    NavigationLink(value: SettingsPage.lyricFilter) {
+                        Label("歌词过滤", systemImage: "line.3.horizontal.decrease.circle")
+                    }
+                    Text("按规则删掉指定歌词行，并处理开头的制作人员信息")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                    Picker("制作人员信息", selection: $settings.lyricStaffPolicy) {
+                        ForEach(LyricStaffPolicy.allCases) { policy in
+                            Text(policy.displayName).tag(policy)
+                        }
+                    }
+                    Text("歌词开头的作词、作曲等署名行：保留、智能处理或整块隐藏")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                    if settings.lyricStaffPolicy != .keep {
+                        HStack {
+                            Text("每行最少停留")
+                            Spacer()
+                            Text("\(settings.lyricStaffMinDwellSeconds, specifier: "%.1f")秒")
+                                .foregroundStyle(.secondary)
+                            Stepper("", value: $settings.lyricStaffMinDwellSeconds, in: 0.6...4, step: 0.1)
+                                .labelsHidden()
+                        }
+                        Text("智能模式按这个时间算前奏放不放得下整块署名")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                        Picker("吸收相邻行", selection: $settings.lyricStaffAbsorbMode) {
+                            ForEach(LyricStaffAbsorbMode.allCases) { mode in
+                                Text(mode.displayName).tag(mode)
+                            }
+                        }
+                        Text("把署名块前后耗时过短的行并进块里一起处理")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                        TextField("自定义识别正则（留空用内置词表）", text: $settings.lyricStaffPattern)
+                            #if os(iOS)
+                            .textInputAutocapitalization(.never)
+                            #endif
+                            .autocorrectionDisabled()
+                        if let error = LyricStaffCredits.patternError(settings.lyricStaffPattern) {
+                            Text(error)
+                                .font(.caption)
+                                .foregroundStyle(.red)
+                        }
+                    }
                     Picker("歌词动画样式", selection: $settings.lyricAnimationStyle) {
                         ForEach(LyricAnimationStyle.allCases) { style in
                             Text(style.displayName).tag(style)
@@ -757,68 +723,64 @@ struct SettingsView: View {
                         .foregroundStyle(.secondary)
                     #endif
                 }.disabled(!settings.foliaEnabled)
-            }
-
-            Section("播放页") {
-                Toggle("隐藏进度条", isOn: $settings.hidePlayerProgressBar)
-                Text("iOS 可用")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                Toggle("自动隐藏播放控件", isOn: $settings.autoHidePlayerChrome)
-                Text("3 秒无操作后隐藏进度条、播放按钮和顶部按钮，点一下屏幕即可恢复")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                // D8: the back button is only gated by this setting on
-                // iOS; the macOS page always shows its own collapse button.
-                #if os(iOS)
-                Toggle("始终显示返回按钮", isOn: $settings.alwaysShowPlayerBackButton)
-                Text("iOS 可用")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                #endif
-                Toggle("始终显示切歌按钮", isOn: $settings.alwaysShowTrackSwitchButtons)
-                Text("只在 FM 模式下显示切歌按钮")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                Toggle("浮动歌曲卡片", isOn: $settings.stageTrackCardEnabled)
-                Text("iOS 可用")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                Toggle("过渡动画-屏幕圆环", isOn: $settings.transitionAnimationRing)
-                // P6: 旧文案“需先打开「切歌淡入淡出」”指向的过渡模式
-                // 选择器（AutoMixSettingsSection 的“过渡模式”）已不在
-                // 设置页里；iOS 上 `PlayerServiceIOS.transitionInProgress`
-                // 在 PR #36 单引擎回退后恒为 false，圆环目前只在 macOS
-                // 的 AutoMix 切歌过渡进行时出现。
-                Text("只在切歌过渡进行时短暂出现；iOS 单引擎播放时不产生过渡")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                Toggle("过渡动画-卡片描边", isOn: $settings.transitionAnimationCard)
-                Text("只在切歌过渡进行时短暂出现；iOS 单引擎播放时不产生过渡")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-            }
-            .disabled(!settings.foliaEnabled)
-
-            Section("播放器控制槽位") {
-                ForEach(PlayerControlSlot.allCases) { slot in
-                    Toggle(slot.displayName, isOn: Binding(
-                        get: { settings.playerControlSlots.contains(slot.rawValue) },
-                        set: { isOn in
-                            var slots = Set(settings.playerControlSlots)
-                            if isOn {
-                                slots.insert(slot.rawValue)
-                            } else {
-                                slots.remove(slot.rawValue)
+                Group {
+                    Toggle("隐藏进度条", isOn: $settings.hidePlayerProgressBar)
+                    Text("iOS 可用")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                    Toggle("自动隐藏播放控件", isOn: $settings.autoHidePlayerChrome)
+                    Text("3 秒无操作后隐藏进度条、播放按钮和顶部按钮，点一下屏幕即可恢复")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                    // D8: the back button is only gated by this setting on
+                    // iOS; the macOS page always shows its own collapse button.
+                    #if os(iOS)
+                    Toggle("始终显示返回按钮", isOn: $settings.alwaysShowPlayerBackButton)
+                    Text("iOS 可用")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                    #endif
+                    Toggle("始终显示切歌按钮", isOn: $settings.alwaysShowTrackSwitchButtons)
+                    Text("只在 FM 模式下显示切歌按钮")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                    Toggle("浮动歌曲卡片", isOn: $settings.stageTrackCardEnabled)
+                    Text("iOS 可用")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                    Toggle("过渡动画-屏幕圆环", isOn: $settings.transitionAnimationRing)
+                    // P6: 旧文案“需先打开「切歌淡入淡出」”指向的过渡模式
+                    // 选择器（AutoMixSettingsSection 的“过渡模式”）已不在
+                    // 设置页里；iOS 上 `PlayerServiceIOS.transitionInProgress`
+                    // 在 PR #36 单引擎回退后恒为 false，圆环目前只在 macOS
+                    // 的 AutoMix 切歌过渡进行时出现。
+                    Text("只在切歌过渡进行时短暂出现；iOS 单引擎播放时不产生过渡")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                    Toggle("过渡动画-卡片描边", isOn: $settings.transitionAnimationCard)
+                    Text("只在切歌过渡进行时短暂出现；iOS 单引擎播放时不产生过渡")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }.disabled(!settings.foliaEnabled)
+                Group {
+                    ForEach(PlayerControlSlot.allCases) { slot in
+                        Toggle(slot.displayName, isOn: Binding(
+                            get: { settings.playerControlSlots.contains(slot.rawValue) },
+                            set: { isOn in
+                                var slots = Set(settings.playerControlSlots)
+                                if isOn {
+                                    slots.insert(slot.rawValue)
+                                } else {
+                                    slots.remove(slot.rawValue)
+                                }
+                                settings.playerControlSlots = PlayerControlSlot.allCases
+                                    .map(\.rawValue)
+                                    .filter { slots.contains($0) }
                             }
-                            settings.playerControlSlots = PlayerControlSlot.allCases
-                                .map(\.rawValue)
-                                .filter { slots.contains($0) }
-                        }
-                    ))
-                }
+                        ))
+                    }
+                }.disabled(!settings.foliaEnabled)
             }
-            .disabled(!settings.foliaEnabled)
 
             Section("存储") {
                 NavigationLink(value: SettingsPage.storage) {
