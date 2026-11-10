@@ -13,7 +13,9 @@ import Security
 /// 2. **QR scan** (`fetchQRCode` / `poll`): `ptqrshow` -> `ptqrlogin`
 ///    polling -> `check_sig` chain -> `graph.qq.com` OAuth authorize
 ///    -> `musicu.fcg QQConnectLogin` exchanging the code for a
-///    `musickey`. Kept for parity with Beans; not the primary path.
+///    `musickey`. Exposed in `LoginSheet` next to web login and
+///    Cookie import; still not the primary path (Beans itself never
+///    wired it into its login sheet).
 ///
 /// Storage differs from Beans on purpose: Beans kept the cookie dict in
 /// `UserDefaults`. Here credentials live
@@ -335,6 +337,44 @@ final class QQMusicAuth: ObservableObject {
         case error(String)
     }
 
+    /// One `ptqrlogin` poll's next step, derived purely from the
+    /// parsed response code. Kept separate from `poll()` so the
+    /// mapping is unit-testable without the network:
+    /// - `"0"` + check_sig URL -> `.authorize` (caller runs
+    ///   `completeOAuth`); `"0"` without a URL is a login failure.
+    /// - `"65"` / `"68"` -> `.expired` (code expired / invalid).
+    /// - `"67"` -> `.scanned` (scanned, awaiting phone confirmation).
+    /// - `"66"` and anything else -> `.waiting` (Beans parity: an
+    ///   unknown code keeps polling until the server expires the
+    ///   code, instead of failing the login outright).
+    enum PollOutcome: Equatable {
+        case waiting
+        case scanned
+        case expired
+        case authorize(url: String, nickname: String)
+        case error(String)
+    }
+
+    nonisolated static func pollOutcome(
+        for parsed: (code: String, url: String?, nickname: String)
+    ) -> PollOutcome {
+        switch parsed.code {
+        case "0":
+            guard let url = parsed.url else {
+                return .error("登录成功但凭证获取失败")
+            }
+            return .authorize(url: url, nickname: parsed.nickname)
+        case "65", "68":
+            return .expired
+        case "67":
+            return .scanned
+        case "66":
+            return .waiting
+        default:
+            return .waiting
+        }
+    }
+
     /// Fetches the QR code image (PNG) and saves `qrsig` for polling.
     /// Secondary path; webview cookie import is primary.
     func fetchQRCode() async throws -> Data {
@@ -355,6 +395,14 @@ final class QQMusicAuth: ObservableObject {
         request.setValue(Self.ua, forHTTPHeaderField: "User-Agent")
         request.setValue("https://xui.ptlogin2.qq.com/", forHTTPHeaderField: "Referer")
         let (data, response) = try await session.data(for: request)
+        guard let http = response as? HTTPURLResponse, http.statusCode == 200 else {
+            throw QQMusicError.loginFailed("获取 QQ 二维码失败，请检查网络后重试")
+        }
+        // Without this, an error page (HTML) would be handed to the UI
+        // as a QR image and show as a broken white square.
+        guard data.starts(with: [0x89, 0x50, 0x4E, 0x47]) else {
+            throw QQMusicError.loginFailed("获取 QQ 二维码失败，请检查网络后重试")
+        }
         collectCookies(from: response)
         guard let qr = cookies["qrsig"], !qr.isEmpty else {
             throw QQMusicError.loginFailed("获取 QQ 二维码失败，请检查网络后重试")
@@ -396,15 +444,14 @@ final class QQMusicAuth: ObservableObject {
               let parsed = Self.parsePTUI(text) else {
             return .error("QQ 登录接口异常，请重试")
         }
-        switch parsed.code {
-        case "0":
-            guard let url = parsed.url else { return .error("登录成功但凭证获取失败") }
+        switch Self.pollOutcome(for: parsed) {
+        case .authorize(let url, let scannedNickname):
             do {
                 try await completeOAuth(redirectURL: url)
             } catch {
                 return .error(error.localizedDescription)
             }
-            let resolvedNickname = parsed.nickname
+            let resolvedNickname = scannedNickname
             nickname = resolvedNickname
             isLoggedIn = true
             Self.keychainSaveCookies(cookies)
@@ -412,14 +459,14 @@ final class QQMusicAuth: ObservableObject {
             Task { await self.fetchVIPStatus() }
             Task { await self.fetchProfile() }
             return .success(resolvedNickname)
-        case "65", "68":
+        case .expired:
             return .expired
-        case "67":
+        case .scanned:
             return .scanned
-        case "66":
+        case .waiting:
             return .waiting
-        default:
-            return .waiting
+        case .error(let message):
+            return .error(message)
         }
     }
 
@@ -734,8 +781,9 @@ final class QQMusicAuth: ObservableObject {
 
     /// Parses a `ptuiCB('66','','0','','')` JSONP callback. Compatible
     /// with both historical shapes: `code,url,'0',msg,nick` and
-    /// `code,'0',url,msg,nick`.
-    private static func parsePTUI(_ text: String) -> (code: String, url: String?, nickname: String)? {
+    /// `code,'0',url,msg,nick`. Internal (not private) so the QR scan
+    /// tests can feed it fixture callbacks; pure, hence `nonisolated`.
+    nonisolated static func parsePTUI(_ text: String) -> (code: String, url: String?, nickname: String)? {
         guard let open = text.firstIndex(of: "("), let close = text.lastIndex(of: ")") else { return nil }
         let inner = text[text.index(after: open)..<close]
         let parts = inner.split(separator: ",", omittingEmptySubsequences: false).map {
