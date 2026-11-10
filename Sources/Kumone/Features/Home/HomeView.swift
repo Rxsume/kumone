@@ -447,25 +447,48 @@ struct HomeView: View {
         }
     }
 
-    /// QQ home feed, in order: 每日推荐 / 推荐 / 推荐歌单 / 热门歌曲 /
-    /// 排行榜 / 热门歌手. Kugou, in order: 私人漫游 card / 每日推荐 /
-    /// 推荐歌单 / 排行榜. Song rows play through the normal queue
+    /// QQ home feed, Beans 图3 order: 每日推荐大卡 / 排行榜 / 热门歌手 /
+    /// 推荐歌单 / 推荐 / 热门歌曲. Kugou keeps its own order (私人漫游 card /
+    /// 每日推荐 / 推荐歌单 / 排行榜). Song rows play through the normal queue
     /// (PR #29 ikun fallback); playlist and chart cards play their
     /// songs directly, as before — there is no platform playlist/chart
     /// detail page. A section whose fetch failed is hidden, never
     /// faked.
     private var platformSections: some View {
         Group {
-            if model.currentPlatform == .kugou {
-                kugouFeatureCards
+            if model.currentPlatform == .qqmusic {
+                qqHomeSections
+            } else {
+                kugouHomeSections
             }
+        }
+    }
 
+    /// QQ home in Beans 图3 order: the daily hero card first, then
+    /// horizontal chart cards, then circular artists. The remaining
+    /// sections (推荐歌单 / 推荐 / 热门歌曲) keep their data and layout,
+    /// just below — only the order changed, no fetch logic.
+    private var qqHomeSections: some View {
+        Group {
             if !model.platformDailySongs.isEmpty {
-                platformSongListSection(title: "每日推荐", tracks: model.platformDailySongs)
+                qqDailyHeroCard
+                    .padding(.horizontal, Theme.Layout.contentInset)
             }
 
-            if model.currentPlatform == .qqmusic, !model.platformRecommendSongs.isEmpty {
-                platformSongListSection(title: "推荐", tracks: model.platformRecommendSongs)
+            if !model.platformToplists.isEmpty {
+                Shelf(title: "排行榜", seeAll: nil, rowHeight: Theme.Layout.coverShelfHeight) {
+                    ForEach(model.platformToplists) { toplist in
+                        platformToplistCard(toplist)
+                    }
+                }
+            }
+
+            if !model.platformHotArtists.isEmpty {
+                Shelf(title: "热门歌手", rowHeight: Theme.Layout.artistShelfHeight) {
+                    ForEach(model.platformHotArtists) { artist in
+                        platformArtistCard(artist)
+                    }
+                }
             }
 
             if !model.platformPlaylists.isEmpty {
@@ -477,22 +500,81 @@ struct HomeView: View {
                 }
             }
 
-            if model.currentPlatform == .qqmusic, !model.platformHotSongs.isEmpty {
+            if !model.platformRecommendSongs.isEmpty {
+                platformSongListSection(title: "推荐", tracks: model.platformRecommendSongs)
+            }
+
+            if !model.platformHotSongs.isEmpty {
                 platformSongListSection(title: "热门歌曲", tracks: model.platformHotSongs)
+            }
+        }
+    }
+
+    /// QQ 每日推荐大封面卡（Beans 图3）：第一首歌的封面做背景，
+    /// 点进每日推荐列表（PlatformDailySongsView，复用 TrackListView）。
+    private var qqDailyHeroCard: some View {
+        NavigationLink {
+            PlatformDailySongsView(tracks: model.platformDailySongs)
+        } label: {
+            ZStack(alignment: .bottomLeading) {
+                CachedAsyncImage(url: model.platformDailySongs.first?.album.picUrl?.resizedImageURL(1024))
+                    .frame(maxWidth: .infinity)
+                    .frame(height: 190)
+                    .clipped()
+                LinearGradient(colors: [.black.opacity(0.05), .black.opacity(0.68)],
+                               startPoint: .top, endPoint: .bottom)
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("每日推荐")
+                        .font(.system(size: 22, weight: .bold))
+                        .foregroundStyle(.white)
+                    Text("\(model.platformDailySongs.count) 首 · 每天 6:00 更新")
+                        .font(.system(size: 12))
+                        .foregroundStyle(.white.opacity(0.8))
+                }
+                .padding(16)
+                .shadow(color: .black.opacity(0.4), radius: 2, y: 1)
+                Image(systemName: "calendar")
+                    .font(.system(size: 18, weight: .medium))
+                    .foregroundStyle(.white)
+                    .shadow(color: .black.opacity(0.4), radius: 2, y: 1)
+                    .padding(16)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+            }
+            .frame(maxWidth: .infinity)
+            .frame(height: 190)
+            .clipShape(RoundedRectangle(cornerRadius: Theme.Radius.large, style: .continuous))
+            .overlay(
+                RoundedRectangle(cornerRadius: Theme.Radius.large, style: .continuous)
+                    .strokeBorder(.white.opacity(0.12), lineWidth: 0.5)
+            )
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+    }
+
+    /// Kugou home feed, unchanged order: 私人漫游 card / 每日推荐 /
+    /// 推荐歌单 / 排行榜.
+    private var kugouHomeSections: some View {
+        Group {
+            kugouFeatureCards
+
+            if !model.platformDailySongs.isEmpty {
+                platformSongListSection(title: "每日推荐", tracks: model.platformDailySongs)
+            }
+
+            if !model.platformPlaylists.isEmpty {
+                Shelf(title: "推荐歌单", rowHeight: Theme.Layout.coverShelfHeight) {
+                    ForEach(Array(model.platformPlaylists.prefix(12).enumerated()), id: \.element.id) { index, playlist in
+                        platformPlaylistCard(playlist)
+                            .staggeredAppearance(index: index, id: "home-platform-rec-\(playlist.id)")
+                    }
+                }
             }
 
             if !model.platformToplists.isEmpty {
                 Shelf(title: "排行榜", seeAll: nil, rowHeight: Theme.Layout.coverShelfHeight) {
                     ForEach(model.platformToplists) { toplist in
                         platformToplistCard(toplist)
-                    }
-                }
-            }
-
-            if model.currentPlatform == .qqmusic, !model.platformHotArtists.isEmpty {
-                Shelf(title: "热门歌手", rowHeight: Theme.Layout.artistShelfHeight) {
-                    ForEach(model.platformHotArtists) { artist in
-                        platformArtistCard(artist)
                     }
                 }
             }
@@ -588,7 +670,7 @@ struct HomeView: View {
         .buttonStyle(.plain)
     }
 
-    // MARK: - Feature cards
+// MARK: - Feature cards
 
     private var featureCards: some View {
         ScrollView(.horizontal, showsIndicators: false) {
@@ -830,6 +912,69 @@ struct HomeView: View {
             player.play(tracks: tracks, source: .playlist(id),
                         context: .playlist(id: id, name: detail.playlist.name))
         }
+    }
+}
+
+    /// QQ 每日推荐列表：从首页每日推荐大卡点进来。歌已在首页取好，
+/// 这里只展示（TrackListView）+ 播放全部，不再请求一次。
+/// Header mirrors DailySongsView (NetEase), with the QQ subtitle.
+struct PlatformDailySongsView: View {
+    let tracks: [Track]
+
+    private let player = PlayerService.shared
+
+    var body: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 20) {
+                header
+                    .padding(.horizontal, Theme.Layout.contentInset)
+                    .padding(.top, 16)
+                TrackListView(tracks: tracks, style: .compact)
+                    .padding(.horizontal, Theme.Layout.contentInset - 10)
+                PlayerClearanceSpacer()
+            }
+        }
+        .navigationTitle("每日推荐")
+    }
+
+    private var header: some View {
+        ZStack(alignment: .bottomLeading) {
+            CachedAsyncImage(url: tracks.first?.album.picUrl?.resizedImageURL(1024))
+                .frame(height: 220)
+                .frame(maxWidth: .infinity)
+                .clipped()
+            LinearGradient(colors: [.black.opacity(0.15), .black.opacity(0.72)],
+                           startPoint: .top, endPoint: .bottom)
+
+            HStack(alignment: .bottom) {
+                VStack(alignment: .leading, spacing: 6) {
+                    Text("每日推荐")
+                        .font(.system(size: 30, weight: .bold))
+                    Text("\(tracks.count) 首 · 每天 6:00 更新")
+                        .font(.system(size: 12))
+                        .opacity(0.7)
+                }
+                .foregroundStyle(.white)
+                .shadow(color: .black.opacity(0.4), radius: 3, y: 1)
+
+                Spacer()
+
+                Button {
+                    player.play(tracks: tracks, source: .none)
+                } label: {
+                    Label("播放全部", systemImage: "play.fill")
+                        .font(.system(size: 13, weight: .semibold))
+                        .foregroundStyle(.white)
+                        .padding(.horizontal, 18)
+                        .padding(.vertical, 9)
+                        .background(Theme.accentGradient, in: Capsule())
+                        .shadow(color: .black.opacity(0.3), radius: 6, y: 2)
+                }
+                .buttonStyle(.pressable)
+            }
+            .padding(20)
+        }
+        .clipShape(RoundedRectangle(cornerRadius: Theme.Radius.large, style: .continuous))
     }
 }
 
