@@ -507,6 +507,8 @@ final class SettingsManager: ObservableObject {
         static let mixWithOtherAudio = "settings.mixWithOtherAudio"
         static let autoResumeLastPlayback = "settings.autoResumeLastPlayback"
         static let showThirdPartySourceNotice = "settings.showThirdPartySourceNotice"
+        // Folia auto-hide (restored): 3s idle fade of the player chrome.
+        static let autoHidePlayerChrome = "settings.autoHidePlayerChrome"
         // Beans `appearanceSection` (P3 3/3): deep appearance
         // customization. All `settings.*` (Golia namespace, never
         // `beans.*`); the file I/O lives in `WallpaperStore` /
@@ -1232,6 +1234,18 @@ final class SettingsManager: ObservableObject {
     /// source plays a VIP song. Not Folia-gated.
     @Published var showThirdPartySourceNotice: Bool {
         didSet { UserDefaults.standard.set(showThirdPartySourceNotice, forKey: Keys.showThirdPartySourceNotice) }
+    }
+
+    /// Folia auto-hide (restored): hide the now-playing page chrome
+    /// (scrubber, transport and top buttons) after 3 seconds without
+    /// interaction; tap the page to bring it back. Default off.
+    @Published var autoHidePlayerChrome: Bool {
+        didSet { UserDefaults.standard.set(autoHidePlayerChrome, forKey: Keys.autoHidePlayerChrome) }
+    }
+
+    /// Auto-hide with the master switch off: the chrome never hides.
+    var effectiveAutoHidePlayerChrome: Bool {
+        foliaEnabled ? autoHidePlayerChrome : false
     }
 
     // MARK: - Beans `appearanceSection` (P3 3/3)
@@ -2969,6 +2983,7 @@ final class SettingsManager: ObservableObject {
         // Beans settings port (P3b/P3c) keys — mirrors the init() assignments.
         mixWithOtherAudio = defaults.object(forKey: Keys.mixWithOtherAudio) as? Bool ?? false
         autoResumeLastPlayback = defaults.object(forKey: Keys.autoResumeLastPlayback) as? Bool ?? false
+        autoHidePlayerChrome = defaults.object(forKey: Keys.autoHidePlayerChrome) as? Bool ?? false
         showThirdPartySourceNotice = defaults.object(forKey: Keys.showThirdPartySourceNotice) as? Bool ?? true
         customAccentHex = defaults.string(forKey: Keys.customAccentHex) ?? ""
         tabLabelsVisible = defaults.object(forKey: Keys.tabLabelsVisible) as? Bool ?? true
@@ -3083,6 +3098,7 @@ final class SettingsManager: ObservableObject {
         // Beans `playbackSection` (P3 2/3).
         mixWithOtherAudio = defaults.object(forKey: Keys.mixWithOtherAudio) as? Bool ?? false
         autoResumeLastPlayback = defaults.object(forKey: Keys.autoResumeLastPlayback) as? Bool ?? false
+        autoHidePlayerChrome = defaults.object(forKey: Keys.autoHidePlayerChrome) as? Bool ?? false
         showThirdPartySourceNotice = defaults.object(forKey: Keys.showThirdPartySourceNotice) as? Bool ?? true
         // Beans `appearanceSection` (P3 3/3).
         customAccentHex = defaults.string(forKey: Keys.customAccentHex) ?? ""

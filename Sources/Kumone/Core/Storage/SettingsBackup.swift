@@ -75,6 +75,7 @@ enum SettingsBackup {
         "settings.audioCacheSizeMB",
         "settings.audioQuality",
         "settings.autoCheckUpdates",
+        "settings.autoHidePlayerChrome",
         "settings.autoResumeLastPlayback",
         "settings.autoSkipUnplayable",
         "settings.automixEnabled",

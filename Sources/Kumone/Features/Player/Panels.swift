@@ -87,7 +87,7 @@ struct LyricsPanel: View {
             }
         } else if player.lyrics?.isInstrumental == true {
             EmptyStateView(icon: "music.quarternote.3", title: "纯音乐", subtitle: "请欣赏")
-        } else if player.hasCurrentTrack {
+        } else if player.hasCurrentTrack, player.lyrics == nil {
             VStack(spacing: 10) {
                 ProgressView().controlSize(.small)
                 Text("歌词加载中…")

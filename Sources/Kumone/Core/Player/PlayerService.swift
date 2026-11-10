@@ -2855,8 +2855,27 @@ final class PlayerService: ObservableObject {
             applyLyrics(saved, for: track)
         }
         guard !Task.isCancelled, generation == resolveGeneration, !usesOfflineQueue else { return }
-        let response = await MusicAPI.lyric(for: track)
-        guard !Task.isCancelled, generation == resolveGeneration, let response else { return }
+        var response = await MusicAPI.lyric(for: track)
+        if response == nil {
+            // One retry for transient network failures: a single blip
+            // must not leave the song lyric-less for its whole play.
+            try? await Task.sleep(nanoseconds: 2_000_000_000)
+            guard !Task.isCancelled, generation == resolveGeneration else { return }
+            response = await MusicAPI.lyric(for: track)
+        }
+        guard !Task.isCancelled, generation == resolveGeneration else { return }
+        guard let response else {
+            // Loaded, but no source has lyrics: say so instead of
+            // pretending to load forever. An empty ParsedLyrics is
+            // the "loaded, none" marker — the lyrics views render it
+            // as "暂无歌词". Offline lyrics applied above, when
+            // present, are kept: only mark when nothing loaded.
+            if lyrics == nil {
+                lyrics = ParsedLyrics()
+                updateLyricsCursor(at: livePlaybackTime)
+            }
+            return
+        }
         applyLyrics(response, for: track)
         // The engine caches every song it streams, so each one may play offline.
         if let scope { await OfflineMetadataStore.shared.keepPlaybackData(track: track, lyrics: response, scope: scope) }
