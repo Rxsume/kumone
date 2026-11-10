@@ -280,29 +280,66 @@ send(EVENT_NAMES.inited, { status: true, openDevTools: DEV_ENABLE, sources: musi
     /// one (double or single quotes). Nil when the script has no
     /// `API_KEY` assignment at all.
     static func apiKey(in script: String) -> String? {
-        let pattern = #"const API_KEY\s*=\s*["']([^"']*)["']"#
+        // The value may contain JS-escaped characters (\" \\ \' \n \r)
+        // written by settingApiKey, so the capture must allow
+        // backslash escapes inside the quotes instead of stopping
+        // at the first quote character.
+        let pattern = #"const API_KEY\s*=\s*(?:"((?:\\.|[^"\\])*)"|'((?:\\.|[^'\\])*)')"#
         guard let regex = try? NSRegularExpression(pattern: pattern),
               let match = regex.firstMatch(
                   in: script,
                   range: NSRange(script.startIndex..., in: script)
-              ),
-              let valueRange = Range(match.range(at: 1), in: script) else {
+              ) else {
             return nil
         }
-        return String(script[valueRange])
+        let group = match.range(at: 1).location != NSNotFound ? 1 : 2
+        guard let valueRange = Range(match.range(at: group), in: script) else {
+            return nil
+        }
+        return unescapeJS(String(script[valueRange]))
+    }
+
+    /// Undo the JS string escapes `settingApiKey` writes, one pass
+    /// left to right so `\\` is not unescaped twice.
+    private static func unescapeJS(_ value: String) -> String {
+        var out = ""
+        out.reserveCapacity(value.count)
+        var escaped = false
+        for ch in value {
+            if escaped {
+                switch ch {
+                case "n": out.append("\n")
+                case "r": out.append("\r")
+                default: out.append(ch)
+                }
+                escaped = false
+            } else if ch == "\\" {
+                escaped = true
+            } else {
+                out.append(ch)
+            }
+        }
+        if escaped { out.append("\\") }
+        return out
     }
 
     /// Writes `key` into the script's `API_KEY` assignment,
     /// JS-escaped for the surrounding quotes. Returns the new
     /// script, or nil when the script declares no `API_KEY`.
     static func settingApiKey(_ key: String, in script: String) -> String? {
-        let pattern = #"const API_KEY\s*=\s*["']([^"']*)["']"#
+        // Same escape-aware capture as apiKey: the stored value may
+        // itself contain \" or \\ from a previous write, so the
+        // range to replace must span the whole quoted value.
+        let pattern = #"const API_KEY\s*=\s*(?:"((?:\\.|[^"\\])*)"|'((?:\\.|[^'\\])*)')"#
         guard let regex = try? NSRegularExpression(pattern: pattern),
               let match = regex.firstMatch(
                   in: script,
                   range: NSRange(script.startIndex..., in: script)
-              ),
-              let valueRange = Range(match.range(at: 1), in: script) else {
+              ) else {
+            return nil
+        }
+        let group = match.range(at: 1).location != NSNotFound ? 1 : 2
+        guard let valueRange = Range(match.range(at: group), in: script) else {
             return nil
         }
         // Replace only the captured value range (not a regex
