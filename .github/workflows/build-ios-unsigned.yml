@@ -2,10 +2,10 @@
 # macOS signing secrets and only runs on tag pushes, so this workflow
 # builds just the unsigned IPA on demand.
 #
-# Base: main HEAD at upstream 0.3.29 plus the Golia rename/icon. MARKETING_VERSION stays
-# 0.3.29 and CURRENT_PROJECT_VERSION is the commit count, exactly as
+# Base: main HEAD at upstream 0.3.32 plus the Golia rename/icon. MARKETING_VERSION stays
+# 0.3.32 and CURRENT_PROJECT_VERSION is the commit count, exactly as
 # the release workflow derives them, so this build is identifiable as
-# a custom build on top of 0.3.29 rather than a new upstream release.
+# a custom build on top of 0.3.32 rather than a new upstream release.
 name: Build Unsigned iOS IPA
 
 on:
@@ -28,9 +28,9 @@ jobs:
       - name: Derive version
         id: version
         run: |
-          echo "VERSION=0.3.29" >> "$GITHUB_ENV"
+          echo "VERSION=0.3.32" >> "$GITHUB_ENV"
           echo "BUILD_NUMBER=$(git rev-list --count HEAD)" >> "$GITHUB_ENV"
-          echo "version=0.3.29" >> "$GITHUB_OUTPUT"
+          echo "version=0.3.32" >> "$GITHUB_OUTPUT"
           echo "build_number=$(git rev-list --count HEAD)" >> "$GITHUB_OUTPUT"
 
       - name: Build unsigned iOS IPA
@@ -58,7 +58,7 @@ jobs:
 
   # Publish the same IPA as a GitHub Release so the in-app updater
   # (ReleaseChecker, fork repo Rxsume/kumone) has something to find.
-  # The tag carries version AND build — `Golia-0.3.29-build-565` — because
+  # The tag carries version AND build — `Golia-0.3.32-build-565` — because
   # every fork build shares one dotted version and differs only in build
   # number. Created with the repo's own GITHUB_TOKEN (no new secrets);
   # a re-run of the same commit re-uploads to the existing release instead

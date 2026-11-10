@@ -492,6 +492,10 @@ final class SettingsManager: ObservableObject {
         static let enableAudioCache = "settings.enableAudioCache"
         static let audioCacheSizeMB = "settings.audioCacheSizeMB"
         static let audioCacheAutomatic = "settings.audioCacheAutomatic"
+        #if os(iOS)
+        static let soundEffectPreset = "settings.soundEffectPreset"
+        static let customEqualizerGains = "settings.customEqualizerGains"
+        #endif
         static let lyricAnimationStyle = "settings.lyricAnimationStyle"
         static let homePlatform = "settings.homePlatform"
         static let homeDynamicBackground = "settings.homeDynamicBackground"
@@ -3010,6 +3014,69 @@ final class SettingsManager: ObservableObject {
         // Keys.customFontName directly, so there is nothing to reload here.
     }
 
+    #if os(iOS)
+    @Published var soundEffectPreset: SoundEffectPreset {
+        didSet {
+            UserDefaults.standard.set(soundEffectPreset.rawValue, forKey: Keys.soundEffectPreset)
+            publishSoundEffectParameters()
+        }
+    }
+
+    @Published private(set) var customEqualizerGains: [Float] {
+        didSet {
+            let normalized = EqualizerConfiguration(gains: customEqualizerGains).gains
+            guard normalized == customEqualizerGains else {
+                customEqualizerGains = normalized
+                return
+            }
+            UserDefaults.standard.set(
+                normalized.map(Double.init), forKey: Keys.customEqualizerGains)
+            if soundEffectPreset == .custom { publishSoundEffectParameters() }
+        }
+    }
+
+    var customEqualizerConfiguration: EqualizerConfiguration {
+        EqualizerConfiguration(gains: customEqualizerGains)
+    }
+
+    var isCustomEqualizerEnabled: Bool {
+        soundEffectPreset == .custom
+    }
+
+    func selectSoundEffect(_ preset: SoundEffectPreset) {
+        soundEffectPreset = preset
+    }
+
+    func setCustomEqualizerEnabled(_ isEnabled: Bool) {
+        if isEnabled {
+            soundEffectPreset = .custom
+        } else if soundEffectPreset == .custom {
+            soundEffectPreset = .original
+        }
+    }
+
+    func updateCustomEqualizerGain(at index: Int, to value: Float) {
+        guard customEqualizerGains.indices.contains(index) else { return }
+        var gains = customEqualizerGains
+        gains[index] = min(
+            max(value, EqualizerConfiguration.gainRange.lowerBound),
+            EqualizerConfiguration.gainRange.upperBound)
+        customEqualizerGains = gains
+        if soundEffectPreset != .custom { soundEffectPreset = .custom }
+    }
+
+    func resetCustomEqualizer() {
+        customEqualizerGains = EqualizerConfiguration.flat.gains
+        if soundEffectPreset != .custom { soundEffectPreset = .custom }
+    }
+
+    private func publishSoundEffectParameters() {
+        SoundEffectParameterStore.publish(SoundEffectParameters(
+            preset: soundEffectPreset,
+            custom: customEqualizerConfiguration))
+    }
+    #endif
+
     private init() {
         let defaults = UserDefaults.standard
         audioQuality = defaults.string(forKey: Keys.quality).flatMap(AudioQuality.init) ?? .exhigh
@@ -3455,5 +3522,12 @@ final class SettingsManager: ObservableObject {
             subtitleFontWeight = nil
         }
         subtitleCustomFont = defaults.string(forKey: Keys.subtitleCustomFont)
+        #if os(iOS)
+        soundEffectPreset = SoundEffectPreferences.preset(
+            from: defaults, key: Keys.soundEffectPreset)
+        customEqualizerGains = SoundEffectPreferences.customConfiguration(
+            from: defaults, key: Keys.customEqualizerGains).gains
+        publishSoundEffectParameters()
+        #endif
     }
 }
