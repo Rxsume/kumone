@@ -3,12 +3,12 @@ import SwiftUI
 // MARK: - 播放页底部布局自由拖动 (Folia)
 //
 // Beans 的拖动编辑器 (Beans/PlayerLayout.swift + PlayerView.swift 的
-// `layoutMode`) 的 Golia 版，只做用户点名的底部两件：进度条、控制按钮。
-// Beans 有 20 个可调部件 (含旋转/透明度)；这里只做 XY + 缩放。
+// `layoutMode`) 的 Golia 版，做用户点名的底部三件：进度条、控制按钮、
+// 指示线。Beans 有 20 个可调部件 (含旋转/透明度)；这里只做 XY + 缩放。
 //
-// 指示线不在内：Golia 播放页没有底部指示线，唯一的指示线是页面顶部
-// 的下拉关闭手柄 (NowPlayingPresentation.dragIndicator)，动它会破坏
-// 下拉关闭，所以不进编辑器。
+// 指示线是新增的底部纯视觉部件：Golia 播放页原本没有底部指示线，
+// 页面顶部的指示线是下拉关闭手柄 (NowPlayingPresentation.dragIndicator)，
+// 动它会破坏下拉关闭，所以顶部手柄不动。
 //
 // 存储：UserDefaults JSON (`settings.folia.playerBottomLayoutData`)，
 // 防抖 0.12 秒保存，重启后保留；默认值全是 identity，现有外观不变。
@@ -17,6 +17,7 @@ import SwiftUI
 enum PlayerBottomLayoutPart: String, CaseIterable, Identifiable {
     case progress
     case controls
+    case indicator
 
     var id: String { rawValue }
 
@@ -24,6 +25,7 @@ enum PlayerBottomLayoutPart: String, CaseIterable, Identifiable {
         switch self {
         case .progress: return String(localized: "进度条")
         case .controls: return String(localized: "控制按钮")
+        case .indicator: return String(localized: "指示线")
         }
     }
 }
@@ -156,6 +158,19 @@ struct PlayerBottomLayoutTransform: ViewModifier {
     }
 }
 
+/// 底部指示线：新增的纯视觉部件，底部居中的细胶囊。
+/// 不拦截手势（播放页里另加 `.allowsHitTesting(false)`），拖动与缩放
+/// 只走布局变换与编辑器；页面顶部的下拉关闭手柄不受影响。
+struct PlayerBottomIndicator: View {
+    var body: some View {
+        Capsule()
+            .fill(.white.opacity(0.5))
+            .frame(width: 36, height: 4)
+            .frame(maxWidth: .infinity, alignment: .center)
+            .accessibilityHidden(true)
+    }
+}
+
 #if os(iOS)
 /// 底部布局编辑器：悬浮窗实时预览 + 滑杆微调 + 一键恢复默认。
 /// 从设置页 Folia 分区进入。预览里是真实的进度条与控制按钮行
@@ -173,7 +188,7 @@ struct PlayerBottomLayoutEditor: View {
         Form {
             Section {
                 previewCard
-                Text("在预览里直接拖动进度条或控制按钮移动位置，双指捏合缩放；也可以用下面的滑杆微调。")
+                Text("在预览里直接拖动进度条、控制按钮或指示线移动位置，双指捏合缩放；也可以用下面的滑杆微调。")
                     .font(.caption)
                     .foregroundStyle(.secondary)
             } header: {
@@ -206,7 +221,7 @@ struct PlayerBottomLayoutEditor: View {
             }
 
             Section {
-                Text("调整实时保存，返回播放页即可看到；重启后保留。播放页顶部的指示线是下拉关闭手柄，不参与布局调整。")
+                Text("调整实时保存，返回播放页即可看到；重启后保留。底部指示线是新增的可调部件；页面顶部的指示线是下拉关闭手柄，仍不参与布局调整。")
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
@@ -238,6 +253,10 @@ struct PlayerBottomLayoutEditor: View {
                 }
                 previewPart(.controls) {
                     CompactTransportControls()
+                        .allowsHitTesting(false)
+                }
+                previewPart(.indicator) {
+                    PlayerBottomIndicator()
                         .allowsHitTesting(false)
                 }
             }

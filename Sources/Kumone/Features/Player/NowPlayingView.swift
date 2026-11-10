@@ -1120,6 +1120,10 @@ struct NowPlayingView: View {
                 }
                 CompactTransportControls()
                     .modifier(PlayerBottomLayoutTransform(part: .controls, entry: bottomLayout.entry(for: .controls)))
+                PlayerBottomIndicator()
+                    .allowsHitTesting(false)
+                    .modifier(PlayerBottomLayoutTransform(part: .indicator, entry: bottomLayout.entry(for: .indicator)))
+                    .padding(.top, 2)
                 HStack(spacing: 0) {
                     Button {
                         withAnimation(AppAnimation.standard) {
@@ -1318,6 +1322,10 @@ struct NowPlayingView: View {
                 }
                 controls()
                     .modifier(PlayerBottomLayoutTransform(part: .controls, entry: bottomLayout.entry(for: .controls)))
+                PlayerBottomIndicator()
+                    .allowsHitTesting(false)
+                    .modifier(PlayerBottomLayoutTransform(part: .indicator, entry: bottomLayout.entry(for: .indicator)))
+                    .padding(.top, 2)
             }
             .padding(.bottom, 24)
             .opacity(chromeAutoHide.controlsVisible ? 1 : 0)
@@ -1463,6 +1471,10 @@ struct NowPlayingView: View {
             }
             CompactTransportControls()
                 .modifier(PlayerBottomLayoutTransform(part: .controls, entry: bottomLayout.entry(for: .controls)))
+            PlayerBottomIndicator()
+                .allowsHitTesting(false)
+                .modifier(PlayerBottomLayoutTransform(part: .indicator, entry: bottomLayout.entry(for: .indicator)))
+                .padding(.top, 2)
             CompactSecondaryControls(
                 accent: Theme.accent,
                 showsLyrics: showLyricsOnMobile,
@@ -1649,6 +1661,10 @@ struct NowPlayingView: View {
             )
                 .padding(.horizontal, 2)
                 .modifier(PlayerBottomLayoutTransform(part: .controls, entry: bottomLayout.entry(for: .controls)))
+            PlayerBottomIndicator()
+                .allowsHitTesting(false)
+                .modifier(PlayerBottomLayoutTransform(part: .indicator, entry: bottomLayout.entry(for: .indicator)))
+                .padding(.top, 2)
         }
         .accessibilityIdentifier("immersiveControls")
     }
@@ -1814,6 +1830,10 @@ struct NowPlayingView: View {
                 }
                 controls(showsSoundEffects: true)
                     .modifier(PlayerBottomLayoutTransform(part: .controls, entry: bottomLayout.entry(for: .controls)))
+                PlayerBottomIndicator()
+                    .allowsHitTesting(false)
+                    .modifier(PlayerBottomLayoutTransform(part: .indicator, entry: bottomLayout.entry(for: .indicator)))
+                    .padding(.top, 2)
             }
 
             Spacer()
