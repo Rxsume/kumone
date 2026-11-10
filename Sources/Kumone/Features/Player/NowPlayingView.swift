@@ -267,8 +267,8 @@ struct NowPlayingView: View {
     /// published signal: true from the playhead entering the overlap (or
     /// the midpoint, whichever first) until the engine reports completion
     /// or the transition is disarmed. On macOS this is the AutoMix engine;
-    /// on iOS it is the dual-deck crossfade engine, and stays false while
-    /// that engine is switched off.
+    /// on iOS the single-engine player never overlaps tracks, so it stays
+    /// false there (PR #36 rollback).
     private var transitionInProgress: Bool {
         player.transitionInProgress
     }

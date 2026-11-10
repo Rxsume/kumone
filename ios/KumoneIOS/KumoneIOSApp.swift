@@ -4,6 +4,7 @@ import KumoneIOSFeature
 @main
 struct KumoneIOSApp: App {
     @UIApplicationDelegateAdaptor(DownloadAppDelegate.self) private var downloadDelegate
+
     var body: some Scene {
         WindowGroup {
             IOSMainWindow()

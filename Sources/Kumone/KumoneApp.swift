@@ -13,7 +13,11 @@ public struct KumoneApp: App {
     @StateObject private var shortcuts = ShortcutManager.shared
     @Environment(\.openWindow) private var openWindow
 
-    public init() {}
+    public init() {
+        // Re-register user-installed fonts (Beans `appearanceSection`,
+        // P3 3/3); the font files live in Documents/Fonts.
+        FontManager.reinstallIfNeeded()
+    }
 
     public var body: some Scene {
         Window("Kumone", id: "main") {

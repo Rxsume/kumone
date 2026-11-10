@@ -30,7 +30,7 @@ enum PlaybackEngineEvent: Sendable {
     /// Deck 播完了所有已调度音频（自然结束，非 stop/seek 引起）。
     case deckFinished(Deck)
     /// 过渡中点已过（crossfade 中点 / beatMatched 的 bass swap 点）——
-    /// PlayerService 以此为界切换 currentTrack/歌词/scrobble。
+    /// PlayerService 以此为界切换 currentTrack/歌词。
     case transitionMidpoint(from: Deck, to: Deck, via: TransitionOutcome)
     /// 过渡完成，出曲 deck 已停止并复位。
     case transitionCompleted(from: Deck, to: Deck)
@@ -1601,13 +1601,6 @@ final class PlaybackEngine: @unchecked Sendable {
 
     private func ensureEngineRunningLocked() {
         guard !engine.isRunning else { return }
-        #if os(iOS)
-        if !sessionConfigured {
-            sessionConfigured = true
-            try? AVAudioSession.sharedInstance().setCategory(.playback, mode: .default, policy: .longFormAudio, options: [])
-            try? AVAudioSession.sharedInstance().setActive(true)
-        }
-        #endif
         engine.prepare()
         do {
             try engine.start()

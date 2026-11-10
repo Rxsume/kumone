@@ -102,6 +102,20 @@ final class CustomAudioSourceStore: ObservableObject {
         save()
     }
 
+    /// Sets every imported source's quality (the global third-party
+    /// quality picker in Settings). Resolve keeps reading each source's
+    /// own `quality`, so the per-source editor can still override
+    /// afterwards; this is only the bulk setter.
+    func updateQualityForAll(_ quality: String) {
+        guard !sources.isEmpty else { return }
+        var updated = sources
+        for index in updated.indices {
+            updated[index].quality = quality
+        }
+        sources = updated
+        save()
+    }
+
     @discardableResult
     func removeSource(id: String) -> Bool {
         let originalCount = sources.count

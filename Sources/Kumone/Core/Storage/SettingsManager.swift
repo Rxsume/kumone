@@ -474,8 +474,6 @@ final class SettingsManager: ObservableObject {
 
         // Folia B12: global lyric timeline offset, milliseconds, ±2000.
         static let globalLyricTimelineOffsetMs = "settings.globalLyricTimelineOffsetMs"
-        // Folia B18: report listening to NetEase (scrobble), default on.
-        static let neteaseScrobbleEnabled = "settings.neteaseScrobbleEnabled"
         static let autoCheckUpdates = "settings.autoCheckUpdates"
         static let desktopLyrics = "settings.showDesktopLyrics"
         #if os(macOS)
@@ -505,6 +503,31 @@ final class SettingsManager: ObservableObject {
         static let playbackFadeEnabled = "settings.playbackFadeEnabled"
         static let queueAddBehavior = "settings.queueAddBehavior"
         static let autoSkipUnplayable = "settings.autoSkipUnplayable"
+        // Beans `playbackSection` (P3 2/3).
+        static let mixWithOtherAudio = "settings.mixWithOtherAudio"
+        static let autoResumeLastPlayback = "settings.autoResumeLastPlayback"
+        static let showThirdPartySourceNotice = "settings.showThirdPartySourceNotice"
+        // Beans `appearanceSection` (P3 3/3): deep appearance
+        // customization. All `settings.*` (Golia namespace, never
+        // `beans.*`); the file I/O lives in `WallpaperStore` /
+        // `FontManager`, the state lives here like P3a/P3b.
+        static let customAccentHex = "settings.customAccentHex"
+        static let tabLabelsVisible = "settings.tabLabelsVisible"
+        static let legacyTabBarCornerRadius = "settings.legacyTabBarCornerRadius"
+        static let legacyTabBarWidth = "settings.legacyTabBarWidth"
+        static let legacyTabBarOffsetX = "settings.legacyTabBarOffsetX"
+        static let legacyTabBarOffsetY = "settings.legacyTabBarOffsetY"
+        static let homeWallpaperBlur = "settings.homeWallpaperBlur"
+        static let backgroundSyncAll = "settings.backgroundSyncAll"
+        static let backgroundHexLight = "settings.backgroundHexLight"
+        static let backgroundHexDark = "settings.backgroundHexDark"
+        static let backgroundImagePathLight = "settings.backgroundImagePathLight"
+        static let backgroundImagePathDark = "settings.backgroundImagePathDark"
+        static let wallpaperPaths = "settings.wallpaperPaths"
+        // Installed global font (PostScript name), managed by
+        // `FontManager`. Not a settings row's key — the font rows read
+        // it through `FontManager.installedFontName`.
+        static let customFontName = "settings.customFontName"
         static let playbackEntryView = "settings.playbackEntryView"
         static let playerPageTintIntensity = "settings.playerPageTintIntensity"
         static let hidePlayerProgressBar = "settings.hidePlayerProgressBar"
@@ -808,17 +831,6 @@ final class SettingsManager: ObservableObject {
     var canResolveUnblockedTracks: Bool {
         enableUnblock && !enabledAudioSourceIDs.isEmpty
     }
-
-    /// Report listening to NetEase (scrobble), Folia B18. On by default,
-    /// matching the historical always-on behaviour; off means no
-    /// `scrobbleStart`/`scrobbleFinish` calls at all.
-    @Published var neteaseScrobbleEnabled: Bool {
-        didSet { UserDefaults.standard.set(neteaseScrobbleEnabled, forKey: Keys.neteaseScrobbleEnabled) }
-    }
-
-    /// Scrobble is NetEase account behaviour, not a Folia visual setting,
-    /// so it is not gated by the Folia master switch.
-    var effectiveNetEaseScrobbleEnabled: Bool { neteaseScrobbleEnabled }
 
     /// Floating desktop lyrics window (LyricsX-style).
     @Published var showDesktopLyrics: Bool {
@@ -1202,6 +1214,104 @@ final class SettingsManager: ObservableObject {
     /// track just failed instead of skipping to the next one.
     var effectiveAutoSkipUnplayable: Bool {
         foliaEnabled ? autoSkipUnplayable : false
+    }
+
+    /// Beans `playbackSection` (P3 2/3): play alongside other apps'
+    /// audio instead of silencing them. Not Folia-gated.
+    @Published var mixWithOtherAudio: Bool {
+        didSet { UserDefaults.standard.set(mixWithOtherAudio, forKey: Keys.mixWithOtherAudio) }
+    }
+
+    /// Beans `playbackSection` (P3 2/3): resume the last unfinished
+    /// song on launch. Not Folia-gated.
+    @Published var autoResumeLastPlayback: Bool {
+        didSet { UserDefaults.standard.set(autoResumeLastPlayback, forKey: Keys.autoResumeLastPlayback) }
+    }
+
+    /// Beans `playbackSection` (P3 2/3): toast when a third-party
+    /// source plays a VIP song. Not Folia-gated.
+    @Published var showThirdPartySourceNotice: Bool {
+        didSet { UserDefaults.standard.set(showThirdPartySourceNotice, forKey: Keys.showThirdPartySourceNotice) }
+    }
+
+    // MARK: - Beans `appearanceSection` (P3 3/3)
+
+    /// Custom accent colour as "#RRGGBB"; empty means the default
+    /// brand red. Read by `Theme.accent` (via UserDefaults, not via
+    /// this property — `Theme` is nonisolated and this class is
+    /// @MainActor). Not Folia-gated.
+    @Published var customAccentHex: String {
+        didSet { UserDefaults.standard.set(customAccentHex, forKey: Keys.customAccentHex) }
+    }
+
+    /// Show the text label under each GlassTabBar icon. Not
+    /// Folia-gated.
+    @Published var tabLabelsVisible: Bool {
+        didSet { UserDefaults.standard.set(tabLabelsVisible, forKey: Keys.tabLabelsVisible) }
+    }
+
+    static let legacyTabBarCornerRadiusRange = 18.0...42.0
+    static let legacyTabBarWidthRange = 300.0...420.0
+    static let legacyTabBarOffsetXRange = -40.0...40.0
+    static let legacyTabBarOffsetYRange = -36.0...36.0
+
+    /// Floating tab bar geometry (Beans' "低系统悬浮底栏" sliders,
+    /// ported to Golia's `GlassTabBar`, which is the floating bar on
+    /// every iOS version here — Beans gates them to iOS <26 because
+    /// iOS 26+ uses the system bar). Width default 420 (not Beans'
+    /// 356): 420 is the slider max, i.e. today's full-width look.
+    @Published var legacyTabBarCornerRadius: Double {
+        didSet { UserDefaults.standard.set(legacyTabBarCornerRadius, forKey: Keys.legacyTabBarCornerRadius) }
+    }
+
+    @Published var legacyTabBarWidth: Double {
+        didSet { UserDefaults.standard.set(legacyTabBarWidth, forKey: Keys.legacyTabBarWidth) }
+    }
+
+    @Published var legacyTabBarOffsetX: Double {
+        didSet { UserDefaults.standard.set(legacyTabBarOffsetX, forKey: Keys.legacyTabBarOffsetX) }
+    }
+
+    @Published var legacyTabBarOffsetY: Double {
+        didSet { UserDefaults.standard.set(legacyTabBarOffsetY, forKey: Keys.legacyTabBarOffsetY) }
+    }
+
+    /// Home wallpaper blur radius (0...30pt). Only visible when a
+    /// wallpaper image is applied. Not Folia-gated.
+    @Published var homeWallpaperBlur: Double {
+        didSet { UserDefaults.standard.set(homeWallpaperBlur, forKey: Keys.homeWallpaperBlur) }
+    }
+
+    /// Apply the home background (colour / wallpaper) to search,
+    /// library and 我的 as well. Off = home only. Not Folia-gated.
+    @Published var backgroundSyncAll: Bool {
+        didSet { UserDefaults.standard.set(backgroundSyncAll, forKey: Keys.backgroundSyncAll) }
+    }
+
+    /// Custom home background colour ("#RRGGBB", empty = unset) for
+    /// the light / dark appearance. Not Folia-gated.
+    @Published var backgroundHexLight: String {
+        didSet { UserDefaults.standard.set(backgroundHexLight, forKey: Keys.backgroundHexLight) }
+    }
+
+    @Published var backgroundHexDark: String {
+        didSet { UserDefaults.standard.set(backgroundHexDark, forKey: Keys.backgroundHexDark) }
+    }
+
+    /// Active wallpaper file path ("", unset) for the light / dark
+    /// appearance. Paths live under Documents/Wallpapers; the files
+    /// are managed by `WallpaperStore`. Not Folia-gated.
+    @Published var backgroundImagePathLight: String {
+        didSet { UserDefaults.standard.set(backgroundImagePathLight, forKey: Keys.backgroundImagePathLight) }
+    }
+
+    @Published var backgroundImagePathDark: String {
+        didSet { UserDefaults.standard.set(backgroundImagePathDark, forKey: Keys.backgroundImagePathDark) }
+    }
+
+    /// Wallpaper library: all uploaded wallpaper file paths.
+    @Published var wallpaperPaths: [String] {
+        didSet { UserDefaults.standard.set(wallpaperPaths, forKey: Keys.wallpaperPaths) }
     }
 
     /// Which view opens when playback starts from a list.
@@ -2438,6 +2548,453 @@ final class SettingsManager: ObservableObject {
         subtitleContentMode = .translation
     }
 
+    /// Re-read every setting from UserDefaults into the @Published
+    /// properties — the same assignments `init()` performs. Swift
+    /// cannot call an instance method before all stored properties
+    /// are initialized, so `init()` keeps its own copy of this body;
+    /// keep the two in sync when adding a setting (a backup
+    /// round-trip test guards the mechanism). Used by settings
+    /// restore: after the backup's values are written to
+    /// UserDefaults, this makes the running app pick them up
+    /// without a restart. Assigning the properties fires their
+    /// `didSet`, which writes the same values back — harmless; the
+    /// two side-effecting setters (audio-cache limit, macOS auto
+    /// update checks) are idempotent for unchanged values.
+    func reloadFromUserDefaults() {
+        let defaults = UserDefaults.standard
+        audioQuality = defaults.string(forKey: Keys.quality).flatMap(AudioQuality.init) ?? .exhigh
+        enableAudioCache = defaults.object(forKey: Keys.enableAudioCache) as? Bool ?? true
+        // A size somebody chose stays chosen; the untouched default becomes automatic.
+        audioCacheAutomatic = defaults.object(forKey: Keys.audioCacheAutomatic) as? Bool
+            ?? (defaults.object(forKey: Keys.audioCacheSizeMB) as? Int).map { $0 == AudioCache.defaultMaximumSizeMB } ?? true
+        let storedAudioCacheSizeMB = defaults.object(forKey: Keys.audioCacheSizeMB) as? Int
+            ?? AudioCache.defaultMaximumSizeMB
+        let normalizedAudioCacheSizeMB = Self.normalizedAudioCacheSizeMB(storedAudioCacheSizeMB)
+        audioCacheSizeMB = normalizedAudioCacheSizeMB
+        defaults.set(normalizedAudioCacheSizeMB, forKey: Keys.audioCacheSizeMB)
+        appearance = defaults.string(forKey: Keys.appearance).flatMap(AppAppearance.init) ?? .auto
+        nowPlayingMode = defaults.string(forKey: Keys.nowPlayingMode).flatMap(NowPlayingMode.init) ?? .immersive
+        landscapeNowPlayingStyle = defaults.string(forKey: Keys.landscapeNowPlayingStyle)
+            .flatMap(LandscapeNowPlayingStyle.init) ?? .classic
+        openAlbumOnArtworkClick = defaults.object(forKey: Keys.openAlbumOnArtworkClick) as? Bool ?? true
+        showLyricsTranslation = defaults.object(forKey: Keys.showTranslation) as? Bool ?? true
+        // Carry over the old on/off romaji toggle for anyone who had it on.
+        lyricsAnnotation = defaults.string(forKey: Keys.annotation).flatMap(LyricsAnnotation.init)
+            ?? (defaults.bool(forKey: Keys.showRomaji) ? .romaji : .off)
+        verbatimLyrics = defaults.object(forKey: Keys.verbatimLyrics) as? Bool ?? true
+        enableUnblock = defaults.object(forKey: Keys.unblock) as? Bool ?? true
+        if let rawSourceIDs = defaults.stringArray(forKey: Keys.unblockSources) {
+            enabledAudioSourceIDs = Set(rawSourceIDs.compactMap(AudioSourceID.init))
+        } else {
+            // Script-backend sources are opt-in, except ikun, the
+            // preferred source, which is on by default: a user who never
+            // touched the source switches keeps pyncmd + ikun.
+            enabledAudioSourceIDs = Set(
+                AudioSourceID.allCases.filter { !$0.isScriptBackend }
+            )
+        }
+        autoCheckUpdates = defaults.object(forKey: Keys.autoCheckUpdates) as? Bool ?? true
+        showDesktopLyrics = defaults.object(forKey: Keys.desktopLyrics) as? Bool ?? false
+        #if os(macOS)
+        automixEnabled = defaults.object(forKey: Keys.automix) as? Bool ?? false
+        automixTransitionsEnabled =
+            defaults.object(forKey: Keys.automixTransitions) as? Bool ?? true
+        automixOrderEnabled = defaults.object(forKey: Keys.automixOrder) as? Bool ?? false
+        automixStemsEnabled = defaults.object(forKey: Keys.automixStems) as? Bool ?? false
+        loudnessCompensationEnabled =
+            defaults.object(forKey: Keys.loudnessCompensation) as? Bool ?? true
+        audioCacheLimit = (defaults.object(forKey: Keys.audioCacheLimit) as? Int64)
+            ?? Self.defaultAudioCacheLimit
+        outputDeviceUID = defaults.string(forKey: Keys.outputDevice) ?? ""
+        #endif
+        desktopLyricsCentered = defaults.object(forKey: Keys.desktopLyricsCentered) as? Bool ?? false
+        showMainWindowAmbientBackground = defaults.object(
+            forKey: Keys.mainWindowAmbientBackground
+        ) as? Bool ?? true
+        let storedAmbientBackgroundIntensity = defaults.object(
+            forKey: Keys.mainWindowAmbientBackgroundIntensity
+        ) as? Double ?? 1
+        mainWindowAmbientBackgroundIntensity = min(
+            max(storedAmbientBackgroundIntensity, Self.mainWindowAmbientBackgroundIntensityRange.lowerBound),
+            Self.mainWindowAmbientBackgroundIntensityRange.upperBound
+        )
+        foliaEnabled = defaults.object(forKey: Keys.foliaEnabled) as? Bool ?? true
+        lyricAnimationStyle = defaults.string(forKey: Keys.lyricAnimationStyle)
+            .flatMap(LyricAnimationStyle.init) ?? .fade
+        homePlatform = defaults.string(forKey: Keys.homePlatform)
+            .flatMap(HomePlatform.init) ?? .netease
+        homeDynamicBackground = defaults.object(forKey: Keys.homeDynamicBackground) as? Bool ?? true
+        playerPageNativeBlur = defaults.object(forKey: Keys.playerPageNativeBlur) as? Bool ?? true
+        staticMode = defaults.object(forKey: Keys.staticMode) as? Bool ?? false
+        reduceMotionBackground = defaults.object(forKey: Keys.reduceMotionBackground) as? Bool
+        reduceMotionTransitions = defaults.object(forKey: Keys.reduceMotionTransitions) as? Bool
+        reduceMotionMicroMotion = defaults.object(forKey: Keys.reduceMotionMicroMotion) as? Bool
+        playbackFadeEnabled = defaults.object(forKey: Keys.playbackFadeEnabled) as? Bool ?? true
+        queueAddBehavior = defaults.string(forKey: Keys.queueAddBehavior)
+            .flatMap(QueueAddBehavior.init) ?? .next
+        autoSkipUnplayable = defaults.object(forKey: Keys.autoSkipUnplayable) as? Bool ?? true
+        playbackEntryView = defaults.string(forKey: Keys.playbackEntryView)
+            .flatMap(PlaybackEntryView.init) ?? .nowPlaying
+        let storedTintIntensity = defaults.object(forKey: Keys.playerPageTintIntensity) as? Double ?? 1
+        playerPageTintIntensity = min(
+            max(storedTintIntensity, Self.playerPageTintIntensityRange.lowerBound),
+            Self.playerPageTintIntensityRange.upperBound
+        )
+        hidePlayerProgressBar = defaults.object(forKey: Keys.hidePlayerProgressBar) as? Bool ?? false
+        alwaysShowPlayerBackButton =
+            defaults.object(forKey: Keys.alwaysShowPlayerBackButton) as? Bool ?? false
+        alwaysShowTrackSwitchButtons =
+            defaults.object(forKey: Keys.alwaysShowTrackSwitchButtons) as? Bool ?? false
+        playerControlSlots = defaults.stringArray(forKey: Keys.playerControlSlots)
+            ?? PlayerControlSlot.allCases.map(\.rawValue)
+        stageTrackCardEnabled = defaults.object(forKey: Keys.stageTrackCardEnabled) as? Bool ?? false
+        transitionAnimationRing = defaults.object(forKey: Keys.transitionAnimationRing) as? Bool ?? false
+        transitionAnimationCard = defaults.object(forKey: Keys.transitionAnimationCard) as? Bool ?? false
+        #if os(iOS)
+        preventDisplaySleepDuringPlayback =
+            defaults.object(forKey: Keys.preventDisplaySleep) as? Bool ?? true
+        #endif
+        transitionMode = defaults.string(forKey: Keys.transitionMode)
+            .flatMap(TransitionMode.init) ?? .automix
+        let storedCrossfadeMaxSeconds = defaults.object(forKey: Keys.crossfadeMaxSeconds) as? Double ?? 8
+        crossfadeMaxSeconds = min(
+            max(storedCrossfadeMaxSeconds, Self.crossfadeMaxSecondsRange.lowerBound),
+            Self.crossfadeMaxSecondsRange.upperBound
+        )
+        // iOS defaults to .off: the per-track volume trim only applies once
+        // the user turns it on. macOS keeps its shipped .auto default.
+        #if os(iOS)
+        replayGainMode = defaults.string(forKey: Keys.replayGainMode)
+            .flatMap(ReplayGainMode.init) ?? .off
+        #else
+        replayGainMode = defaults.string(forKey: Keys.replayGainMode)
+            .flatMap(ReplayGainMode.init) ?? .auto
+        #endif
+        // Folia luminous (流光) classic tuning.
+        classicWordRotation = defaults.object(forKey: Keys.classicWordRotation) as? Bool
+            ?? Self.defaultClassicWordRotation
+        classicBreathingFloat = Self.clamped(
+            defaults.object(forKey: Keys.classicBreathingFloat) as? Double
+                ?? Self.defaultClassicBreathingFloat,
+            to: Self.classicBreathingFloatRange
+        )
+        classicWordSpacing = Self.clamped(
+            defaults.object(forKey: Keys.classicWordSpacing) as? Double
+                ?? Self.defaultClassicWordSpacing,
+            to: Self.classicWordSpacingRange
+        )
+        classicAvoidOverlap = defaults.object(forKey: Keys.classicAvoidOverlap) as? Bool
+            ?? Self.defaultClassicAvoidOverlap
+        // Folia nomand (漫游) halftone background.
+        visualizerBackgroundMode = defaults.string(forKey: Keys.visualizerBackgroundMode)
+            .flatMap(VisualizerBackgroundMode.init) ?? Self.defaultVisualizerBackgroundMode
+        nomandEffect = defaults.string(forKey: Keys.nomandEffect)
+            .flatMap(NomandEffect.init) ?? Self.defaultNomandEffect
+        nomandHalftoneSize = Self.clamped(
+            defaults.object(forKey: Keys.nomandHalftoneSize) as? Double
+                ?? Self.defaultNomandHalftoneSize,
+            to: Self.nomandHalftoneSizeRange
+        )
+        nomandHalftoneRadius = Self.clamped(
+            defaults.object(forKey: Keys.nomandHalftoneRadius) as? Double
+                ?? Self.defaultNomandHalftoneRadius,
+            to: Self.nomandHalftoneRadiusRange
+        )
+        nomandHalftoneContrast = Self.clamped(
+            defaults.object(forKey: Keys.nomandHalftoneContrast) as? Double
+                ?? Self.defaultNomandHalftoneContrast,
+            to: Self.nomandHalftoneContrastRange
+        )
+        nomandOriginalColors = defaults.object(forKey: Keys.nomandOriginalColors) as? Bool
+            ?? Self.defaultNomandOriginalColors
+        nomandOverlayOpacity = Self.clamped(
+            defaults.object(forKey: Keys.nomandOverlayOpacity) as? Double
+                ?? Self.defaultNomandOverlayOpacity,
+            to: Self.nomandOverlayOpacityRange
+        )
+        nomandOverlayEnabled = defaults.object(forKey: Keys.nomandOverlayEnabled) as? Bool
+            ?? Self.defaultNomandOverlayEnabled
+        nomandImageSource = defaults.string(forKey: Keys.nomandImageSource)
+            .flatMap(BackgroundImageSource.init) ?? Self.defaultNomandImageSource
+        nomandDitheringType = defaults.string(forKey: Keys.nomandDitheringType)
+            .flatMap(NomandDitheringType.init) ?? Self.defaultNomandDitheringType
+        nomandDitheringSize = Self.clamped(
+            defaults.object(forKey: Keys.nomandDitheringSize) as? Double
+                ?? Self.defaultNomandDitheringSize,
+            to: Self.nomandDitheringSizeRange
+        )
+        nomandDitheringColorSteps = min(
+            max(
+                defaults.object(forKey: Keys.nomandDitheringColorSteps) as? Int
+                    ?? Self.defaultNomandDitheringColorSteps,
+                Self.nomandDitheringColorStepsRange.lowerBound
+            ),
+            Self.nomandDitheringColorStepsRange.upperBound
+        )
+        nomandDitheringOriginalColors = defaults.object(forKey: Keys.nomandDitheringOriginalColors) as? Bool
+            ?? Self.defaultNomandDitheringOriginalColors
+        nomandDitheringInverted = defaults.object(forKey: Keys.nomandDitheringInverted) as? Bool
+            ?? Self.defaultNomandDitheringInverted
+        nomandFlutedGlassSize = Self.clamped(
+            defaults.object(forKey: Keys.nomandFlutedGlassSize) as? Double
+                ?? Self.defaultNomandFlutedGlassSize,
+            to: Self.nomandFlutedGlassSizeRange
+        )
+        nomandFlutedGlassDistortion = Self.clamped(
+            defaults.object(forKey: Keys.nomandFlutedGlassDistortion) as? Double
+                ?? Self.defaultNomandFlutedGlassDistortion,
+            to: Self.nomandFlutedGlassDistortionRange
+        )
+        nomandFlutedGlassBlur = Self.clamped(
+            defaults.object(forKey: Keys.nomandFlutedGlassBlur) as? Double
+                ?? Self.defaultNomandFlutedGlassBlur,
+            to: Self.nomandFlutedGlassBlurRange
+        )
+        nomandPaperTextureContrast = Self.clamped(
+            defaults.object(forKey: Keys.nomandPaperTextureContrast) as? Double
+                ?? Self.defaultNomandPaperTextureContrast,
+            to: Self.nomandPaperTextureContrastRange
+        )
+        nomandPaperTextureRoughness = Self.clamped(
+            defaults.object(forKey: Keys.nomandPaperTextureRoughness) as? Double
+                ?? Self.defaultNomandPaperTextureRoughness,
+            to: Self.nomandPaperTextureRoughnessRange
+        )
+        nomandPaperTextureFiber = Self.clamped(
+            defaults.object(forKey: Keys.nomandPaperTextureFiber) as? Double
+                ?? Self.defaultNomandPaperTextureFiber,
+            to: Self.nomandPaperTextureFiberRange
+        )
+        nomandHalftoneDotsInverted = defaults.object(forKey: Keys.nomandHalftoneDotsInverted) as? Bool
+            ?? Self.defaultNomandHalftoneDotsInverted
+        nomandLensDistortionSpread = Self.clamped(
+            defaults.object(forKey: Keys.nomandLensDistortionSpread) as? Double
+                ?? Self.defaultNomandLensDistortionSpread,
+            to: Self.nomandLensDistortionSpreadRange
+        )
+        nomandLensDistortionBulge = Self.clamped(
+            defaults.object(forKey: Keys.nomandLensDistortionBulge) as? Double
+                ?? Self.defaultNomandLensDistortionBulge,
+            to: Self.nomandLensDistortionBulgeRange
+        )
+        nomandLensDistortionDispersion = Self.clamped(
+            defaults.object(forKey: Keys.nomandLensDistortionDispersion) as? Double
+                ?? Self.defaultNomandLensDistortionDispersion,
+            to: Self.nomandLensDistortionDispersionRange
+        )
+        // Folia latent (隐现) background tuning.
+        latentDisplayMode = defaults.string(forKey: Keys.latentDisplayMode)
+            .flatMap(LatentDisplayMode.init) ?? Self.defaultLatentDisplayMode
+        latentColorSource = defaults.string(forKey: Keys.latentColorSource)
+            .flatMap(LatentColorSource.init) ?? Self.defaultLatentColorSource
+        latentDynamicOnlyInPlayer = defaults.object(forKey: Keys.latentDynamicOnlyInPlayer) as? Bool
+            ?? Self.defaultLatentDynamicOnlyInPlayer
+        latentEnhancedBeatResponse = defaults.object(forKey: Keys.latentEnhancedBeatResponse) as? Bool
+            ?? Self.defaultLatentEnhancedBeatResponse
+        latentDitheringSpeed = Self.clamped(
+            defaults.object(forKey: Keys.latentDitheringSpeed) as? Double
+                ?? Self.defaultLatentDitheringSpeed,
+            to: Self.latentSpeedRange
+        )
+        latentDitheringAudioSpeed = Self.clamped(
+            defaults.object(forKey: Keys.latentDitheringAudioSpeed) as? Double
+                ?? Self.defaultLatentDitheringAudioSpeed,
+            to: Self.latentSpeedRange
+        )
+        latentDitheringSize = Self.clamped(
+            defaults.object(forKey: Keys.latentDitheringSize) as? Double
+                ?? Self.defaultLatentDitheringSize,
+            to: Self.latentDitheringSizeRange
+        )
+        latentDitheringOpacity = Self.clamped(
+            defaults.object(forKey: Keys.latentDitheringOpacity) as? Double
+                ?? Self.defaultLatentDitheringOpacity,
+            to: Self.latentOpacityRange
+        )
+        latentMeshSpeed = Self.clamped(
+            defaults.object(forKey: Keys.latentMeshSpeed) as? Double
+                ?? Self.defaultLatentMeshSpeed,
+            to: Self.latentSpeedRange
+        )
+        latentMeshAudioSpeed = Self.clamped(
+            defaults.object(forKey: Keys.latentMeshAudioSpeed) as? Double
+                ?? Self.defaultLatentMeshAudioSpeed,
+            to: Self.latentSpeedRange
+        )
+        latentMeshDistortion = Self.clamped(
+            defaults.object(forKey: Keys.latentMeshDistortion) as? Double
+                ?? Self.defaultLatentMeshDistortion,
+            to: Self.latentMeshDistortionRange
+        )
+        latentMeshSwirl = Self.clamped(
+            defaults.object(forKey: Keys.latentMeshSwirl) as? Double
+                ?? Self.defaultLatentMeshSwirl,
+            to: Self.latentMeshSwirlRange
+        )
+        latentOverlayEnabled = defaults.object(forKey: Keys.latentOverlayEnabled) as? Bool
+            ?? Self.defaultLatentOverlayEnabled
+        latentOverlayOpacity = Self.clamped(
+            defaults.object(forKey: Keys.latentOverlayOpacity) as? Double
+                ?? Self.defaultLatentOverlayOpacity,
+            to: Self.latentOpacityRange
+        )
+        // Folia common (通用) background.
+        commonOpacity = Self.clamped(
+            defaults.object(forKey: Keys.commonOpacity) as? Double
+                ?? Self.defaultCommonOpacity,
+            to: Self.commonOpacityRange
+        )
+        commonUseCoverColorBg = defaults.object(forKey: Keys.commonUseCoverColorBg) as? Bool
+            ?? Self.defaultCommonUseCoverColorBg
+        commonDisableVignette = defaults.object(forKey: Keys.commonDisableVignette) as? Bool
+            ?? Self.defaultCommonDisableVignette
+        commonDisableGeometric = defaults.object(forKey: Keys.commonDisableGeometric) as? Bool
+            ?? Self.defaultCommonDisableGeometric
+        // Folia monet (莫奈) background.
+        monetBackgroundSource = defaults.string(forKey: Keys.monetBackgroundSource)
+            .flatMap(BackgroundImageSource.init) ?? Self.defaultMonetBackgroundSource
+        monetBackgroundLayout = defaults.string(forKey: Keys.monetBackgroundLayout)
+            .flatMap(MonetLayout.init) ?? Self.defaultMonetBackgroundLayout
+        monetBackgroundBlurPx = Self.clamped(
+            defaults.object(forKey: Keys.monetBackgroundBlurPx) as? Double
+                ?? Self.defaultMonetBackgroundBlurPx,
+            to: Self.monetBackgroundBlurPxRange
+        )
+        monetBackgroundOverlayOpacity = Self.clamped(
+            defaults.object(forKey: Keys.monetBackgroundOverlayOpacity) as? Double
+                ?? Self.defaultMonetBackgroundOverlayOpacity,
+            to: Self.monetBackgroundOverlayOpacityRange
+        )
+        monetBackgroundGrayscale = Self.clamped(
+            defaults.object(forKey: Keys.monetBackgroundGrayscale) as? Double
+                ?? Self.defaultMonetBackgroundGrayscale,
+            to: Self.monetBackgroundGrayscaleRange
+        )
+        monetBackgroundSaturation = Self.clamped(
+            defaults.object(forKey: Keys.monetBackgroundSaturation) as? Double
+                ?? Self.defaultMonetBackgroundSaturation,
+            to: Self.monetBackgroundSaturationRange
+        )
+        monetBackgroundWash = Self.clamped(
+            defaults.object(forKey: Keys.monetBackgroundWash) as? Double
+                ?? Self.defaultMonetBackgroundWash,
+            to: Self.monetBackgroundWashRange
+        )
+        monetBackgroundHalfPaneOffsetX = Self.clamped(
+            defaults.object(forKey: Keys.monetBackgroundHalfPaneOffsetX) as? Double
+                ?? Self.defaultMonetBackgroundHalfPaneOffsetX,
+            to: Self.monetBackgroundHalfPaneOffsetXRange
+        )
+        monetBackgroundWashColorMode = defaults.string(forKey: Keys.monetBackgroundWashColorMode)
+            .flatMap(MonetWashColorMode.init) ?? Self.defaultMonetBackgroundWashColorMode
+        monetBackgroundWashCustomColor = Self.normalizedHexColor(
+            defaults.string(forKey: Keys.monetBackgroundWashCustomColor),
+            default: Self.defaultMonetBackgroundWashCustomColor
+        )
+        monetBackgroundDriftEnabled = defaults.object(forKey: Keys.monetBackgroundDriftEnabled) as? Bool
+            ?? Self.defaultMonetBackgroundDriftEnabled
+        monetBackgroundDriftStrength = Self.clamped(
+            defaults.object(forKey: Keys.monetBackgroundDriftStrength) as? Double
+                ?? Self.defaultMonetBackgroundDriftStrength,
+            to: Self.monetBackgroundDriftStrengthRange
+        )
+        monetBackgroundStreaksEnabled = defaults.object(forKey: Keys.monetBackgroundStreaksEnabled) as? Bool
+            ?? Self.defaultMonetBackgroundStreaksEnabled
+        // Folia sora (空) background.
+        soraBlank = defaults.object(forKey: Keys.soraBlank) as? Bool
+            ?? Self.defaultSoraBlank
+        // Folia url (嵌入) background.
+        urlBackgroundList = defaults.data(forKey: Keys.urlBackgroundList)
+            .flatMap { try? JSONDecoder().decode([UrlBackgroundItem].self, from: $0) } ?? []
+        urlBackgroundSelectedID = defaults.string(forKey: Keys.urlBackgroundSelectedID)
+        // Uploaded background image (monet + nomand share it).
+        uploadedBackgroundImageName = defaults.string(forKey: Keys.uploadedBackgroundImageName)
+        // Folia lyric-style window (VisPlayground).
+        lyricsFontStyle = defaults.string(forKey: Keys.lyricsFontStyle)
+            .flatMap(LyricsFontStyle.init) ?? Self.defaultLyricsFontStyle
+        lyricsFontScale = Self.clamped(
+            defaults.object(forKey: Keys.lyricsFontScale) as? Double
+                ?? Self.defaultLyricsFontScale,
+            to: Self.lyricsFontScaleRange
+        )
+        globalLyricTimelineOffsetMs = min(max(
+            defaults.object(forKey: Keys.globalLyricTimelineOffsetMs) as? Int ?? 0,
+            -2000), 2000)
+        if let storedWeight = defaults.object(forKey: Keys.lyricsFontWeight) as? Double {
+            lyricsFontWeight = Self.clamped(storedWeight, to: Self.lyricsFontWeightRange)
+        } else {
+            lyricsFontWeight = nil
+        }
+        lyricsCustomFont = defaults.string(forKey: Keys.lyricsCustomFont)
+        visualizerOpacity = Self.clamped(
+            defaults.object(forKey: Keys.visualizerOpacity) as? Double
+                ?? Self.defaultVisualizerOpacity,
+            to: Self.visualizerOpacityRange
+        )
+        subtitleFontScale = Self.clamped(
+            defaults.object(forKey: Keys.subtitleFontScale) as? Double
+                ?? Self.defaultSubtitleFontScale,
+            to: Self.subtitleFontScaleRange
+        )
+        subtitleOverlayOpacity = Self.clamped(
+            defaults.object(forKey: Keys.subtitleOverlayOpacity) as? Double
+                ?? Self.defaultSubtitleOverlayOpacity,
+            to: Self.subtitleOverlayOpacityRange
+        )
+        subtitleUpcomingLyricsBlur = defaults.object(forKey: Keys.subtitleUpcomingLyricsBlur) as? Bool
+            ?? Self.defaultSubtitleUpcomingLyricsBlur
+        hideTranslationSubtitle = defaults.object(forKey: Keys.hideTranslationSubtitle) as? Bool
+            ?? Self.defaultHideTranslationSubtitle
+        subtitleFontFollowsLyrics = defaults.object(forKey: Keys.subtitleFontFollowsLyrics) as? Bool
+            ?? Self.defaultSubtitleFontFollowsLyrics
+        subtitleHarmonyEnabled = defaults.object(forKey: Keys.subtitleHarmonyEnabled) as? Bool
+            ?? Self.defaultSubtitleHarmonyEnabled
+        subtitleUpcomingLineCount = min(max(
+            defaults.object(forKey: Keys.subtitleUpcomingLineCount) as? Int
+                ?? Self.defaultSubtitleUpcomingLineCount,
+            Self.subtitleUpcomingLineCountRange.lowerBound),
+            Self.subtitleUpcomingLineCountRange.upperBound)
+        subtitleBackgroundEnabled = defaults.object(forKey: Keys.subtitleBackgroundEnabled) as? Bool
+            ?? Self.defaultSubtitleBackgroundEnabled
+        subtitleHarmonyBackgroundEnabled = defaults.object(forKey: Keys.subtitleHarmonyBackgroundEnabled) as? Bool
+            ?? Self.defaultSubtitleHarmonyBackgroundEnabled
+        subtitleFontStyle = defaults.string(forKey: Keys.subtitleFontStyle)
+            .flatMap(LyricsFontStyle.init) ?? Self.defaultSubtitleFontStyle
+        if let storedWeight = defaults.object(forKey: Keys.subtitleFontWeight) as? Double {
+            subtitleFontWeight = Self.clamped(storedWeight, to: Self.lyricsFontWeightRange)
+        } else {
+            subtitleFontWeight = nil
+        }
+        subtitleCustomFont = defaults.string(forKey: Keys.subtitleCustomFont)
+        // Beans settings port (P3b/P3c) keys — mirrors the init() assignments.
+        mixWithOtherAudio = defaults.object(forKey: Keys.mixWithOtherAudio) as? Bool ?? false
+        autoResumeLastPlayback = defaults.object(forKey: Keys.autoResumeLastPlayback) as? Bool ?? false
+        showThirdPartySourceNotice = defaults.object(forKey: Keys.showThirdPartySourceNotice) as? Bool ?? true
+        customAccentHex = defaults.string(forKey: Keys.customAccentHex) ?? ""
+        tabLabelsVisible = defaults.object(forKey: Keys.tabLabelsVisible) as? Bool ?? true
+        legacyTabBarCornerRadius = Self.clamped(
+            defaults.object(forKey: Keys.legacyTabBarCornerRadius) as? Double ?? 32,
+            to: Self.legacyTabBarCornerRadiusRange)
+        legacyTabBarWidth = Self.clamped(
+            defaults.object(forKey: Keys.legacyTabBarWidth) as? Double ?? 420,
+            to: Self.legacyTabBarWidthRange)
+        legacyTabBarOffsetX = Self.clamped(
+            defaults.object(forKey: Keys.legacyTabBarOffsetX) as? Double ?? 0,
+            to: Self.legacyTabBarOffsetXRange)
+        legacyTabBarOffsetY = Self.clamped(
+            defaults.object(forKey: Keys.legacyTabBarOffsetY) as? Double ?? 0,
+            to: Self.legacyTabBarOffsetYRange)
+        homeWallpaperBlur = min(max(defaults.object(forKey: Keys.homeWallpaperBlur) as? Double ?? 0, 0), 30)
+        backgroundSyncAll = defaults.object(forKey: Keys.backgroundSyncAll) as? Bool ?? true
+        backgroundHexLight = defaults.string(forKey: Keys.backgroundHexLight) ?? ""
+        backgroundHexDark = defaults.string(forKey: Keys.backgroundHexDark) ?? ""
+        backgroundImagePathLight = defaults.string(forKey: Keys.backgroundImagePathLight) ?? ""
+        backgroundImagePathDark = defaults.string(forKey: Keys.backgroundImagePathDark) ?? ""
+        wallpaperPaths = defaults.stringArray(forKey: Keys.wallpaperPaths) ?? []
+        // customFontName has no SettingsManager property — FontManager reads
+        // Keys.customFontName directly, so there is nothing to reload here.
+    }
+
     private init() {
         let defaults = UserDefaults.standard
         audioQuality = defaults.string(forKey: Keys.quality).flatMap(AudioQuality.init) ?? .exhigh
@@ -2484,7 +3041,6 @@ final class SettingsManager: ObservableObject {
             )
         }
         autoCheckUpdates = defaults.object(forKey: Keys.autoCheckUpdates) as? Bool ?? true
-        neteaseScrobbleEnabled = defaults.object(forKey: Keys.neteaseScrobbleEnabled) as? Bool ?? true
         showDesktopLyrics = defaults.object(forKey: Keys.desktopLyrics) as? Bool ?? false
         #if os(macOS)
         automixEnabled = defaults.object(forKey: Keys.automix) as? Bool ?? false
@@ -2524,6 +3080,32 @@ final class SettingsManager: ObservableObject {
         queueAddBehavior = defaults.string(forKey: Keys.queueAddBehavior)
             .flatMap(QueueAddBehavior.init) ?? .next
         autoSkipUnplayable = defaults.object(forKey: Keys.autoSkipUnplayable) as? Bool ?? true
+        // Beans `playbackSection` (P3 2/3).
+        mixWithOtherAudio = defaults.object(forKey: Keys.mixWithOtherAudio) as? Bool ?? false
+        autoResumeLastPlayback = defaults.object(forKey: Keys.autoResumeLastPlayback) as? Bool ?? false
+        showThirdPartySourceNotice = defaults.object(forKey: Keys.showThirdPartySourceNotice) as? Bool ?? true
+        // Beans `appearanceSection` (P3 3/3).
+        customAccentHex = defaults.string(forKey: Keys.customAccentHex) ?? ""
+        tabLabelsVisible = defaults.object(forKey: Keys.tabLabelsVisible) as? Bool ?? true
+        legacyTabBarCornerRadius = Self.clamped(
+            defaults.object(forKey: Keys.legacyTabBarCornerRadius) as? Double ?? 32,
+            to: Self.legacyTabBarCornerRadiusRange)
+        legacyTabBarWidth = Self.clamped(
+            defaults.object(forKey: Keys.legacyTabBarWidth) as? Double ?? 420,
+            to: Self.legacyTabBarWidthRange)
+        legacyTabBarOffsetX = Self.clamped(
+            defaults.object(forKey: Keys.legacyTabBarOffsetX) as? Double ?? 0,
+            to: Self.legacyTabBarOffsetXRange)
+        legacyTabBarOffsetY = Self.clamped(
+            defaults.object(forKey: Keys.legacyTabBarOffsetY) as? Double ?? 0,
+            to: Self.legacyTabBarOffsetYRange)
+        homeWallpaperBlur = min(max(defaults.object(forKey: Keys.homeWallpaperBlur) as? Double ?? 0, 0), 30)
+        backgroundSyncAll = defaults.object(forKey: Keys.backgroundSyncAll) as? Bool ?? true
+        backgroundHexLight = defaults.string(forKey: Keys.backgroundHexLight) ?? ""
+        backgroundHexDark = defaults.string(forKey: Keys.backgroundHexDark) ?? ""
+        backgroundImagePathLight = defaults.string(forKey: Keys.backgroundImagePathLight) ?? ""
+        backgroundImagePathDark = defaults.string(forKey: Keys.backgroundImagePathDark) ?? ""
+        wallpaperPaths = defaults.stringArray(forKey: Keys.wallpaperPaths) ?? []
         playbackEntryView = defaults.string(forKey: Keys.playbackEntryView)
             .flatMap(PlaybackEntryView.init) ?? .nowPlaying
         let storedTintIntensity = defaults.object(forKey: Keys.playerPageTintIntensity) as? Double ?? 1

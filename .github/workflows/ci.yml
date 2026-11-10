@@ -12,17 +12,77 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  build-and-test:
+  # The six test groups run as parallel matrix jobs, one runner each.
+  # A plain `swift test` stalls this target on the 3-thread CI runner:
+  # runs #136/#137 both printed test output for only ~30 s (the
+  # documented ~30 s cooperative-pool backlog at the start of a run —
+  # see EventLog in PlaybackEngineSmokeTests), then went completely
+  # silent for ~85 min until the 90-min cap killed them, with no test
+  # failing. The stuck test set moves between runs, so no single test
+  # is the cause — they are victims of cooperative-pool oversubscription:
+  # hundreds of tests queue at once, synchronous CPU-bound work
+  # (TrackAnalyzer full-track decodes, loudness/stem suites) and
+  # synchronous blocking waits (EventLog.wait's Thread.sleep loop,
+  # semaphore waits, queue.sync) occupy the pool threads, and a task
+  # suspended in a checked continuation whose resumer never gets a
+  # thread wedges the run instead of failing one test.
+  #
+  # Splitting the suite into sequential steps (run #138) already
+  # proved the stall is load-dependent: account isolation, A-M and N-P
+  # all passed, but the sequential job still risked the 90-min cap
+  # (Q-S alone took 22+ min before). So each group now gets its own
+  # runner — its own 3 pool threads and its own 90-min cap — and the
+  # groups run in parallel instead of queuing behind each other.
+  #
+  # Run #140 attempt 2 showed Q-S alone still wedges on its own
+  # runner (244 tests, 159 passed in ~19 s, then 83 min of silence):
+  # the Score/Stem/Queue planner suites in Q-S block the pool by
+  # themselves. So Q-S is split in two (Q-S1/Q-S2, 16 suites each)
+  # until the wedge is gone; split further if either half still stalls.
+  # The skip lists below are REGENERATED from the current 129-suite
+  # enumeration (verified: every suite runs exactly once across the
+  # six groups): account isolation 1, A-M 54, N-P 23, Q-S 32, T-Z 17,
+  # playback 2 (PlaybackEngineSmokeTests + TransitionSegmentTests,
+  # which drive AVAudioEngine through runWithWatchdog; account
+  # isolation runs alone because it was the first starvation victim
+  # on the PR #31 branch). A suite whose type name does not end in
+  # Tests is not skipped by any list, so it runs in the group jobs
+  # instead of being dropped.
+  test:
     runs-on: macos-26
-    timeout-minutes: 45
+    timeout-minutes: 90
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: account isolation
+            run: "swift test --filter 'AccountIsolationTests'"
+          - name: suites A-M
+            run: "swift test --skip 'AccountIsolationTests|NavigationDestinationTests|NowPlayingArtworkStoreTests|OfflineArtworkTests|OfflineMetadataCleanupTests|OfflineStoreTests|OfflineUIFixtureTests|OutputRouteChangeDamperTests|OverloadTraceLineTests|PauseDrainTests|PlatformTrackLyricsTests|PlaybackEngineSmokeTests|PlaybackQueuePlanTests|PlaybackRepositoryTests|PlaybackRescheduleCheckTests|PlaybackStallCheckTests|PlaybackStartErrorCheckTests|PlaybackStateStorageTests|PlaylistAddErrorTests|PlaylistLoadingTests|PlaylistPublicationTests|PlaylistSearchTests|PreparedDeckTests|ProgressiveAudioBufferTests|ProgressiveLoaderFLACTests|QQLyricDecryptTests|QueueOrderAcquisitionTests|QueueOrderTests|QueuePrefetchTests|RecommendationTests|ReleaseCheckerDownloadTests|ScoreByteIdentityTests|ScoreCompilerTests|ScoreGridSelfCheckTests|ScoreRenderTests|ScoreSegmentAdmissionTests|ScoreTemplateSelectionTests|ScoreVettingTests|SeamAlignmentTests|SeamLatencyCalibrationTests|SeamReleaseTests|SegmentTimelineAlignmentTests|SettingsBackupTests|ShortcutSettingsTests|SlamAndTensionCutCompileTests|SleepTimerTests|StemEnvelopeTests|StemMetalResourcesTests|StemModelDownloaderStateTests|StemModelSpecTests|StemModelVerificationTests|StemPrerenderFieldSampleTests|StemPrerenderStartTests|StemTechniqueTests|StorageUsageTests|StructureSegmenterTests|SyncTests|TapCaptureThreadingTests|TapWriteLedgerTests|TempoRampTests|TestWatchdogTests|TrackAnalyzerTests|TrackTableTests|TransitionAimTests|TransitionAutomationTests|TransitionIntentTests|TransitionPlannerStructureTests|TransitionPlannerTests|TransitionScoreModelTests|TransitionSegmentTests|VinylRecordTests|VocalExchangeBothClocksTests|VocalHoldEQTests|WeightLoaderTests|WholeMixLaneTests'"
+          - name: suites N-P
+            run: "swift test --skip 'AccountIsolationTests|AdmissionGateTests|AnalysisStoreTests|AppearanceHexTests|AudioCacheEvictionTests|AudioCacheTests|AudioOutputDeviceTests|AudioSourceTrackMatcherTests|AuditionPlanOverrideTests|AutoMixDebugModelTests|AutoMixSettingsTests|AutomaticCacheLimitTests|BackgroundDownloadTransportTests|BeansCoverPaletteTests|BedIntroCompileTests|BedSplitTests|CDNHostTests|ChainCoherenceTests|CheckpointShapeTests|CustomAudioSourceTests|DeckChainDSPResetTests|DeckChainTimePitchBypassTests|DeviceIDTests|DistributionChannelTests|DownloadEligibilityTests|DownloadManagerTests|EngineAudioCacheDownloadTests|EngineDumpThrottleTests|EngineResurrectionSentinelTests|EngineTraceCoalesceTests|EngineTraceRenderTests|EngineTraceRingHygieneTests|EngineTraceRingTests|FoliaIOSPureLogicTests|FoliaMacPlaybackSettingsTests|FoliaMasterSwitchTests|FoliaPlaybackSettingsTests|GestureLibraryByteIdentityTests|HeadLatencyOverrideTests|HiddenAppWindowsTests|ImageCacheClearTests|ImageThumbnailTests|KumoneObjCTests|LatticePlayerTests|LayoutSizeClassTests|LoudnessCompensationTests|LoudnessMeterTests|LuminousPlayerTests|LyricFilterTests|LyricMatchTests|LyricsParserTests|LyricsSidecarTests|MasterLimiterTests|ModelManifestTests|ModelReleaseTests|PlaybackEngineSmokeTests|QQLyricDecryptTests|QueueOrderAcquisitionTests|QueueOrderTests|QueuePrefetchTests|RecommendationTests|ReleaseCheckerDownloadTests|ScoreByteIdentityTests|ScoreCompilerTests|ScoreGridSelfCheckTests|ScoreRenderTests|ScoreSegmentAdmissionTests|ScoreTemplateSelectionTests|ScoreVettingTests|SeamAlignmentTests|SeamLatencyCalibrationTests|SeamReleaseTests|SegmentTimelineAlignmentTests|SettingsBackupTests|ShortcutSettingsTests|SlamAndTensionCutCompileTests|SleepTimerTests|StemEnvelopeTests|StemMetalResourcesTests|StemModelDownloaderStateTests|StemModelSpecTests|StemModelVerificationTests|StemPrerenderFieldSampleTests|StemPrerenderStartTests|StemTechniqueTests|StorageUsageTests|StructureSegmenterTests|SyncTests|TapCaptureThreadingTests|TapWriteLedgerTests|TempoRampTests|TestWatchdogTests|TrackAnalyzerTests|TrackTableTests|TransitionAimTests|TransitionAutomationTests|TransitionIntentTests|TransitionPlannerStructureTests|TransitionPlannerTests|TransitionScoreModelTests|TransitionSegmentTests|VinylRecordTests|VocalExchangeBothClocksTests|VocalHoldEQTests|WeightLoaderTests|WholeMixLaneTests'"
+          - name: suites Q-S1
+            run: "swift test --skip 'AccountIsolationTests|AdmissionGateTests|AnalysisStoreTests|AppearanceHexTests|AudioCacheEvictionTests|AudioCacheTests|AudioOutputDeviceTests|AudioSourceTrackMatcherTests|AuditionPlanOverrideTests|AutoMixDebugModelTests|AutoMixSettingsTests|AutomaticCacheLimitTests|BackgroundDownloadTransportTests|BeansCoverPaletteTests|BedIntroCompileTests|BedSplitTests|CDNHostTests|ChainCoherenceTests|CheckpointShapeTests|CustomAudioSourceTests|DeckChainDSPResetTests|DeckChainTimePitchBypassTests|DeviceIDTests|DistributionChannelTests|DownloadEligibilityTests|DownloadManagerTests|EngineAudioCacheDownloadTests|EngineDumpThrottleTests|EngineResurrectionSentinelTests|EngineTraceCoalesceTests|EngineTraceRenderTests|EngineTraceRingHygieneTests|EngineTraceRingTests|FoliaIOSPureLogicTests|FoliaMacPlaybackSettingsTests|FoliaMasterSwitchTests|FoliaPlaybackSettingsTests|GestureLibraryByteIdentityTests|HeadLatencyOverrideTests|HiddenAppWindowsTests|ImageCacheClearTests|ImageThumbnailTests|KumoneObjCTests|LatticePlayerTests|LayoutSizeClassTests|LoudnessCompensationTests|LoudnessMeterTests|LuminousPlayerTests|LyricFilterTests|LyricMatchTests|LyricsParserTests|LyricsSidecarTests|MasterLimiterTests|ModelManifestTests|ModelReleaseTests|NavigationDestinationTests|NowPlayingArtworkStoreTests|OfflineArtworkTests|OfflineMetadataCleanupTests|OfflineStoreTests|OfflineUIFixtureTests|OutputRouteChangeDamperTests|OverloadTraceLineTests|PauseDrainTests|PlatformTrackLyricsTests|PlaybackEngineSmokeTests|PlaybackQueuePlanTests|PlaybackRepositoryTests|PlaybackRescheduleCheckTests|PlaybackStallCheckTests|PlaybackStartErrorCheckTests|PlaybackStateStorageTests|PlaylistAddErrorTests|PlaylistLoadingTests|PlaylistPublicationTests|PlaylistSearchTests|PreparedDeckTests|ProgressiveAudioBufferTests|ProgressiveLoaderFLACTests|SegmentTimelineAlignmentTests|SettingsBackupTests|ShortcutSettingsTests|SlamAndTensionCutCompileTests|SleepTimerTests|StemEnvelopeTests|StemMetalResourcesTests|StemModelDownloaderStateTests|StemModelSpecTests|StemModelVerificationTests|StemPrerenderFieldSampleTests|StemPrerenderStartTests|StemTechniqueTests|StorageUsageTests|StructureSegmenterTests|SyncTests|TapCaptureThreadingTests|TapWriteLedgerTests|TempoRampTests|TestWatchdogTests|TrackAnalyzerTests|TrackTableTests|TransitionAimTests|TransitionAutomationTests|TransitionIntentTests|TransitionPlannerStructureTests|TransitionPlannerTests|TransitionScoreModelTests|TransitionSegmentTests|VinylRecordTests|VocalExchangeBothClocksTests|VocalHoldEQTests|WeightLoaderTests|WholeMixLaneTests'"
+          - name: suites Q-S2
+            run: "swift test --skip 'AccountIsolationTests|AdmissionGateTests|AnalysisStoreTests|AppearanceHexTests|AudioCacheEvictionTests|AudioCacheTests|AudioOutputDeviceTests|AudioSourceTrackMatcherTests|AuditionPlanOverrideTests|AutoMixDebugModelTests|AutoMixSettingsTests|AutomaticCacheLimitTests|BackgroundDownloadTransportTests|BeansCoverPaletteTests|BedIntroCompileTests|BedSplitTests|CDNHostTests|ChainCoherenceTests|CheckpointShapeTests|CustomAudioSourceTests|DeckChainDSPResetTests|DeckChainTimePitchBypassTests|DeviceIDTests|DistributionChannelTests|DownloadEligibilityTests|DownloadManagerTests|EngineAudioCacheDownloadTests|EngineDumpThrottleTests|EngineResurrectionSentinelTests|EngineTraceCoalesceTests|EngineTraceRenderTests|EngineTraceRingHygieneTests|EngineTraceRingTests|FoliaIOSPureLogicTests|FoliaMacPlaybackSettingsTests|FoliaMasterSwitchTests|FoliaPlaybackSettingsTests|GestureLibraryByteIdentityTests|HeadLatencyOverrideTests|HiddenAppWindowsTests|ImageCacheClearTests|ImageThumbnailTests|KumoneObjCTests|LatticePlayerTests|LayoutSizeClassTests|LoudnessCompensationTests|LoudnessMeterTests|LuminousPlayerTests|LyricFilterTests|LyricMatchTests|LyricsParserTests|LyricsSidecarTests|MasterLimiterTests|ModelManifestTests|ModelReleaseTests|NavigationDestinationTests|NowPlayingArtworkStoreTests|OfflineArtworkTests|OfflineMetadataCleanupTests|OfflineStoreTests|OfflineUIFixtureTests|OutputRouteChangeDamperTests|OverloadTraceLineTests|PauseDrainTests|PlatformTrackLyricsTests|PlaybackEngineSmokeTests|PlaybackQueuePlanTests|PlaybackRepositoryTests|PlaybackRescheduleCheckTests|PlaybackStallCheckTests|PlaybackStartErrorCheckTests|PlaybackStateStorageTests|PlaylistAddErrorTests|PlaylistLoadingTests|PlaylistPublicationTests|PlaylistSearchTests|PreparedDeckTests|ProgressiveAudioBufferTests|ProgressiveLoaderFLACTests|QQLyricDecryptTests|QueueOrderAcquisitionTests|QueueOrderTests|QueuePrefetchTests|RecommendationTests|ReleaseCheckerDownloadTests|ScoreByteIdentityTests|ScoreCompilerTests|ScoreGridSelfCheckTests|ScoreRenderTests|ScoreSegmentAdmissionTests|ScoreTemplateSelectionTests|ScoreVettingTests|SeamAlignmentTests|SeamLatencyCalibrationTests|SeamReleaseTests|TapCaptureThreadingTests|TapWriteLedgerTests|TempoRampTests|TestWatchdogTests|TrackAnalyzerTests|TrackTableTests|TransitionAimTests|TransitionAutomationTests|TransitionIntentTests|TransitionPlannerStructureTests|TransitionPlannerTests|TransitionScoreModelTests|TransitionSegmentTests|VinylRecordTests|VocalExchangeBothClocksTests|VocalHoldEQTests|WeightLoaderTests|WholeMixLaneTests'"
+          - name: suites T-Z
+            run: "swift test --skip 'AccountIsolationTests|AdmissionGateTests|AnalysisStoreTests|AppearanceHexTests|AudioCacheEvictionTests|AudioCacheTests|AudioOutputDeviceTests|AudioSourceTrackMatcherTests|AuditionPlanOverrideTests|AutoMixDebugModelTests|AutoMixSettingsTests|AutomaticCacheLimitTests|BackgroundDownloadTransportTests|BeansCoverPaletteTests|BedIntroCompileTests|BedSplitTests|CDNHostTests|ChainCoherenceTests|CheckpointShapeTests|CustomAudioSourceTests|DeckChainDSPResetTests|DeckChainTimePitchBypassTests|DeviceIDTests|DistributionChannelTests|DownloadEligibilityTests|DownloadManagerTests|EngineAudioCacheDownloadTests|EngineDumpThrottleTests|EngineResurrectionSentinelTests|EngineTraceCoalesceTests|EngineTraceRenderTests|EngineTraceRingHygieneTests|EngineTraceRingTests|FoliaIOSPureLogicTests|FoliaMacPlaybackSettingsTests|FoliaMasterSwitchTests|FoliaPlaybackSettingsTests|GestureLibraryByteIdentityTests|HeadLatencyOverrideTests|HiddenAppWindowsTests|ImageCacheClearTests|ImageThumbnailTests|KumoneObjCTests|LatticePlayerTests|LayoutSizeClassTests|LoudnessCompensationTests|LoudnessMeterTests|LuminousPlayerTests|LyricFilterTests|LyricMatchTests|LyricsParserTests|LyricsSidecarTests|MasterLimiterTests|ModelManifestTests|ModelReleaseTests|NavigationDestinationTests|NowPlayingArtworkStoreTests|OfflineArtworkTests|OfflineMetadataCleanupTests|OfflineStoreTests|OfflineUIFixtureTests|OutputRouteChangeDamperTests|OverloadTraceLineTests|PauseDrainTests|PlatformTrackLyricsTests|PlaybackEngineSmokeTests|PlaybackQueuePlanTests|PlaybackRepositoryTests|PlaybackRescheduleCheckTests|PlaybackStallCheckTests|PlaybackStartErrorCheckTests|PlaybackStateStorageTests|PlaylistAddErrorTests|PlaylistLoadingTests|PlaylistPublicationTests|PlaylistSearchTests|PreparedDeckTests|ProgressiveAudioBufferTests|ProgressiveLoaderFLACTests|QQLyricDecryptTests|QueueOrderAcquisitionTests|QueueOrderTests|QueuePrefetchTests|RecommendationTests|ReleaseCheckerDownloadTests|ScoreByteIdentityTests|ScoreCompilerTests|ScoreGridSelfCheckTests|ScoreRenderTests|ScoreSegmentAdmissionTests|ScoreTemplateSelectionTests|ScoreVettingTests|SeamAlignmentTests|SeamLatencyCalibrationTests|SeamReleaseTests|SegmentTimelineAlignmentTests|SettingsBackupTests|ShortcutSettingsTests|SlamAndTensionCutCompileTests|SleepTimerTests|StemEnvelopeTests|StemMetalResourcesTests|StemModelDownloaderStateTests|StemModelSpecTests|StemModelVerificationTests|StemPrerenderFieldSampleTests|StemPrerenderStartTests|StemTechniqueTests|StorageUsageTests|StructureSegmenterTests|SyncTests|TransitionSegmentTests'"
+          - name: playback suites
+            run: "swift test --filter 'PlaybackEngineSmokeTests|TransitionSegmentTests'"
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Test (${{ matrix.name }})
+        run: ${{ matrix.run }}
+
+  build:
+    runs-on: macos-26
+    timeout-minutes: 90
     steps:
       - uses: actions/checkout@v4
 
       - name: Build
         run: swift build
-
-      - name: Test
-        run: swift test
 
       # Same invocation as release.yml, minus signing / notarization: the
       # script's own ad-hoc signature is all an unsigned build gets.

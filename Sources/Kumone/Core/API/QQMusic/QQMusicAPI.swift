@@ -1316,6 +1316,29 @@ final class QQMusicAPI: Sendable {
         return artists
     }
 
+    /// Daily recommendations for the QQ home feed ("每日推荐"),
+    /// from Beans 2.0.3 `QQMusicAPI.recommendSongs`: the tops of the
+    /// three charts (热歌 26 / 新歌 27 / 飙升 62), deduped by
+    /// songmid, mixed and shuffled with a day-seeded RNG — the order
+    /// rotates daily but stays stable within the day. Depends only
+    /// on the existing `topListSongs`, so it works anonymously.
+    func recommendSongs(limit: Int = 30) async throws -> [QQMusicSong] {
+        let day = Calendar.current.ordinality(of: .day, in: .year, for: Date()) ?? 0
+        var songs: [QQMusicSong] = []
+        var seen = Set<String>()
+        let per = max(8, (limit + 2) / 3)
+        for topid in [26, 27, 62] {
+            guard let list = try? await topListSongs(topid: topid, limit: per) else { continue }
+            for song in list where !seen.contains(song.songmid) {
+                seen.insert(song.songmid)
+                songs.append(song)
+            }
+        }
+        var rng = SeededRNG(state: UInt64(day) &* 2654435761)
+        songs.shuffle(using: &rng)
+        return Array(songs.prefix(limit))
+    }
+
     /// Resolves the "我的喜欢" real playlist ID: the `dirid=201`
     /// endpoint, or `GetUserPlaylist` order 3.
     private func likedPlaylistID(auth: AuthSnapshot, cookies: [String]) async -> Int? {
@@ -1686,4 +1709,15 @@ private enum QQMusicSearchType: Int {
     case song = 0
     case artist = 1
     case album = 2
+}
+
+/// Seedable RNG (Beans 2.0.3 `QQMusicAPI.SeededRNG`): daily
+/// recommendations shuffle deterministically per day, so the
+/// order is stable within a day and rotates the next.
+private struct SeededRNG: RandomNumberGenerator {
+    var state: UInt64
+    mutating func next() -> UInt64 {
+        state = state &* 6364136223846793005 &+ 1442695040888963407
+        return state
+    }
 }

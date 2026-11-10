@@ -15,58 +15,7 @@ enum MusicAPI {
         let code: Int
     }
 
-    // MARK: - Auth
-
-    struct QRKeyResponse: Decodable {
-        let code: Int
-        let unikey: String
-    }
-
-    static func qrKey() async throws -> String {
-        try await eapi(QRKeyResponse.self, "/login/qrcode/unikey", ["type": 3]).unikey
-    }
-
-    static func qrLoginURL(unikey: String) -> String? {
-        Upstream.webURL("/login?codekey=\(unikey)")?.absoluteString
-    }
-
-    struct QRCheckResponse: Decodable {
-        let code: Int
-        let message: String?
-        let nickname: String?
-        let avatarUrl: String?
-    }
-
-    /// Codes: 800 expired · 801 waiting · 802 scanned · 803 success.
-    /// On 803 the auth cookies arrive via Set-Cookie and are absorbed by the client.
-    static func qrCheck(unikey: String) async throws -> QRCheckResponse {
-        let data = try await client.eapi("/login/qrcode/client/login", ["key": unikey, "type": 3])
-        return try JSONDecoder().decode(QRCheckResponse.self, from: data)
-    }
-
-    /// Sends an SMS verification code for phone-number login
-    /// (upstream: `/api/sms/captcha/sent`). Through the web API, with the
-    /// login it is for.
-    static func sendSMSCode(phone: String, countryCode: String = "86") async throws {
-        let data = try await client.api("/sms/captcha/sent",
-                                        ["ctcode": countryCode, "cellphone": phone,
-                                         "secrete": "music_middleuser_pclogin"])
-        _ = try client.decoded(CodeOnly.self, from: data)
-    }
-
-    /// Phone-number login with an SMS code (upstream: `/api/w/login/cellphone`).
-    /// Auth cookies arrive via Set-Cookie. Through the web API: through the
-    /// eapi, the service refuses it with -460 before it checks the code.
-    static func loginCellphone(phone: String, captcha: String, countryCode: String = "86") async throws {
-        let data = try await client.api("/w/login/cellphone",
-                                        ["type": "1", "https": "true",
-                                         "phone": phone, "countrycode": countryCode,
-                                         "captcha": captcha, "remember": "true"])
-        _ = try client.decoded(CodeOnly.self, from: data)
-        guard client.isLoggedIn else {
-            throw MusicAPIError.business(code: -1, message: String(localized: "登录失败，请重试"))
-        }
-    }
+    // MARK: - Session maintenance
 
     /// An isolated client keeps a late logout response away from a newer login.
     static func logout(
@@ -175,43 +124,6 @@ enum MusicAPI {
 
     static func cloudDelete(id: Int) async throws {
         _ = try await eapi(CodeOnly.self, "/cloud/del", ["songIds": "[\(id)]"])
-    }
-
-    /// `startplay` weblog — writes the song into the 最近播放 (recent-plays)
-    /// list. The service needs this *and* the `play` weblog; sending only `play`
-    /// (as before) bumped the listening ranking but never wrote 最近播放 (#33).
-    static func scrobbleStart(trackID: Int, sourceID: Int) async {
-        await sendWeblog([[
-            "action": "startplay",
-            "json": [
-                "id": trackID, "type": "song",
-                "mainsite": "1", "mainsiteWeb": "1",
-                "content": "id=\(sourceID)",
-            ],
-        ]])
-    }
-
-    /// `play` weblog — increments the listening-ranking play count and time.
-    static func scrobbleFinish(trackID: Int, sourceID: Int, seconds: Int) async {
-        await sendWeblog([[
-            "action": "play",
-            "json": [
-                "download": 0, "end": "playend", "id": trackID,
-                "sourceId": String(sourceID), "time": seconds,
-                "type": "song", "wifi": 0, "source": "list",
-                "mainsite": "1", "mainsiteWeb": "1",
-                "content": "id=\(sourceID)",
-            ],
-        ]])
-    }
-
-    /// Routed via eapi with the desktop-client cookie (`os=osx`) to match the
-    /// reference scrobble implementation.
-    private static func sendWeblog(_ log: [[String: Any]]) async {
-        guard let data = try? JSONSerialization.data(withJSONObject: log),
-              let logs = String(data: data, encoding: .utf8) else { return }
-        _ = try? await client.eapi("/feedback/weblog", ["logs": logs],
-                                   cookieOverrides: ["os": "osx"])
     }
 
     // MARK: - Playlists

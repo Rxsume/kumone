@@ -2,14 +2,55 @@ import SwiftUI
 
 /// Design tokens: color, radius, spacing, layout metrics.
 enum Theme {
-    /// Accent red, tuned slightly warmer for macOS.
-    static let accent = Color(red: 0.925, green: 0.286, blue: 0.286) // #EC4949
-    static let accentDeep = Color(red: 0.788, green: 0.161, blue: 0.161) // #C92929
+    /// Brand red. Customisable in Settings → 主题模式 → 自定义强调色
+    /// (Beans' `appearanceSection` custom accent, P3 3/3): a stored
+    /// "#RRGGBB" replaces it app-wide; empty means this default.
+    /// Reads UserDefaults directly instead of `SettingsManager.shared`
+    /// — this enum is nonisolated and `SettingsManager` is @MainActor,
+    /// so a synchronous read through it would cross the isolation
+    /// boundary. Views that observe `SettingsManager` re-render when
+    /// the key changes; views that only read `Theme.accent` pick the
+    /// new colour up on their next refresh.
+    static var accent: Color {
+        if let rgb = customAccentRGB {
+            return Color(red: rgb.0, green: rgb.1, blue: rgb.2)
+        }
+        return Color(red: 0.925, green: 0.286, blue: 0.286) // #EC4949
+    }
 
-    static let accentGradient = LinearGradient(
-        colors: [Color(red: 0.973, green: 0.357, blue: 0.357), accentDeep],
-        startPoint: .topLeading, endPoint: .bottomTrailing
-    )
+    /// Darkened accent for gradients. Derives from the custom accent
+    /// when one is set; otherwise the tuned brand values.
+    static var accentDeep: Color {
+        if let rgb = customAccentRGB {
+            return Color(red: rgb.0 * 0.85, green: rgb.1 * 0.85, blue: rgb.2 * 0.85)
+        }
+        return Color(red: 0.788, green: 0.161, blue: 0.161) // #C92929
+    }
+
+    static var accentGradient: LinearGradient {
+        if customAccentRGB != nil {
+            return LinearGradient(
+                colors: [accent, accentDeep],
+                startPoint: .topLeading, endPoint: .bottomTrailing
+            )
+        }
+        return LinearGradient(
+            colors: [Color(red: 0.973, green: 0.357, blue: 0.357), accentDeep],
+            startPoint: .topLeading, endPoint: .bottomTrailing
+        )
+    }
+
+    /// Stored custom accent as sRGB components, or nil when unset /
+    /// unparsable (then the brand red applies).
+    private static var customAccentRGB: (Double, Double, Double)? {
+        guard let hex = UserDefaults.standard.string(forKey: SettingsManager.Keys.customAccentHex),
+              !hex.isEmpty,
+              let color = Color(hex: hex),
+              let components = color.cgColor?.components,
+              components.count >= 3
+        else { return nil }
+        return (Double(components[0]), Double(components[1]), Double(components[2]))
+    }
 
     enum Radius {
         static let badge: CGFloat = 4
