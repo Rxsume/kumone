@@ -766,6 +766,9 @@ struct IOSLibraryView: View {
                     NavigationLink(value: Destination.recents) {
                         Label("最近播放", systemImage: "clock.fill")
                     }
+                    NavigationLink(value: Destination.ranking) {
+                        Label("听歌排行", systemImage: "chart.bar.fill")
+                    }
                     NavigationLink(value: Destination.collections) {
                         Label("我的收藏", systemImage: "star.fill")
                     }

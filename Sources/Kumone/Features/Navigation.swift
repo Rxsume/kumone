@@ -87,6 +87,7 @@ enum SidebarItem: Hashable {
     case likedSongs
     case daily
     case recents
+    case ranking
     case collections
     case cloud
     case playlist(Int)
@@ -101,6 +102,7 @@ enum Destination: Hashable {
     case daily
     case toplists
     case recents
+    case ranking
     case collections
     case cloud
     case search(String)
@@ -137,6 +139,8 @@ struct DestinationsModifier: ViewModifier {
                     ToplistsView()
                 case .recents:
                     RecentsView()
+                case .ranking:
+                    RankingView()
                 case .collections:
                     CollectionsView()
                 case .cloud:

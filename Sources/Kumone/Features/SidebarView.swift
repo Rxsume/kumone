@@ -34,6 +34,7 @@ struct SidebarView: View {
                     row(.downloaded, title: "已下载", icon: "arrow.down.circle.fill")
                     row(.daily, title: "每日推荐", icon: "calendar")
                     row(.recents, title: "最近播放", icon: "clock.fill")
+                    row(.ranking, title: "听歌排行", icon: "chart.bar.fill")
                     row(.collections, title: "我的收藏", icon: "star.fill")
                     row(.cloud, title: "音乐云盘", icon: "icloud.fill")
                 }
