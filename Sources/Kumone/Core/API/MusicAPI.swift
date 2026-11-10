@@ -482,6 +482,12 @@ enum MusicAPI {
     }
 
     /// Lyric lookup for a track (Folia multi-source, restored).
+    /// A platform track is tried by its own song key first
+    /// (`LyricDirectFetch`, Beans-style): QQ by songmid, Kugou by file
+    /// hash — one direct request, no search, no match scoring. This is
+    /// what rescues the songs the search-based providers miss
+    /// on-device (QQ 青花瓷, 2026-11-10). When the direct fetch comes
+    /// back empty, the normal paths below run unchanged.
     /// When the auto-best-lyric switch is on, the four sources
     /// (NetEase, AMLL, QQ, Kugou) are tried in order — preferred
     /// source first — and the best match wins (word-by-word beats
@@ -498,6 +504,9 @@ enum MusicAPI {
     /// Never throws, so callers keep today's `try?` behaviour: no error
     /// UI when lyrics are missing.
     static func lyric(for track: Track) async -> LyricResponse? {
+        if let direct = await LyricDirectFetch.fetch(for: track) {
+            return direct
+        }
         if await SettingsManager.shared.effectiveAutoUseBestLyric {
             let preferred = await SettingsManager.shared.effectivePreferredLyricSource
             return await LyricMultiSource.fetch(for: track, preferred: preferred)
