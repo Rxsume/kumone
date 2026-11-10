@@ -796,7 +796,9 @@ final class QQMusicAuth: ObservableObject {
         } else {
             url = parts.count > 2 ? parts[2] : ""
         }
-        return (parts[0], url.isEmpty ? nil : url, parts[4])
+        // QQ uses "0" as the placeholder for an absent field: a "0" in
+        // either URL slot means there is no redirect URL, not a URL.
+        return (parts[0], url.isEmpty || url == "0" ? nil : url, parts[4])
     }
 
     private static func extractCode(from urlString: String) -> String? {
