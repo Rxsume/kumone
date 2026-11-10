@@ -3,8 +3,8 @@
 name: KumoneIOS
 options:
   deploymentTarget:
-    # 26.1 floor (was 16.0): kept — later code uses unguarded iOS 26 APIs.
-    iOS: "26.1"
+    # 16.0 floor (was 26.1 while CiliCili was vendored; removed in PR #47).
+    iOS: "16.0"
   createIntermediateGroups: true
 configs:
   Debug: debug

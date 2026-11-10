@@ -4,9 +4,9 @@ import PackageDescription
 let package = Package(
     name: "KumoneIOSFeature",
     defaultLocalization: "zh-Hans",
-    // iOS 26.1 floor (was 16.0): kept — later code uses unguarded
-    // iOS 26 APIs.
-    platforms: [.iOS("26.1")],
+    // iOS 16.0 floor (was 26.1 while CiliCili was vendored; removed in
+    // PR #47, so the floor is back to 16.0).
+    platforms: [.iOS("16.0")],
     products: [
         .library(
             name: "KumoneIOSFeature",

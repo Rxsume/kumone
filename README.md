@@ -78,11 +78,11 @@ built-in Sparkle automatic updates (menu bar: Kumone → Check for Updates…).
 
 ### iOS / iPadOS (sideload)
 
-Every release ships an **unsigned** `Golia-iOS-x.y.z-custom.ipa` (iOS 26.1+). Kumone
+Every release ships an **unsigned** `Golia-iOS-x.y.z-custom.ipa` (iOS 16.0+). Kumone
 is an unofficial client and will not be on the App Store or TestFlight, so
 install it with a sideloading tool that signs the IPA with your own Apple ID —
 [AltStore](https://altstore.io), [SideStore](https://sidestore.io),
-[Sideloadly](https://sideloadly.io) or Xcode all work. The tab bar is the system’s native Liquid Glass (iOS 26.1+).
+[Sideloadly](https://sideloadly.io) or Xcode all work. The tab bar is the system’s native Liquid Glass on iOS 26+ (older versions fall back to a standard tab bar).
 
 Updating: iOS apps can't replace themselves. Settings → About → **Check for
 Updates** tells you when a newer release exists and links to it; download the
