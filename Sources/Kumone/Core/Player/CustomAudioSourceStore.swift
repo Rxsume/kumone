@@ -1,14 +1,14 @@
 import Foundation
 
 /// Stores user-imported custom audio sources, mirroring Beans'
-/// `UnblockSourceStore`, plus the one built-in source
-/// (`BuiltInAudioSources.ikunSource`, fixed id `builtin-ikun`,
-/// always first in the list).
+/// `UnblockSourceStore`.
 ///
-/// One JSON blob in UserDefaults under `storeKey`. The built-in
-/// record is stored too — its script text carries an EMPTY API key,
-/// so the blob stays key-free. List order is the resolve order in
-/// `UnblockService`.
+/// One JSON blob in UserDefaults under `storeKey`. List order is
+/// the resolve order in `UnblockService`. (The former built-in ikun
+/// source was removed 2026-11-10: nothing is auto-inserted
+/// anymore. A leftover record of it is an ordinary imported source;
+/// see `migrateLegacyBuiltInKeyIfNeeded` for the one-time key
+/// fold-back that keeps it working.)
 ///
 /// Security: the blob may contain imported scripts with private keys
 /// inside them, so `storeKey` is permanently excluded from
@@ -47,67 +47,97 @@ final class CustomAudioSourceStore: ObservableObject {
         // Dedup by id on load (first wins).
         var seen = Set<String>()
         sources = saved.filter { seen.insert($0.id).inserted }
-        ensureBuiltInSource()
+        declaredPlatforms = Self.loadDeclaredPlatforms(from: defaults)
+        migrateLegacyBuiltInKeyIfNeeded()
         save()
     }
 
-    /// Guarantees the built-in ikun source exists, first in the list.
-    /// Called on every load: an existing built-in record keeps its
-    /// `enabled` / `quality` / `name` but its script is refreshed
-    /// from code (source of truth), so an app update can ship a newer
-    /// script without touching the toggle. A user who already imported
-    /// the same script (same name, random UUID) has that copy ADOPTED
-    /// as the built-in source — same id, same script refresh, moved
-    /// to index 0 — so the sponsored-key field exists for it instead
-    /// of the built-in row silently never appearing.
-    func ensureBuiltInSource() {
-        if let index = sources.firstIndex(where: { $0.id == BuiltInAudioSources.ikunID }) {
-            var list = sources
-            var refreshed = list[index]
-            refreshed.script = BuiltInAudioSources.ikunScript
-            list.remove(at: index)
-            list.insert(refreshed, at: 0)
-            sources = list
-            return
-        }
-        if let index = sources.firstIndex(where: { $0.name == BuiltInAudioSources.ikunName }) {
-            // Adopt only a real copy of this script (same backend):
-            // an unrelated script that merely shares the name is
-            // left alone, and no built-in row is added for it.
-            guard let script = sources[index].script,
-                  script.contains(BuiltInAudioSources.ikunBackendHost) else { return }
-            var list = sources
-            var adopted = list[index]
-            // Preserve the key the user already had inside the
-            // imported text: move it to the device-only key store
-            // before the script is refreshed from code (which carries
-            // an empty key). The key field then shows it, and future
-            // rotations work from the field.
-            if let key = BuiltInAudioSources.apiKeyInScript(script), !key.isEmpty {
-                defaults.set(key, forKey: BuiltInAudioSources.apiKeyDefaultsKey)
-                if defaults === UserDefaults.standard {
-                    // Production uses UserDefaults.standard: keep the
-                    // SettingsManager-published value in sync so the
-                    // SecureField shows the moved key. Test suites use
-                    // an isolated defaults and skip this (no shared
-                    // state is touched there).
-                    SettingsManager.shared.ikunApiKey = key
-                }
-            }
-            adopted.id = BuiltInAudioSources.ikunID
-            adopted.script = BuiltInAudioSources.ikunScript
-            list.remove(at: index)
-            list.insert(adopted, at: 0)
-            sources = list
-            return
-        }
+    /// One-time migration (built-in removal, 2026-11-10). The removed
+    /// built-in ikun source stored an EMPTY key in its script text
+    /// and kept the sponsored key in UserDefaults under
+    /// "settings.ikunApiKey", which only the removed built-in
+    /// injection read. Fold the key back into the script text once,
+    /// so the record keeps working as an ordinary imported script,
+    /// then drop the device-only key. Idempotent: after the first
+    /// run the defaults key is gone, so later loads are no-ops.
+    /// Matches by script content (ikun backend host + empty
+    /// `API_KEY` placeholder), not by id, so any empty-key copy of
+    /// the script is repaired. The key is never logged.
+    private func migrateLegacyBuiltInKeyIfNeeded() {
+        guard let key = defaults.string(forKey: "settings.ikunApiKey"), !key.isEmpty else { return }
+        let placeholder = "const API_KEY = \"\""
         var list = sources
-        list.insert(BuiltInAudioSources.ikunSource(), at: 0)
-        sources = list
+        var changed = false
+        for index in list.indices {
+            guard let script = list[index].script,
+                  script.contains("c.wwwweb.top"),
+                  script.contains(placeholder) else { continue }
+            list[index].script = script.replacingOccurrences(
+                of: placeholder,
+                with: "const API_KEY = \"\(Self.jsEscaped(key))\""
+            )
+            changed = true
+        }
+        if changed {
+            sources = list
+        }
+        defaults.removeObject(forKey: "settings.ikunApiKey")
     }
 
-    /// True when at least one script source (built-in or imported) is
-    /// enabled. The custom-script resolve step and the
+    /// Escapes a key for interpolation into a JS double-quoted string.
+    private static func jsEscaped(_ key: String) -> String {
+        key
+            .replacingOccurrences(of: "\\", with: "\\\\")
+            .replacingOccurrences(of: "\"", with: "\\\"")
+            .replacingOccurrences(of: "\n", with: "\\n")
+            .replacingOccurrences(of: "\r", with: "\\r")
+    }
+
+    /// Declared LX source ids per custom source, as reported by the
+    /// script itself in its `inited` event (the keys of its
+    /// `musicSources` object). Display-only: never consulted by
+    /// resolve. Persisted in UserDefaults under `platformsKey` so
+    /// the editor shows the last known platforms even before the
+    /// source has ever played in this install; refreshed on every
+    /// runtime init via `noteDeclaredPlatforms`. Deliberately NOT in
+    /// the SettingsBackup allowlist (same category as the sources
+    /// blob: derived from user-imported scripts).
+    static let platformsKey = "settings.customAudioSourcePlatforms"
+
+    /// Source id → sorted declared LX source ids. A missing entry
+    /// means never observed (the editor shows the "first playback"
+    /// note); an empty array means observed with no sources.
+    @Published private(set) var declaredPlatforms: [String: [String]] = [:]
+
+    private static func loadDeclaredPlatforms(from defaults: UserDefaults) -> [String: [String]] {
+        guard let data = defaults.data(forKey: platformsKey),
+              let decoded = try? JSONDecoder().decode([String: [String]].self, from: data) else { return [:] }
+        return decoded
+    }
+
+    /// Declared platforms for one source, or nil if never observed.
+    func declaredPlatforms(for id: String) -> [String]? {
+        declaredPlatforms[id]
+    }
+
+    /// Records the platforms a script declared at runtime init.
+    /// Called from `LXScriptRuntime.receive(event:payload:)` on the
+    /// `inited` event; overwrites any previous entry for the id.
+    func noteDeclaredPlatforms(_ ids: [String], for id: String) {
+        let sorted = ids.sorted()
+        guard declaredPlatforms[id] != sorted else { return }
+        declaredPlatforms[id] = sorted
+        saveDeclaredPlatforms()
+    }
+
+    private func saveDeclaredPlatforms() {
+        if let data = try? JSONEncoder().encode(declaredPlatforms) {
+            defaults.set(data, forKey: Self.platformsKey)
+        }
+    }
+
+    /// True when at least one script source is enabled. The
+    /// custom-script resolve step and the
     /// `canResolveUnblockedTracks` gate read this, so playback via
     /// scripts does not depend on any built-in source toggle.
     var hasEnabledScriptSources: Bool {
@@ -150,15 +180,8 @@ final class CustomAudioSourceStore: ObservableObject {
     }
 
     func moveSource(id: String, by offset: Int) {
-        // The built-in source stays pinned at index 0.
-        guard !BuiltInAudioSources.isBuiltIn(id: id) else { return }
         guard let index = sources.firstIndex(where: { $0.id == id }) else { return }
-        var target = min(max(0, index + offset), max(0, sources.count - 1))
-        if let first = sources.first,
-           BuiltInAudioSources.isBuiltIn(id: first.id),
-           target == 0 {
-            target = 1
-        }
+        let target = min(max(0, index + offset), max(0, sources.count - 1))
         guard target != index else { return }
         var reordered = sources
         let item = reordered.remove(at: index)
@@ -191,11 +214,13 @@ final class CustomAudioSourceStore: ObservableObject {
 
     @discardableResult
     func removeSource(id: String) -> Bool {
-        // The built-in source cannot be deleted (only switched off);
-        // otherwise a reinstall would be the only way to get it back.
-        guard !BuiltInAudioSources.isBuiltIn(id: id) else { return false }
         let originalCount = sources.count
         sources.removeAll { $0.id == id }
+        // Drop the cached platform chips too, so the persisted cache
+        // does not grow with entries for sources that no longer exist.
+        if declaredPlatforms.removeValue(forKey: id) != nil {
+            saveDeclaredPlatforms()
+        }
         save()
         return sources.count != originalCount
     }

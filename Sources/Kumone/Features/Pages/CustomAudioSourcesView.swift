@@ -97,7 +97,7 @@ struct CustomAudioSourcesView: View {
                 }
 
                 Section {
-                    if store.sources.filter({ !BuiltInAudioSources.isBuiltIn(id: $0.id) }).isEmpty {
+                    if store.sources.isEmpty {
                         Text("还没有导入音源。粘贴 LX 脚本后点「识别并导入」。")
                             .font(.caption)
                             .foregroundStyle(.secondary)
@@ -105,7 +105,6 @@ struct CustomAudioSourcesView: View {
                     ForEach(store.sources) { source in
                         SourceRow(
                             source: source,
-                            isBuiltIn: BuiltInAudioSources.isBuiltIn(id: source.id),
                             onToggle: { store.updateEnabled(id: source.id, enabled: $0) },
                             onEdit: { editingSource = source },
                             onMoveUp: { store.moveSource(id: source.id, by: -1) },
@@ -215,7 +214,6 @@ struct CustomAudioSourcesView: View {
 
 private struct SourceRow: View {
     let source: CustomAudioSource
-    let isBuiltIn: Bool
     let onToggle: (Bool) -> Void
     let onEdit: () -> Void
     let onMoveUp: () -> Void
@@ -236,24 +234,22 @@ private struct SourceRow: View {
                     .labelStyle(.iconOnly)
             }
             .buttonStyle(.plain)
-            if !isBuiltIn {
-                Button(action: onMoveUp) {
-                    Label("上移", systemImage: "chevron.up")
-                        .labelStyle(.iconOnly)
-                }
-                .buttonStyle(.plain)
-                Button(action: onMoveDown) {
-                    Label("下移", systemImage: "chevron.down")
-                        .labelStyle(.iconOnly)
-                }
-                .buttonStyle(.plain)
-                Button(action: onDelete) {
-                    Label("删除", systemImage: "trash")
-                        .labelStyle(.iconOnly)
-                }
-                .buttonStyle(.plain)
-                .foregroundStyle(.red)
+            Button(action: onMoveUp) {
+                Label("上移", systemImage: "chevron.up")
+                    .labelStyle(.iconOnly)
             }
+            .buttonStyle(.plain)
+            Button(action: onMoveDown) {
+                Label("下移", systemImage: "chevron.down")
+                    .labelStyle(.iconOnly)
+            }
+            .buttonStyle(.plain)
+            Button(action: onDelete) {
+                Label("删除", systemImage: "trash")
+                    .labelStyle(.iconOnly)
+            }
+            .buttonStyle(.plain)
+            .foregroundStyle(.red)
             Toggle("", isOn: Binding(get: { source.enabled }, set: onToggle))
                 .labelsHidden()
         }
@@ -266,23 +262,45 @@ private struct SourceRow: View {
         } else {
             base = "\(source.kind) · \(source.quality)"
         }
-        return isBuiltIn ? "内置 · \(base)" : base
+        return base
     }
 }
 
 private struct SourceEditorSheet: View {
-    @ObservedObject private var settings = SettingsManager.shared
     @State private var draft: CustomAudioSource
+    @ObservedObject private var store = CustomAudioSourceStore.shared
     let onSave: (CustomAudioSource) -> Void
     @Environment(\.dismiss) private var dismiss
+
+    /// LX source ids the script declared at its last runtime init
+    /// (persisted cache; empty = never observed). Display-only.
+    private var declaredPlatformIDs: Set<String> {
+        Set(store.declaredPlatforms(for: draft.id) ?? [])
+    }
+
+    /// Declared ids with no grounded Chinese name (e.g. the ikun
+    /// script's `git` key): shown as raw-id chips, never guessed.
+    private var unmappedDeclaredIDs: [String] {
+        declaredPlatformIDs
+            .filter { LXScriptSourcePlatform.displayName(for: $0) == nil }
+            .sorted()
+    }
+
+    private func platformChip(label: String, highlighted: Bool) -> some View {
+        Text(label)
+            .font(.subheadline)
+            .padding(.horizontal, 12)
+            .padding(.vertical, 6)
+            .background(
+                highlighted ? Color.accentColor.opacity(0.15) : Color.secondary.opacity(0.12),
+                in: Capsule()
+            )
+            .foregroundStyle(highlighted ? Color.accentColor : Color.secondary)
+    }
 
     init(source: CustomAudioSource, onSave: @escaping (CustomAudioSource) -> Void) {
         _draft = State(initialValue: source)
         self.onSave = onSave
-    }
-
-    private var isBuiltIn: Bool {
-        BuiltInAudioSources.isBuiltIn(id: draft.id)
     }
 
     private var qualityOptions: [(value: String, label: String)] {
@@ -298,7 +316,6 @@ private struct SourceEditorSheet: View {
             Form {
                 Section("名称") {
                     TextField("音源名称", text: $draft.name)
-                        .disabled(isBuiltIn)
                 }
                 Section("音质") {
                     Picker("音质", selection: $draft.quality) {
@@ -307,15 +324,32 @@ private struct SourceEditorSheet: View {
                         }
                     }
                 }
-                if isBuiltIn {
-                    Section("赞助密钥") {
-                        SecureField("粘贴赞助密钥", text: $settings.ikunApiKey)
-                        Text("只保存在本机，不会备份、同步或上传。")
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
+                if draft.script != nil || draft.kind == "script" {
+                    Section("支持平台") {
+                        ScrollView(.horizontal, showsIndicators: false) {
+                            HStack(spacing: 8) {
+                                platformChip(
+                                    label: "全部",
+                                    highlighted: LXScriptSourcePlatform.allDeclared(declaredPlatformIDs)
+                                )
+                                ForEach(LXScriptSourcePlatform.known, id: \.id) { platform in
+                                    platformChip(
+                                        label: platform.name,
+                                        highlighted: declaredPlatformIDs.contains(platform.id)
+                                    )
+                                }
+                                ForEach(unmappedDeclaredIDs, id: \.self) { id in
+                                    platformChip(label: id, highlighted: true)
+                                }
+                            }
+                            .padding(.vertical, 2)
+                        }
+                        if declaredPlatformIDs.isEmpty {
+                            Text("首次播放后显示支持情况")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
                     }
-                }
-                if (draft.script != nil || draft.kind == "script") && !isBuiltIn {
                     Section("脚本内容") {
                         TextEditor(text: Binding(
                             get: { draft.script ?? "" },
