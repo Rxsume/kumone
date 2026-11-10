@@ -298,6 +298,85 @@ struct CustomAudioSourceTests {
         #expect(reloaded.sources.first?.enabled == false)
     }
 
+    @Test func apiKeyInScriptExtractsKey() {
+        #expect(BuiltInAudioSources.apiKeyInScript("const API_KEY = \"TEST-KEY-123\";") == "TEST-KEY-123")
+        #expect(BuiltInAudioSources.apiKeyInScript("const API_KEY = \"\";") == nil)
+        #expect(BuiltInAudioSources.apiKeyInScript("const x = 1;") == nil)
+        #expect(BuiltInAudioSources.apiKeyInScript(nil) == nil)
+        #expect(BuiltInAudioSources.apiKeyInScript(BuiltInAudioSources.ikunScript) == nil)
+    }
+
+    @Test @MainActor func storeAdoptsSameNamedImportedIkunSource() {
+        let suite = "com.test.BuiltinIkunAdoptionTests"
+        guard let defaults = UserDefaults(suiteName: suite) else {
+            Issue.record("could not create test UserDefaults suite")
+            return
+        }
+        defaults.removePersistentDomain(forName: suite)
+        defer { defaults.removePersistentDomain(forName: suite) }
+
+        // An imported copy of the v26 script: same @name, same
+        // backend, key still inside the text. (TEST-KEY-123 is a
+        // fake placeholder for this test, never a real key.)
+        let imported = CustomAudioSource(
+            name: BuiltInAudioSources.ikunName,
+            kind: "script",
+            template: "",
+            quality: "flac",
+            script: """
+            const API_URL = "https://c.wwwweb.top";
+            const API_KEY = "TEST-KEY-123";
+            """,
+            enabled: false
+        )
+        guard let data = try? JSONEncoder().encode([imported]) else {
+            Issue.record("could not encode imported source")
+            return
+        }
+        defaults.set(data, forKey: CustomAudioSourceStore.storeKey)
+
+        let store = CustomAudioSourceStore(defaults: defaults)
+        #expect(store.sources.count == 1)
+        #expect(store.sources.first?.id == BuiltInAudioSources.ikunID)
+        #expect(store.sources.first?.name == BuiltInAudioSources.ikunName)
+        #expect(store.sources.first?.script == BuiltInAudioSources.ikunScript)
+        #expect(store.sources.first?.quality == "flac")
+        #expect(store.sources.first?.enabled == false)
+        #expect(defaults.string(forKey: BuiltInAudioSources.apiKeyDefaultsKey) == "TEST-KEY-123")
+        #expect(store.removeSource(id: BuiltInAudioSources.ikunID) == false)
+    }
+
+    @Test @MainActor func storeAdoptsSameNamedImportedIkunSourceWithoutKey() {
+        let suite = "com.test.BuiltinIkunAdoptionNoKeyTests"
+        guard let defaults = UserDefaults(suiteName: suite) else {
+            Issue.record("could not create test UserDefaults suite")
+            return
+        }
+        defaults.removePersistentDomain(forName: suite)
+        defer { defaults.removePersistentDomain(forName: suite) }
+
+        let imported = CustomAudioSource(
+            name: BuiltInAudioSources.ikunName,
+            kind: "script",
+            template: "",
+            script: """
+            const API_URL = "https://c.wwwweb.top";
+            const API_KEY = "";
+            """
+        )
+        guard let data = try? JSONEncoder().encode([imported]) else {
+            Issue.record("could not encode imported source")
+            return
+        }
+        defaults.set(data, forKey: CustomAudioSourceStore.storeKey)
+
+        let store = CustomAudioSourceStore(defaults: defaults)
+        #expect(store.sources.count == 1)
+        #expect(store.sources.first?.id == BuiltInAudioSources.ikunID)
+        #expect(store.sources.first?.script == BuiltInAudioSources.ikunScript)
+        #expect(defaults.string(forKey: BuiltInAudioSources.apiKeyDefaultsKey) == nil)
+    }
+
     // MARK: - Share import (.js / .txt opened into the app)
 
     private static let sharedScript = """

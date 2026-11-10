@@ -27,6 +27,12 @@ enum BuiltInAudioSources {
     /// Display name, matching the script's own `@name`.
     static let ikunName = "酸甜贤音源"
 
+    /// The script's backend host. An imported script is only treated
+    /// as a copy of this script (and adopted as the built-in source)
+    /// when its text reaches this host — a different script that
+    /// merely shares the name is never clobbered.
+    static let ikunBackendHost = "c.wwwweb.top"
+
     /// The exact line in `ikunScript` holding the key placeholder.
     /// Key injection replaces this line only.
     static let apiKeyPlaceholder = "const API_KEY = \"\""
@@ -89,6 +95,25 @@ enum BuiltInAudioSources {
             .replacingOccurrences(of: "\"", with: "\\\"")
             .replacingOccurrences(of: "\n", with: "\\n")
             .replacingOccurrences(of: "\r", with: "\\r")
+    }
+
+    /// The sponsored key embedded in an imported copy of the script,
+    /// if any. The v26 line is exactly `const API_KEY = "<key>"` (no
+    /// semicolon). Keys are `IKM-…` alphanumerics and dashes, so a
+    /// plain quote-delimited scan is enough; the unescape below only
+    /// covers the escapes `jsEscaped` writes. Returns nil for an
+    /// empty key and for text without the line.
+    static func apiKeyInScript(_ script: String?) -> String? {
+        guard let script,
+              let marker = script.range(of: "const API_KEY = \""),
+              let end = script[marker.upperBound...].firstIndex(of: "\"") else { return nil }
+        var key = String(script[marker.upperBound..<end])
+        key = key
+            .replacingOccurrences(of: "\\n", with: "\n")
+            .replacingOccurrences(of: "\\r", with: "\r")
+            .replacingOccurrences(of: "\\\"", with: "\"")
+            .replacingOccurrences(of: "\\\\", with: "\\")
+        return key.isEmpty ? nil : key
     }
 
     /// The ikun v26 LX script, verbatim except `API_KEY` is empty

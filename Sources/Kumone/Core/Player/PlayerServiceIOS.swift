@@ -1195,6 +1195,14 @@ final class PlayerService: ObservableObject {
     }
 
     private func handleUnplayable(_ track: Track) {
+        // The track will never play, so its lyrics will never arrive
+        // through the normal path either: stop pretending to load
+        // them. A later real delivery (a still-running loadLyrics)
+        // overwrites this marker; a new track resets it.
+        if lyrics == nil {
+            lyrics = ParsedLyrics()
+            updateLyricsCursor(at: progress)
+        }
         consecutiveFailures += 1
         let playability = track.playability(privilege: nil,
                                             isLoggedIn: AccountStore.shared.isLoggedIn,
@@ -1582,7 +1590,18 @@ final class PlayerService: ObservableObject {
             lyrics = LyricsParser.parse(saved, filter: LyricFilterSettings.effective(for: track)).applyingOffset(lyricOffsetSeconds)
             updateLyricsCursor(at: progress)
         }
-        guard !usesOfflineQueue else { return }
+        guard !usesOfflineQueue else {
+            // Offline queue: nothing will ever load for this track, so
+            // mark lyrics as loaded-but-empty instead of leaving the
+            // player views stuck on "歌词加载中…" forever. Same marker
+            // as the no-lyrics path below; offline lyrics applied
+            // above, when present, are kept.
+            if generation == resolveGeneration, lyrics == nil {
+                lyrics = ParsedLyrics()
+                updateLyricsCursor(at: progress)
+            }
+            return
+        }
         var response = await MusicAPI.lyric(for: track)
         if response == nil {
             // One retry for transient network failures: a single blip
@@ -1726,6 +1745,12 @@ final class PlayerService: ObservableObject {
 
     private func unavailableOffline(_ track: Track, generation: Int, autoAdvance: Bool? = nil) {
         guard generation == resolveGeneration else { return }
+        // No local copy and no network: this track will not play, so
+        // its lyrics will not load either (see handleUnplayable).
+        if lyrics == nil {
+            lyrics = ParsedLyrics()
+            updateLyricsCursor(at: progress)
+        }
         if autoAdvance ?? currentWasAdvanced {
             advanceOffline(initialSkipped: 1, excludingFailedCurrent: true)
             return

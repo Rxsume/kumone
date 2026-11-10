@@ -1132,6 +1132,13 @@ final class PlayerService: ObservableObject {
 
         guard let resolved else {
             consecutiveFailures += 1
+            // This track will not play, so its lyrics will never
+            // arrive either: stop pretending to load them (same
+            // marker as the no-lyrics path in loadLyrics).
+            if lyrics == nil {
+                lyrics = ParsedLyrics()
+                updateLyricsCursor(at: livePlaybackTime)
+            }
             let reason = track.playability(privilege: nil,
                                            isLoggedIn: AccountStore.shared.isLoggedIn,
                                            vipType: AccountStore.shared.vipType).reason
@@ -2854,7 +2861,19 @@ final class PlayerService: ObservableObject {
             guard !Task.isCancelled, generation == resolveGeneration else { return }
             applyLyrics(saved, for: track)
         }
-        guard !Task.isCancelled, generation == resolveGeneration, !usesOfflineQueue else { return }
+        guard !Task.isCancelled, generation == resolveGeneration else { return }
+        guard !usesOfflineQueue else {
+            // Offline queue: nothing will ever load for this track, so
+            // mark lyrics as loaded-but-empty instead of leaving the
+            // player views stuck on "歌词加载中…" forever. Same marker
+            // as the no-lyrics path below; offline lyrics applied
+            // above, when present, are kept.
+            if lyrics == nil {
+                lyrics = ParsedLyrics()
+                updateLyricsCursor(at: livePlaybackTime)
+            }
+            return
+        }
         var response = await MusicAPI.lyric(for: track)
         if response == nil {
             // One retry for transient network failures: a single blip
@@ -3300,6 +3319,12 @@ final class PlayerService: ObservableObject {
 
     private func unavailableOffline(_ track: Track, generation: Int) {
         guard generation == resolveGeneration else { return }
+        // No local copy and no network: this track will not play, so
+        // its lyrics will not load either (see resolveAndLoad above).
+        if lyrics == nil {
+            lyrics = ParsedLyrics()
+            updateLyricsCursor(at: livePlaybackTime)
+        }
         if currentWasAdvanced {
             advanceOffline(initialSkipped: 1, excludingFailedCurrent: true)
             return
