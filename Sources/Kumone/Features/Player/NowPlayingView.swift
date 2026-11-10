@@ -1,5 +1,50 @@
 import SwiftUI
 
+/// Auto-hide state for the now-playing page chrome (Folia
+/// `usePlayerChromeAutoHide`: idle timeout exactly 3000 ms). One model
+/// owns the timer so every layout and transport control resets the
+/// same clock; the page injects it as an environment object so the
+/// transport subviews can reset it too. Only the chrome fades — lyrics,
+/// artwork and backgrounds never do. (Restored: removed by the Folia
+/// rollback, PR #36.)
+@MainActor
+final class ChromeAutoHideModel: ObservableObject {
+    /// Idle time before the chrome fades out (Folia: exactly 3000 ms).
+    static let idleTimeoutNanoseconds: UInt64 = 3_000_000_000
+
+    @Published var controlsVisible = true
+    /// Whether auto-hide is in effect (setting on + Folia master on).
+    var autoHideEnabled = false
+
+    private var hideTask: Task<Void, Never>?
+
+    /// Restart the idle timer and show the chrome. While auto-hide is
+    /// off this just leaves the chrome visible.
+    func resetTimer() {
+        hideTask?.cancel()
+        hideTask = nil
+        controlsVisible = true
+        guard autoHideEnabled else { return }
+        hideTask = Task {
+            try? await Task.sleep(nanoseconds: Self.idleTimeoutNanoseconds)
+            guard !Task.isCancelled else { return }
+            controlsVisible = false
+        }
+    }
+
+    /// Show the chrome and restart the idle timer (tap-to-reveal).
+    func showAndResetTimer() {
+        resetTimer()
+    }
+
+    /// Stop the timer and leave the chrome visible (page dismissed).
+    func stop() {
+        hideTask?.cancel()
+        hideTask = nil
+        controlsVisible = true
+    }
+}
+
 /// Immersive full-window now-playing page: artwork-tinted gradient backdrop,
 /// large artwork on the left, big synced lyrics on the right.
 struct NowPlayingView: View {
@@ -31,6 +76,7 @@ struct NowPlayingView: View {
     /// Horizontal swipe offset on the classic cover (Beans swipe-to-switch).
     @State private var classicSwipeOffset: CGFloat = 0
     /// Auto-hide model for the page chrome (Folia 3s idle fade).
+    @StateObject private var chromeAutoHide = ChromeAutoHideModel()
     #if os(iOS)
     /// Folia lyric-style window (VisPlayground) sheet, opened from the
     /// luminous layout's panel button.
@@ -81,6 +127,9 @@ struct NowPlayingView: View {
                     collapseButton(diameter: 36, glyphSize: 14)
                         .padding(.top, 20)
                         .padding(.leading, 20)
+                        .opacity(chromeAutoHide.controlsVisible ? 1 : 0)
+                        .allowsHitTesting(chromeAutoHide.controlsVisible)
+                        .animation(AppAnimation.standard, value: chromeAutoHide.controlsVisible)
                 }
             }
             #endif
@@ -100,6 +149,9 @@ struct NowPlayingView: View {
                     .buttonStyle(.pressable)
                     .padding(.top, 20)
                     .padding(.trailing, 20)
+                    .opacity(chromeAutoHide.controlsVisible ? 1 : 0)
+                    .allowsHitTesting(chromeAutoHide.controlsVisible)
+                    .animation(AppAnimation.standard, value: chromeAutoHide.controlsVisible)
                 }
             }
             .overlay(alignment: .bottomTrailing) {
@@ -117,12 +169,27 @@ struct NowPlayingView: View {
                     }
                     .padding(.trailing, 20)
                     .padding(.bottom, 108)
+                    .opacity(chromeAutoHide.controlsVisible ? 1 : 0)
+                    .allowsHitTesting(chromeAutoHide.controlsVisible)
+                    .animation(AppAnimation.standard, value: chromeAutoHide.controlsVisible)
                 }
             }
             .overlay {
                 // C11: the transition ring floats over the page while a
                 // handover plays; inert until a transition signal exists.
                 TransitionAnimationView(isTransitioning: transitionInProgress, accent: Theme.accent)
+            }
+            .overlay {
+                // Auto-hide: when the chrome is hidden, any tap on the
+                // page brings it back. Lyrics, artwork and backgrounds
+                // never fade — only the chrome does.
+                if !chromeAutoHide.controlsVisible {
+                    Color.clear
+                        .contentShape(Rectangle())
+                        .onTapGesture { chromeAutoHide.showAndResetTimer() }
+                        .accessibilityLabel("显示播放控件")
+                        .accessibilityAddTraits(.isButton)
+                }
             }
             #if os(iOS)
             .overlay {
@@ -144,6 +211,21 @@ struct NowPlayingView: View {
         .ignoresSafeArea()
         #endif
         .preferredColorScheme(.dark)
+        .environmentObject(chromeAutoHide)
+        .onAppear {
+            chromeAutoHide.autoHideEnabled = settings.effectiveAutoHidePlayerChrome
+            chromeAutoHide.resetTimer()
+        }
+        .onChange(of: settings.effectiveAutoHidePlayerChrome) { enabled in
+            chromeAutoHide.autoHideEnabled = enabled
+            chromeAutoHide.resetTimer()
+        }
+        .onChange(of: player.currentTrack?.id) { _ in
+            chromeAutoHide.resetTimer()
+        }
+        .onDisappear {
+            chromeAutoHide.stop()
+        }
         #if os(iOS)
         .modifier(OfflinePlaybackAlert(player: player, onDownloads: { onOpenDestination(.downloaded) },
             enabled: player.showNowPlaying && !(settings.nowPlayingMode == .minimal && showQueueOnMobile)))
@@ -662,6 +744,9 @@ struct NowPlayingView: View {
 
             RoutePickerButton(diameter: 40, glyphSize: 16)
         }
+        .opacity(chromeAutoHide.controlsVisible ? 1 : 0)
+        .allowsHitTesting(chromeAutoHide.controlsVisible)
+        .animation(AppAnimation.standard, value: chromeAutoHide.controlsVisible)
     }
 
     private var landscapeNowPlayingMetadata: some View {
@@ -690,6 +775,9 @@ struct NowPlayingView: View {
             }
         }
         .frame(maxWidth: 360, alignment: .leading)
+        .opacity(chromeAutoHide.controlsVisible ? 1 : 0)
+        .allowsHitTesting(chromeAutoHide.controlsVisible)
+        .animation(AppAnimation.standard, value: chromeAutoHide.controlsVisible)
     }
 
     private var landscapeTransportRow: some View {
@@ -733,6 +821,10 @@ struct NowPlayingView: View {
             }
         }
         .accessibilityIdentifier("landscapeTransportRow")
+        .opacity(chromeAutoHide.controlsVisible ? 1 : 0)
+        .allowsHitTesting(chromeAutoHide.controlsVisible)
+        .animation(AppAnimation.standard, value: chromeAutoHide.controlsVisible)
+        .onTapGesture { chromeAutoHide.resetTimer() }
     }
 
     /// A continuously moving backdrop for the karaoke page: the blurred cover
@@ -900,6 +992,9 @@ struct NowPlayingView: View {
             }
             .padding(.top, 20)
             .padding(.horizontal, 20)
+            .opacity(chromeAutoHide.controlsVisible ? 1 : 0)
+            .allowsHitTesting(chromeAutoHide.controlsVisible)
+            .animation(AppAnimation.standard, value: chromeAutoHide.controlsVisible)
 
             Group {
                 if showQueueOnMobile {
@@ -978,6 +1073,9 @@ struct NowPlayingView: View {
             }
             .padding(.top, 20)
             .padding(.horizontal, 20)
+            .opacity(chromeAutoHide.controlsVisible ? 1 : 0)
+            .allowsHitTesting(chromeAutoHide.controlsVisible)
+            .animation(AppAnimation.standard, value: chromeAutoHide.controlsVisible)
 
             Group {
                 if showQueueOnMobile {
@@ -1034,6 +1132,10 @@ struct NowPlayingView: View {
             .padding(.top, 14)
             .padding(.bottom, 10)
             .padding(.horizontal, 20)
+            .opacity(chromeAutoHide.controlsVisible ? 1 : 0)
+            .allowsHitTesting(chromeAutoHide.controlsVisible)
+            .animation(AppAnimation.standard, value: chromeAutoHide.controlsVisible)
+            .onTapGesture { chromeAutoHide.resetTimer() }
         }
         .frame(width: max(size.width - 64, 0))
         .padding(.horizontal, 32)
@@ -1061,6 +1163,9 @@ struct NowPlayingView: View {
                 onOpenDestination: onOpenDestination
             )
                 .padding(.bottom, 10)
+                .opacity(chromeAutoHide.controlsVisible ? 1 : 0)
+                .allowsHitTesting(chromeAutoHide.controlsVisible)
+                .animation(AppAnimation.standard, value: chromeAutoHide.controlsVisible)
             #else
             Spacer().frame(height: 30)
             trackMetaView
@@ -1187,6 +1292,10 @@ struct NowPlayingView: View {
                 controls
             }
             .padding(.bottom, 24)
+            .opacity(chromeAutoHide.controlsVisible ? 1 : 0)
+            .allowsHitTesting(chromeAutoHide.controlsVisible)
+            .animation(AppAnimation.standard, value: chromeAutoHide.controlsVisible)
+            .onTapGesture { chromeAutoHide.resetTimer() }
         }
         .padding(.horizontal, 16)
     }
@@ -1270,6 +1379,9 @@ struct NowPlayingView: View {
                 onTapArtwork: collapseImmersiveArtwork
             )
             .padding(.bottom, 14)
+            .opacity(chromeAutoHide.controlsVisible ? 1 : 0)
+            .allowsHitTesting(chromeAutoHide.controlsVisible)
+            .animation(AppAnimation.standard, value: chromeAutoHide.controlsVisible)
 
             ZStack {
                 immersiveArtworkContent(artworkDimension: artworkDimension)
@@ -1332,6 +1444,10 @@ struct NowPlayingView: View {
         .padding(.top, 14)
         .padding(.bottom, 10)
         .accessibilityIdentifier("immersiveControls")
+        .opacity(chromeAutoHide.controlsVisible ? 1 : 0)
+        .allowsHitTesting(chromeAutoHide.controlsVisible)
+        .animation(AppAnimation.standard, value: chromeAutoHide.controlsVisible)
+        .onTapGesture { chromeAutoHide.resetTimer() }
     }
 
     private func immersiveArtworkContent(artworkDimension: CGFloat) -> some View {

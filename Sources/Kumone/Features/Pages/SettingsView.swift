@@ -704,6 +704,10 @@ struct SettingsView: View {
                 Text("iOS 可用")
                     .font(.caption)
                     .foregroundStyle(.secondary)
+                Toggle("自动隐藏播放控件", isOn: $settings.autoHidePlayerChrome)
+                Text("3 秒无操作后隐藏进度条、播放按钮和顶部按钮，点一下屏幕即可恢复")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
                 // D8: the back button is only gated by this setting on
                 // iOS; the macOS page always shows its own collapse button.
                 #if os(iOS)
