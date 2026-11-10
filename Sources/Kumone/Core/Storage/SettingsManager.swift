@@ -471,10 +471,6 @@ final class SettingsManager: ObservableObject {
         static let fmMode = "settings.fmMode"
         static let unblock = "settings.enableUnblock"
         static let unblockSources = "settings.enabledUnblockSources"
-        // Sponsored key for the built-in ikun script. Device-only:
-        // NOT in the SettingsBackup allowlist, NOT a synced
-        // preference. The string lives in `BuiltInAudioSources`.
-        static let ikunApiKey = BuiltInAudioSources.apiKeyDefaultsKey
 
         // Folia B12: global lyric timeline offset, milliseconds, ±2000.
         static let globalLyricTimelineOffsetMs = "settings.globalLyricTimelineOffsetMs"
@@ -836,14 +832,6 @@ final class SettingsManager: ObservableObject {
                 forKey: Keys.unblockSources
             )
         }
-    }
-
-    /// Sponsored key for the built-in ikun script, pasted by the user
-    /// in Settings → 自定义音源 → 内置源详情. Device-only: never
-    /// backed up, never synced, never logged; injected into a copy
-    /// of the script at runtime by `LXScriptRunner`.
-    @Published var ikunApiKey: String = "" {
-        didSet { UserDefaults.standard.set(ikunApiKey, forKey: Keys.ikunApiKey) }
     }
 
     var canResolveUnblockedTracks: Bool {
@@ -2625,7 +2613,6 @@ final class SettingsManager: ObservableObject {
                 AudioSourceID.allCases.filter { !$0.isScriptBackend }
             )
         }
-        ikunApiKey = defaults.string(forKey: Keys.ikunApiKey) ?? ""
         autoCheckUpdates = defaults.object(forKey: Keys.autoCheckUpdates) as? Bool ?? true
         showDesktopLyrics = defaults.object(forKey: Keys.desktopLyrics) as? Bool ?? false
         #if os(macOS)
@@ -3137,7 +3124,6 @@ final class SettingsManager: ObservableObject {
                 AudioSourceID.allCases.filter { !$0.isScriptBackend }
             )
         }
-        ikunApiKey = defaults.string(forKey: Keys.ikunApiKey) ?? ""
         autoCheckUpdates = defaults.object(forKey: Keys.autoCheckUpdates) as? Bool ?? true
         showDesktopLyrics = defaults.object(forKey: Keys.desktopLyrics) as? Bool ?? false
         #if os(macOS)

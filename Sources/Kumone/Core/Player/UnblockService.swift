@@ -236,10 +236,14 @@ enum UnblockService {
     /// the track's own platform id first (QQ songmid / Kugou hash),
     /// then the NetEase id — directly for NetEase tracks, or via the
     /// matched NetEase track for platform tracks (whose own id is a
-    /// negative stable hash that no source can resolve). First
+    /// negative stable hash that no source can resolve) — then Kuwo
+    /// (`kw`) with the same NetEase id, last. The backend
+    /// cross-matches a NetEase id to a Kuwo CDN link (live-probed
+    /// 2026-11-10: wy/186016 → code 200, 261.3s full track). First
     /// non-nil URL wins; the `isUsable` clip check is applied by the
     /// caller. Quality is the source's own quality (default `320k`).
-    private static func customScriptResolve(_ track: Track, source: CustomAudioSource) async -> URL? {
+    /// Internal (not private) so tests can cover the fallback order.
+    static func customScriptResolve(_ track: Track, source: CustomAudioSource) async -> URL? {
         let quality = source.quality
         let albumName = track.album.name
         let albumID = String(track.album.id)
@@ -265,20 +269,28 @@ enum UnblockService {
                 albumName: albumName, albumID: albumID, quality: quality
             ) { return url }
         }
+        // The NetEase id to try: the track's own id when positive,
+        // otherwise the matched NetEase track's id.
+        var neteaseID: String?
         if track.id > 0 {
-            return await LXScriptRunner.shared.resolve(
-                source: source, songSource: .netease, songID: String(track.id),
-                name: track.name, artists: track.artistNames,
-                albumName: albumName, albumID: albumID, quality: quality
-            )
+            neteaseID = String(track.id)
+        } else if let matched = await matchedNetEaseTrack(for: track) {
+            neteaseID = String(matched.id)
         }
-        if let matched = await matchedNetEaseTrack(for: track) {
-            return await LXScriptRunner.shared.resolve(
-                source: source, songSource: .netease, songID: String(matched.id),
-                name: track.name, artists: track.artistNames,
-                albumName: albumName, albumID: albumID, quality: quality
-            )
-        }
+        guard let neteaseID else { return nil }
+        if let url = await LXScriptRunner.shared.resolve(
+            source: source, songSource: .netease, songID: neteaseID,
+            name: track.name, artists: track.artistNames,
+            albumName: albumName, albumID: albumID, quality: quality
+        ) { return url }
+        // Kuwo fallback, last: same NetEase id, same fields. NOT
+        // added: mg/git/qs/bi/qishui/bilibili — the backend rejects
+        // all of them (code 500 "unsupported source").
+        if let url = await LXScriptRunner.shared.resolve(
+            source: source, songSource: .kuwo, songID: neteaseID,
+            name: track.name, artists: track.artistNames,
+            albumName: albumName, albumID: albumID, quality: quality
+        ) { return url }
         return nil
     }
 

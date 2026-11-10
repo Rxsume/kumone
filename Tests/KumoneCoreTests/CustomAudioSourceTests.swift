@@ -96,6 +96,22 @@ struct CustomAudioSourceTests {
 
     // MARK: - Store
 
+    @Test @MainActor func freshStoreHasNoAutoInsertedSource() {
+        let suite = "com.test.FreshStoreTests"
+        guard let defaults = UserDefaults(suiteName: suite) else {
+            Issue.record("could not create test UserDefaults suite")
+            return
+        }
+        defaults.removePersistentDomain(forName: suite)
+        defer { defaults.removePersistentDomain(forName: suite) }
+
+        // The built-in ikun source was removed 2026-11-10: a fresh
+        // store is empty; nothing is auto-inserted.
+        let store = CustomAudioSourceStore(defaults: defaults)
+        #expect(store.sources.isEmpty)
+        #expect(store.hasEnabledScriptSources == false)
+    }
+
     @Test @MainActor func storeRoundTripPreservesScript() {
         let suite = "com.test.CustomAudioSourceTests"
         guard let defaults = UserDefaults(suiteName: suite) else {
@@ -112,29 +128,113 @@ struct CustomAudioSourceTests {
             script: "const x = '你好世界'; // non-ASCII must survive the blob"
         )
         let store = CustomAudioSourceStore(defaults: defaults)
+        #expect(store.sources.isEmpty)
         store.addSources([source])
-        // The built-in ikun source is always pinned first, so the
-        // store holds two sources: builtin + the imported one.
-        #expect(store.sources.count == 2)
-        #expect(store.sources.first?.id == BuiltInAudioSources.ikunID)
-        #expect(store.sources.first(where: { $0.id == source.id })?.name == "测试音源")
+        #expect(store.sources.count == 1)
+        #expect(store.sources.first?.name == "测试音源")
 
         let reloaded = CustomAudioSourceStore(defaults: defaults)
-        #expect(reloaded.sources.count == 2)
-        #expect(reloaded.sources.first?.id == BuiltInAudioSources.ikunID)
-        #expect(reloaded.sources.first(where: { $0.id == source.id })?.script == source.script)
+        #expect(reloaded.sources.count == 1)
+        #expect(reloaded.sources.first?.script == source.script)
 
         reloaded.updateEnabled(id: source.id, enabled: false)
-        #expect(reloaded.sources.first(where: { $0.id == source.id })?.enabled == false)
-        #expect(reloaded.sources.first?.enabled == true)
-        // The imported source is already last, so moving it down is
-        // a no-op; the built-in source stays pinned at index 0.
+        #expect(reloaded.sources.first?.enabled == false)
+        // A single source cannot move.
         reloaded.moveSource(id: source.id, by: 1)
-        #expect(reloaded.sources.count == 2)
+        #expect(reloaded.sources.count == 1)
         #expect(reloaded.sources.first(where: { $0.id == source.id }) != nil)
         #expect(reloaded.removeSource(id: source.id) == true)
-        #expect(reloaded.sources.count == 1)
-        #expect(reloaded.sources.first?.id == BuiltInAudioSources.ikunID)
+        #expect(reloaded.sources.isEmpty)
+    }
+
+    // MARK: - Legacy built-in key migration (one-time, 2026-11-10)
+
+    /// An empty-key copy of the ikun script plus the legacy
+    /// device-only key: the key is folded back into the script text
+    /// once, and the defaults key is dropped. (TEST-KEY-123 is a
+    /// fake placeholder for this test, never a real key.)
+    @Test @MainActor func migrationFoldsLegacyKeyIntoEmptyKeyScript() {
+        let suite = "com.test.LegacyKeyMigrationTests"
+        guard let defaults = UserDefaults(suiteName: suite) else {
+            Issue.record("could not create test UserDefaults suite")
+            return
+        }
+        defaults.removePersistentDomain(forName: suite)
+        defer { defaults.removePersistentDomain(forName: suite) }
+
+        let source = CustomAudioSource(
+            name: "ikun 音源",
+            kind: "script",
+            template: "",
+            script: """
+            const API_URL = "https://c.wwwweb.top";
+            const API_KEY = "";
+            """
+        )
+        guard let data = try? JSONEncoder().encode([source]) else {
+            Issue.record("could not encode imported source")
+            return
+        }
+        defaults.set(data, forKey: CustomAudioSourceStore.storeKey)
+        defaults.set("TEST-KEY-123", forKey: "settings.ikunApiKey")
+
+        let store = CustomAudioSourceStore(defaults: defaults)
+        #expect(store.sources.count == 1)
+        #expect(store.sources.first?.script?.contains("const API_KEY = \"TEST-KEY-123\"") == true)
+        #expect(store.sources.first?.script?.contains("const API_KEY = \"\"") == false)
+        #expect(defaults.string(forKey: "settings.ikunApiKey") == nil)
+    }
+
+    /// A script that already carries its key is untouched, but the
+    /// legacy defaults key is still dropped (one-time cleanup).
+    @Test @MainActor func migrationLeavesKeyedScriptUntouched() {
+        let suite = "com.test.LegacyKeyMigrationKeyedTests"
+        guard let defaults = UserDefaults(suiteName: suite) else {
+            Issue.record("could not create test UserDefaults suite")
+            return
+        }
+        defaults.removePersistentDomain(forName: suite)
+        defer { defaults.removePersistentDomain(forName: suite) }
+
+        let script = """
+        const API_URL = "https://c.wwwweb.top";
+        const API_KEY = "ALREADY-IN-SCRIPT";
+        """
+        let source = CustomAudioSource(name: "ikun 音源", kind: "script", template: "", script: script)
+        guard let data = try? JSONEncoder().encode([source]) else {
+            Issue.record("could not encode imported source")
+            return
+        }
+        defaults.set(data, forKey: CustomAudioSourceStore.storeKey)
+        defaults.set("TEST-KEY-123", forKey: "settings.ikunApiKey")
+
+        let store = CustomAudioSourceStore(defaults: defaults)
+        #expect(store.sources.first?.script == script)
+        #expect(defaults.string(forKey: "settings.ikunApiKey") == nil)
+    }
+
+    /// A non-ikun script is untouched, and the legacy key is dropped.
+    @Test @MainActor func migrationSkipsNonIkunScripts() {
+        let suite = "com.test.LegacyKeyMigrationOtherTests"
+        guard let defaults = UserDefaults(suiteName: suite) else {
+            Issue.record("could not create test UserDefaults suite")
+            return
+        }
+        defaults.removePersistentDomain(forName: suite)
+        defer { defaults.removePersistentDomain(forName: suite) }
+
+        let script = "const API_KEY = \"\";"
+        let source = CustomAudioSource(name: "Other", kind: "script", template: "", script: script)
+        guard let data = try? JSONEncoder().encode([source]) else {
+            Issue.record("could not encode imported source")
+            return
+        }
+        defaults.set(data, forKey: CustomAudioSourceStore.storeKey)
+        defaults.set("TEST-KEY-123", forKey: "settings.ikunApiKey")
+
+        let store = CustomAudioSourceStore(defaults: defaults)
+        #expect(store.sources.first?.script == script)
+        #expect(defaults.string(forKey: "settings.ikunApiKey") == nil)
     }
 
     // MARK: - Runner (stub script, no network)
@@ -192,45 +292,33 @@ struct CustomAudioSourceTests {
         #expect(url == nil)
     }
 
-    // MARK: - Built-in ikun source
+    // MARK: - Declared platform chips (display-only)
 
-    @Test func builtinScriptHasEmptyKeyPlaceholder() {
-        #expect(BuiltInAudioSources.ikunScript.contains("const API_KEY = \"\""))
-        #expect(BuiltInAudioSources.ikunScript.contains("@version v26"))
-        // The request URL is built from the API_URL constant, not a
-        // literal: `const API_URL = "https://c.wwwweb.top"` plus
-        // `` `${API_URL}/music/url` `` in the fetch call.
-        #expect(BuiltInAudioSources.ikunScript.contains("const API_URL = \"https://c.wwwweb.top\""))
-        #expect(BuiltInAudioSources.ikunScript.contains("${API_URL}/music/url"))
+    @Test func platformMappingCoversKnownIds() {
+        #expect(LXScriptSourcePlatform.displayName(for: "wy") == "网易")
+        #expect(LXScriptSourcePlatform.displayName(for: "tx") == "QQ")
+        #expect(LXScriptSourcePlatform.displayName(for: "kg") == "酷狗")
+        #expect(LXScriptSourcePlatform.displayName(for: "kw") == "酷我")
+        #expect(LXScriptSourcePlatform.displayName(for: "mg") == "咪咕")
+        // Unmapped ids render as raw-id chips, never guessed names:
+        // `git` is an extra key in the ikun script; 汽水 / 哔哩
+        // have no grounded source id at all.
+        #expect(LXScriptSourcePlatform.displayName(for: "git") == nil)
+        #expect(LXScriptSourcePlatform.displayName(for: "qishui") == nil)
+        #expect(LXScriptSourcePlatform.displayName(for: "bilibili") == nil)
+        #expect(LXScriptSourcePlatform.displayName(for: "") == nil)
     }
 
-    @Test func builtinKeyInjectionReplacesPlaceholderOnly() {
-        let source = BuiltInAudioSources.ikunSource()
-        let effective = BuiltInAudioSources.effectiveScript(for: source, apiKey: "test-key-123")
-        #expect(effective.contains("const API_KEY = \"test-key-123\""))
-        #expect(!effective.contains("const API_KEY = \"\""))
-        #expect(effective != BuiltInAudioSources.ikunScript)
+    @Test func platformAllDeclaredRequiresAllFive() {
+        #expect(LXScriptSourcePlatform.allDeclared(["wy", "tx", "kg", "kw", "mg"]) == true)
+        #expect(LXScriptSourcePlatform.allDeclared(["wy", "tx", "kg", "kw"]) == false)
+        #expect(LXScriptSourcePlatform.allDeclared([]) == false)
+        // Extra unknown ids do not complete the set.
+        #expect(LXScriptSourcePlatform.allDeclared(["wy", "tx", "kg", "kw", "git"]) == false)
     }
 
-    @Test func builtinScriptWithoutKeyIsUnchanged() {
-        let source = BuiltInAudioSources.ikunSource()
-        #expect(BuiltInAudioSources.effectiveScript(for: source, apiKey: "") == BuiltInAudioSources.ikunScript)
-        #expect(BuiltInAudioSources.effectiveScript(for: source, apiKey: nil) == BuiltInAudioSources.ikunScript)
-    }
-
-    @Test func keyInjectionSkipsNonBuiltinSources() {
-        let other = CustomAudioSource(name: "Other", kind: "script", template: "", script: "const API_KEY = \"\";")
-        #expect(BuiltInAudioSources.effectiveScript(for: other, apiKey: "test-key-123") == "const API_KEY = \"\";")
-    }
-
-    @Test func keyEscapingKeepsScriptValid() {
-        let source = BuiltInAudioSources.ikunSource()
-        let effective = BuiltInAudioSources.effectiveScript(for: source, apiKey: "a\"b\\c")
-        #expect(effective.contains("const API_KEY = \"a\\\"b\\\\c\""))
-    }
-
-    @Test @MainActor func builtinIkunSourceIsEnsuredFirst() {
-        let suite = "com.test.BuiltinIkunTests"
+    @Test @MainActor func declaredPlatformsCacheRoundTripsAndClearsOnRemove() {
+        let suite = "com.test.DeclaredPlatformsTests"
         guard let defaults = UserDefaults(suiteName: suite) else {
             Issue.record("could not create test UserDefaults suite")
             return
@@ -238,143 +326,90 @@ struct CustomAudioSourceTests {
         defaults.removePersistentDomain(forName: suite)
         defer { defaults.removePersistentDomain(forName: suite) }
 
+        let source = CustomAudioSource(name: "Cache", kind: "script", template: "", script: "const x = 1;")
         let store = CustomAudioSourceStore(defaults: defaults)
-        #expect(store.sources.count == 1)
-        #expect(store.sources.first?.id == BuiltInAudioSources.ikunID)
-        #expect(store.sources.first?.name == BuiltInAudioSources.ikunName)
-        #expect(store.sources.first?.enabled == true)
-        #expect(store.sources.first?.script == BuiltInAudioSources.ikunScript)
-        #expect(store.hasEnabledScriptSources == true)
-        #expect(store.removeSource(id: BuiltInAudioSources.ikunID) == false)
-        #expect(store.sources.count == 1)
-        store.updateEnabled(id: BuiltInAudioSources.ikunID, enabled: false)
-        #expect(store.hasEnabledScriptSources == false)
-    }
-
-    @Test @MainActor func builtinIkunSkippedWhenSameNameAlreadyImported() {
-        let suite = "com.test.BuiltinIkunNameGateTests"
-        guard let defaults = UserDefaults(suiteName: suite) else {
-            Issue.record("could not create test UserDefaults suite")
-            return
-        }
-        defaults.removePersistentDomain(forName: suite)
-        defer { defaults.removePersistentDomain(forName: suite) }
-
-        let imported = CustomAudioSource(
-            name: BuiltInAudioSources.ikunName,
-            kind: "script",
-            template: "",
-            script: "const x = 1;"
-        )
-        guard let data = try? JSONEncoder().encode([imported]) else {
-            Issue.record("could not encode imported source")
-            return
-        }
-        defaults.set(data, forKey: CustomAudioSourceStore.storeKey)
-
-        let store = CustomAudioSourceStore(defaults: defaults)
-        #expect(store.sources.count == 1)
-        #expect(store.sources.first?.id != BuiltInAudioSources.ikunID)
-    }
-
-    @Test @MainActor func builtinIkunRefreshPreservesToggleAndQuality() {
-        let suite = "com.test.BuiltinIkunRefreshTests"
-        guard let defaults = UserDefaults(suiteName: suite) else {
-            Issue.record("could not create test UserDefaults suite")
-            return
-        }
-        defaults.removePersistentDomain(forName: suite)
-        defer { defaults.removePersistentDomain(forName: suite) }
-
-        let store = CustomAudioSourceStore(defaults: defaults)
-        var stale = BuiltInAudioSources.ikunSource(quality: "flac", enabled: false)
-        stale.script = "const stale = true;"
-        store.upsert(stale)
+        #expect(store.declaredPlatforms(for: source.id) == nil)
+        store.noteDeclaredPlatforms(["wy", "tx"], for: source.id)
+        #expect(store.declaredPlatforms(for: source.id) == ["tx", "wy"])
 
         let reloaded = CustomAudioSourceStore(defaults: defaults)
-        #expect(reloaded.sources.count == 1)
-        #expect(reloaded.sources.first?.script == BuiltInAudioSources.ikunScript)
-        #expect(reloaded.sources.first?.quality == "flac")
-        #expect(reloaded.sources.first?.enabled == false)
+        #expect(reloaded.declaredPlatforms(for: source.id) == ["tx", "wy"])
+
+        store.addSource(source)
+        #expect(store.removeSource(id: source.id) == true)
+        #expect(store.declaredPlatforms(for: source.id) == nil)
     }
 
-    @Test func apiKeyInScriptExtractsKey() {
-        #expect(BuiltInAudioSources.apiKeyInScript("const API_KEY = \"TEST-KEY-123\";") == "TEST-KEY-123")
-        #expect(BuiltInAudioSources.apiKeyInScript("const API_KEY = \"\";") == nil)
-        #expect(BuiltInAudioSources.apiKeyInScript("const x = 1;") == nil)
-        #expect(BuiltInAudioSources.apiKeyInScript(nil) == nil)
-        #expect(BuiltInAudioSources.apiKeyInScript(BuiltInAudioSources.ikunScript) == nil)
-    }
+    /// A script whose `inited` payload declares wy + kw: the
+    /// runtime's `receive` caches the ids on the shared store, so
+    /// the editor chips can show them. The source must be in the
+    /// shared store for the note to land (test stubs are skipped).
+    private static let probeScript = """
+    const {EVENT_NAMES, on, send} = globalThis.lx;
+    on(EVENT_NAMES.request, ({action}) => Promise.reject("no"));
+    send(EVENT_NAMES.inited, {status: true, sources: {wy: {name: "wy", type: "music", actions: ["musicUrl"], qualitys: ["320k"]}, kw: {name: "kw", type: "music", actions: ["musicUrl"], qualitys: ["320k"]}}});
+    """
 
-    @Test @MainActor func storeAdoptsSameNamedImportedIkunSource() {
-        let suite = "com.test.BuiltinIkunAdoptionTests"
-        guard let defaults = UserDefaults(suiteName: suite) else {
-            Issue.record("could not create test UserDefaults suite")
+    @Test @MainActor func runtimeInitedCachesDeclaredPlatforms() async {
+        let source = CustomAudioSource(name: "CacheProbe", kind: "script", template: "", script: Self.probeScript)
+        let store = CustomAudioSourceStore.shared
+        store.addSource(source)
+        defer { _ = store.removeSource(id: source.id) }
+
+        if LXScriptRuntime(source: source, script: Self.probeScript) == nil {
+            Issue.record("could not create runtime")
             return
         }
-        defaults.removePersistentDomain(forName: suite)
-        defer { defaults.removePersistentDomain(forName: suite) }
+        // `receive` hops to the main actor; poll briefly.
+        let deadline = Date().addingTimeInterval(5)
+        while store.declaredPlatforms(for: source.id) == nil && Date() < deadline {
+            try? await Task.sleep(nanoseconds: 50_000_000)
+        }
+        #expect(store.declaredPlatforms(for: source.id) == ["kw", "wy"])
+    }
 
-        // An imported copy of the v26 script: same @name, same
-        // backend, key still inside the text. (TEST-KEY-123 is a
-        // fake placeholder for this test, never a real key.)
-        let imported = CustomAudioSource(
-            name: BuiltInAudioSources.ikunName,
-            kind: "script",
-            template: "",
-            quality: "flac",
-            script: """
-            const API_URL = "https://c.wwwweb.top";
-            const API_KEY = "TEST-KEY-123";
-            """,
-            enabled: false
+    // MARK: - Kuwo fallback in customScriptResolve
+
+    /// Rejects the NetEase leg and resolves the Kuwo leg: proves the
+    /// kw attempt runs after wy fails. No network: the stub answers
+    /// purely from the requested `source` code.
+    private static let wyFailsKwResolvesScript = """
+    const {EVENT_NAMES, on, send} = globalThis.lx;
+    on(EVENT_NAMES.request, ({action, source, info}) => {
+        if (action !== "musicUrl") return Promise.reject("unsupported action");
+        if (source === "wy") return Promise.reject("no wy link");
+        if (source === "kw") return Promise.resolve("https://example.com/kw-song.mp3");
+        return Promise.reject("unsupported source");
+    });
+    send(EVENT_NAMES.inited, {status: true, sources: {wy: {name: "wy", type: "music", actions: ["musicUrl"], qualitys: ["320k"]}, kw: {name: "kw", type: "music", actions: ["musicUrl"], qualitys: ["320k"]}}});
+    """
+
+    private func jayChouQingTian() -> Track {
+        Track(
+            id: 186016, name: "晴天",
+            artists: [ArtistRef(id: 0, name: "周杰伦")],
+            album: AlbumRef(id: 0, name: "叶惠美", picUrl: nil),
+            durationMS: 269_000, alias: [], transNames: [], fee: 0, mvID: 0,
+            trackNo: 0, disc: nil, noCopyright: false, isCloud: false,
+            embeddedPrivilege: nil
         )
-        guard let data = try? JSONEncoder().encode([imported]) else {
-            Issue.record("could not encode imported source")
-            return
-        }
-        defaults.set(data, forKey: CustomAudioSourceStore.storeKey)
-
-        let store = CustomAudioSourceStore(defaults: defaults)
-        #expect(store.sources.count == 1)
-        #expect(store.sources.first?.id == BuiltInAudioSources.ikunID)
-        #expect(store.sources.first?.name == BuiltInAudioSources.ikunName)
-        #expect(store.sources.first?.script == BuiltInAudioSources.ikunScript)
-        #expect(store.sources.first?.quality == "flac")
-        #expect(store.sources.first?.enabled == false)
-        #expect(defaults.string(forKey: BuiltInAudioSources.apiKeyDefaultsKey) == "TEST-KEY-123")
-        #expect(store.removeSource(id: BuiltInAudioSources.ikunID) == false)
     }
 
-    @Test @MainActor func storeAdoptsSameNamedImportedIkunSourceWithoutKey() {
-        let suite = "com.test.BuiltinIkunAdoptionNoKeyTests"
-        guard let defaults = UserDefaults(suiteName: suite) else {
-            Issue.record("could not create test UserDefaults suite")
-            return
-        }
-        defaults.removePersistentDomain(forName: suite)
-        defer { defaults.removePersistentDomain(forName: suite) }
+    @Test func kuwoSongSourceRawValue() {
+        #expect(LXSongSource.kuwo.rawValue == "kw")
+        #expect(LXSongSource(rawValue: "kw") == .kuwo)
+    }
 
-        let imported = CustomAudioSource(
-            name: BuiltInAudioSources.ikunName,
-            kind: "script",
-            template: "",
-            script: """
-            const API_URL = "https://c.wwwweb.top";
-            const API_KEY = "";
-            """
-        )
-        guard let data = try? JSONEncoder().encode([imported]) else {
-            Issue.record("could not encode imported source")
-            return
-        }
-        defaults.set(data, forKey: CustomAudioSourceStore.storeKey)
+    @Test func customScriptResolveFallsBackToKuwoAfterNetEase() async {
+        let source = CustomAudioSource(name: "KwFallback", kind: "script", template: "", script: Self.wyFailsKwResolvesScript)
+        let url = await UnblockService.customScriptResolve(jayChouQingTian(), source: source)
+        #expect(url?.absoluteString == "https://example.com/kw-song.mp3")
+    }
 
-        let store = CustomAudioSourceStore(defaults: defaults)
-        #expect(store.sources.count == 1)
-        #expect(store.sources.first?.id == BuiltInAudioSources.ikunID)
-        #expect(store.sources.first?.script == BuiltInAudioSources.ikunScript)
-        #expect(defaults.string(forKey: BuiltInAudioSources.apiKeyDefaultsKey) == nil)
+    @Test func customScriptResolveUsesNetEaseFirst() async {
+        let source = CustomAudioSource(name: "WyFirst", kind: "script", template: "", script: Self.stubScript)
+        let url = await UnblockService.customScriptResolve(jayChouQingTian(), source: source)
+        #expect(url?.absoluteString == "https://example.com/song.mp3")
     }
 
     // MARK: - Share import (.js / .txt opened into the app)
@@ -407,10 +442,10 @@ struct CustomAudioSourceTests {
         guard let (store, defaults) = freshShareStore(suite: "com.test.ShareImportTests") else { return }
         defer { defaults.removePersistentDomain(forName: "com.test.ShareImportTests") }
 
-        #expect(store.sources.count == 1)
+        #expect(store.sources.count == 0)
         let outcome = SharedAudioSourceImport.importScript(text: Self.sharedScript, fileName: "shared", store: store)
         #expect(outcome == .imported(name: "Shared Source"))
-        #expect(store.sources.count == 2)
+        #expect(store.sources.count == 1)
         #expect(store.sources.last?.name == "Shared Source")
         #expect(store.sources.last?.enabled == true)
     }
@@ -428,7 +463,7 @@ struct CustomAudioSourceTests {
         defer { defaults.removePersistentDomain(forName: "com.test.ShareImportGarbageTests") }
 
         #expect(SharedAudioSourceImport.importScript(text: "hello world this is not a source", fileName: "x", store: store) == .invalid)
-        #expect(store.sources.count == 1)
+        #expect(store.sources.count == 0)
     }
 
     @Test @MainActor func shareImportDedupsByNameAndContent() {
@@ -436,24 +471,15 @@ struct CustomAudioSourceTests {
         defer { defaults.removePersistentDomain(forName: "com.test.ShareImportDedupTests") }
 
         #expect(SharedAudioSourceImport.importScript(text: Self.sharedScript, fileName: "shared", store: store) == .imported(name: "Shared Source"))
-        #expect(store.sources.count == 2)
+        #expect(store.sources.count == 1)
         #expect(SharedAudioSourceImport.importScript(text: Self.sharedScript, fileName: "shared", store: store) == .duplicate(name: "Shared Source"))
-        #expect(store.sources.count == 2)
+        #expect(store.sources.count == 1)
         // Same script text under a different file name: the parsed name
         // differs, but the content is identical, so it still dedups.
         #expect(SharedAudioSourceImport.importScript(text: Self.unnamedScript, fileName: "first", store: store) == .imported(name: "first"))
-        #expect(store.sources.count == 3)
+        #expect(store.sources.count == 2)
         #expect(SharedAudioSourceImport.importScript(text: Self.unnamedScript, fileName: "second", store: store) == .duplicate(name: "second"))
-        #expect(store.sources.count == 3)
-    }
-
-    @Test @MainActor func shareImportSkipsBuiltinIkun() {
-        guard let (store, defaults) = freshShareStore(suite: "com.test.ShareImportBuiltinTests") else { return }
-        defer { defaults.removePersistentDomain(forName: "com.test.ShareImportBuiltinTests") }
-
-        let outcome = SharedAudioSourceImport.importScript(text: BuiltInAudioSources.ikunScript, fileName: "ikun", store: store)
-        #expect(outcome == .duplicate(name: BuiltInAudioSources.ikunName))
-        #expect(store.sources.count == 1)
+        #expect(store.sources.count == 2)
     }
 
     @Test @MainActor func shareImportFileURLReadsJsFileAndRejectsPy() {
@@ -470,6 +496,6 @@ struct CustomAudioSourceTests {
 
         #expect(SharedAudioSourceImport.importFile(at: jsURL, store: store) == .imported(name: "Shared Source"))
         #expect(SharedAudioSourceImport.importFile(at: pyURL, store: store) == .invalid)
-        #expect(store.sources.count == 2)
+        #expect(store.sources.count == 1)
     }
 }

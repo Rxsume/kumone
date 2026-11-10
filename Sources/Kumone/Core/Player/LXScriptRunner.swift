@@ -565,12 +565,27 @@ final class LXScriptRuntime: @unchecked Sendable {
 
     func receive(event: String, payload: Any?) {
         guard event == "inited" else { return }
+        // The script declares the platforms it supports in the
+        // `sources` dictionary (keys are LX source ids, e.g. wy/tx).
+        // Record them for the editor's "支持平台" chips (display
+        // only — resolve never reads this cache).
+        var ids: [String]?
         if let dict = payload as? [String: Any], let sources = dict["sources"] as? [String: Any] {
-            Self.log.debug("custom script initialised: \(self.sourceID, privacy: .public) sources=\(sources.keys.sorted().joined(separator: ","), privacy: .public)")
+            ids = sources.keys.sorted()
         } else if let dict = payload as? NSDictionary,
                   let sources = dict["sources"] as? NSDictionary {
-            let names = sources.allKeys.compactMap { $0 as? String }.sorted().joined(separator: ",")
-            Self.log.debug("custom script initialised: \(self.sourceID, privacy: .public) sources=\(names, privacy: .public)")
+            ids = sources.allKeys.compactMap { $0 as? String }.sorted()
+        }
+        guard let ids else { return }
+        Self.log.debug("custom script initialised: \(self.sourceID, privacy: .public) sources=\(ids.joined(separator: ","), privacy: .public)")
+        let id = sourceID
+        Task { @MainActor in
+            // Only remember ids for sources the user actually has:
+            // test stubs and one-off runtimes must not pollute the
+            // persisted cache with ids no editor will ever look up.
+            let store = CustomAudioSourceStore.shared
+            guard store.sources.contains(where: { $0.id == id }) else { return }
+            store.noteDeclaredPlatforms(ids, for: id)
         }
     }
 
@@ -660,12 +675,16 @@ final class LXScriptRuntime: @unchecked Sendable {
 }
 
 /// LX provider code for the script payload: `wy` NetEase, `tx` QQ,
-/// `kg` Kugou. (Beans calls this `SongSource`; Golia has no such
-/// type, so the runner defines its own.)
+/// `kg` Kugou, `kw` Kuwo. (Beans calls this `SongSource`; Golia has
+/// no such type, so the runner defines its own.) Only codes the
+/// backend accepts are listed: `mg`/`git`/`qs`/`bi`/`qishui`/
+/// `bilibili` are all rejected by the backend (code 500
+/// "unsupported source") and deliberately have no case here.
 enum LXSongSource: String, Sendable {
     case netease = "wy"
     case qq = "tx"
     case kugou = "kg"
+    case kuwo = "kw"
 }
 
 final class LXScriptRunner: @unchecked Sendable {
@@ -728,14 +747,12 @@ final class LXScriptRunner: @unchecked Sendable {
         quality: String
     ) -> URL? {
         guard source.script?.isEmpty == false else { return nil }
-        // Built-in ikun: the stored sponsored key (if any) is
-        // substituted into the empty API_KEY placeholder before the
-        // script is evaluated; the substituted text is also the
-        // runtime cache key, so a key change busts the cache. The
-        // key is never logged. Without a key the script runs as-is
-        // and fails closed (403 → nil → the ladder continues).
-        let effectiveScript = BuiltInAudioSources.effectiveScript(for: source)
-        let runtime = runtime(for: source, script: effectiveScript)
+        // Scripts are evaluated verbatim, key and all: the text
+        // itself is the runtime cache key, so editing the script
+        // (or the key inside it) busts the cache. A script without
+        // a usable key runs as-is and fails closed (403 → nil → the
+        // ladder continues).
+        let runtime = runtime(for: source, script: source.script ?? "")
         let payload: [String: Any] = [
             "action": "musicUrl",
             "source": songSource.rawValue,
