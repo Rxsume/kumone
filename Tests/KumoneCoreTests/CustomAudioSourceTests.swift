@@ -544,6 +544,99 @@ struct CustomAudioSourceTests {
         #expect(url?.absoluteString == "https://example.com/song.mp3")
     }
 
+    // MARK: - Per-script retry in UnblockService.resolve
+
+    /// Builds a stub script that answers every musicUrl request
+    /// with `url`, regardless of the requested source code.
+    private static func resolvingScript(url: String) -> String {
+        """
+        const {EVENT_NAMES, on, send} = globalThis.lx;
+        on(EVENT_NAMES.request, ({action, source, info}) => {
+            if (action === "musicUrl") {
+                return Promise.resolve("\(url)");
+            }
+            return Promise.reject("unsupported action");
+        });
+        send(EVENT_NAMES.inited, {status: true, sources: {wy: {name: "wy", type: "music", actions: ["musicUrl"], qualitys: ["320k"]}}});
+        """
+    }
+
+    /// Disables the three built-in scripts in the shared store so
+    /// `resolve` only sees the stubs this test adds. Returns the
+    /// saved enabled states for the caller to restore.
+    @MainActor
+    private func disableBuiltInsInSharedStore() -> [(id: String, enabled: Bool)] {
+        let store = CustomAudioSourceStore.shared
+        let builtinIDs = [
+            BuiltInAudioSources.ikunSourceID,
+            BuiltInAudioSources.goliaSourceID,
+            BuiltInAudioSources.gdSourceID,
+        ]
+        let saved = store.sources
+            .filter { builtinIDs.contains($0.id) }
+            .map { (id: $0.id, enabled: $0.enabled) }
+        for index in store.sources.indices where builtinIDs.contains(store.sources[index].id) {
+            store.sources[index].enabled = false
+        }
+        return saved
+    }
+
+    @MainActor
+    private func restoreBuiltInsInSharedStore(_ saved: [(id: String, enabled: Bool)]) {
+        let store = CustomAudioSourceStore.shared
+        for (id, enabled) in saved {
+            if let index = store.sources.firstIndex(where: { $0.id == id }) {
+                store.sources[index].enabled = enabled
+            }
+        }
+    }
+
+    @Test @MainActor func resolveReportsAttemptedScriptIDs() async {
+        let store = CustomAudioSourceStore.shared
+        let saved = disableBuiltInsInSharedStore()
+        let stubA = CustomAudioSource(name: "StubA", kind: "script", template: "", script: Self.resolvingScript(url: "https://example.com/a.mp3"))
+        let stubB = CustomAudioSource(name: "StubB", kind: "script", template: "", script: Self.resolvingScript(url: "https://example.com/b.mp3"))
+        store.addSource(stubA)
+        store.addSource(stubB)
+        defer {
+            _ = store.removeSource(id: stubA.id)
+            _ = store.removeSource(id: stubB.id)
+            restoreBuiltInsInSharedStore(saved)
+        }
+
+        let resolution = await UnblockService.resolve(jayChouQingTian(), enabledSources: [], excluding: [])
+        #expect(resolution.source?.url.absoluteString == "https://example.com/a.mp3")
+        #expect(resolution.source?.displayName == "StubA")
+        #expect(resolution.attemptedScriptIDs.contains(stubA.id))
+        #expect(resolution.attemptedScriptIDs.contains(stubB.id) == false)
+    }
+
+    @Test @MainActor func resolveSkipsExcludedScriptAndTriesTheNext() async {
+        let store = CustomAudioSourceStore.shared
+        let saved = disableBuiltInsInSharedStore()
+        let stubA = CustomAudioSource(name: "StubA", kind: "script", template: "", script: Self.resolvingScript(url: "https://example.com/a.mp3"))
+        let stubB = CustomAudioSource(name: "StubB", kind: "script", template: "", script: Self.resolvingScript(url: "https://example.com/b.mp3"))
+        store.addSource(stubA)
+        store.addSource(stubB)
+        defer {
+            _ = store.removeSource(id: stubA.id)
+            _ = store.removeSource(id: stubB.id)
+            restoreBuiltInsInSharedStore(saved)
+        }
+
+        let resolution = await UnblockService.resolve(
+            jayChouQingTian(),
+            enabledSources: [],
+            excluding: [],
+            excludingScriptIDs: [stubA.id]
+        )
+        #expect(resolution.source?.url.absoluteString == "https://example.com/b.mp3")
+        #expect(resolution.source?.displayName == "StubB")
+        #expect(resolution.source?.scriptID == stubB.id)
+        #expect(resolution.attemptedScriptIDs.contains(stubA.id) == false)
+        #expect(resolution.attemptedScriptIDs.contains(stubB.id))
+    }
+
     // MARK: - Share import (.js / .txt opened into the app)
 
     private static let sharedScript = """

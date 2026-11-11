@@ -281,6 +281,12 @@ final class PlayerService: ObservableObject {
     private var resolveGeneration = 0
     private var consecutiveFailures = 0
     private var attemptedUnblockSources: Set<AudioSourceID> = []
+    /// Custom-script records already tried for the current track, by
+    /// store id. The `.customScript` marker in
+    /// `attemptedUnblockSources` covers the whole step, so without
+    /// this a load-failure retry would skip every script instead of
+    /// only the one that already failed.
+    private var attemptedScriptIDs: Set<String> = []
     private var currentUnblockSourceID: AudioSourceID?
     /// The resolve generation that already spent its one reload after a
     /// failed item, so a reload that fails too gives up instead of looping.
@@ -1020,6 +1026,7 @@ final class PlayerService: ObservableObject {
         unblockSource = nil
         currentUnblockSourceID = nil
         attemptedUnblockSources.removeAll()
+        attemptedScriptIDs.removeAll()
         itemStatusObservation?.invalidate()
         itemStatusObservation = nil
         isTrial = false
@@ -1188,9 +1195,11 @@ final class PlayerService: ObservableObject {
         let resolution = await UnblockService.resolve(
             track,
             enabledSources: enabledSources,
-            excluding: attemptedUnblockSources
+            excluding: attemptedUnblockSources,
+            excludingScriptIDs: attemptedScriptIDs
         )
         attemptedUnblockSources.formUnion(resolution.attemptedSources)
+        attemptedScriptIDs.formUnion(resolution.attemptedScriptIDs)
         guard let unblocked = resolution.source else { return false }
         guard generation == resolveGeneration,
               !requiresActivePlayback || isPlaying

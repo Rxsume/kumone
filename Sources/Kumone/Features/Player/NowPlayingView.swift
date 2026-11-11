@@ -1449,6 +1449,12 @@ struct NowPlayingView: View {
 
     private var immersiveControls: some View {
         VStack(spacing: 17) {
+            // The source caption lives here for lattice/immersive;
+            // vinyl already shows it in trackMetaView, so it is
+            // hidden there to avoid showing it twice.
+            if settings.effectiveNowPlayingMode != .vinyl {
+                sourceCaption
+            }
             // C6: the progress bar hides with the setting.
             if !settings.effectiveHidePlayerProgressBar {
                 NowPlayingScrubber(accent: beansPalette.accent)
@@ -1745,6 +1751,21 @@ struct NowPlayingView: View {
         )
     }
 
+    /// The third-party source the current track resolved from, if
+    /// any. The only place on iOS that names it persistently: the
+    /// toast is transient and the macOS bar shows it only as a hover
+    /// tooltip. Hidden for direct NetEase tracks, where there is no
+    /// third-party source to name.
+    @ViewBuilder
+    private var sourceCaption: some View {
+        if let source = player.unblockSource {
+            Text("来自 \(source)")
+                .font(.caption2)
+                .foregroundStyle(.white.opacity(0.55))
+                .lineLimit(1)
+        }
+    }
+
     private var trackMetaView: some View {
         VStack(spacing: 5) {
             HStack(spacing: 8) {
@@ -1765,6 +1786,7 @@ struct NowPlayingView: View {
                     onOpenDestination: onOpenDestination
                 )
             }
+            sourceCaption
         }
         .frame(maxWidth: 400)
     }

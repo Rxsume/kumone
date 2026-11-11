@@ -57,6 +57,10 @@ struct ResolvedAudioSource {
     let id: AudioSourceID
     let displayName: String
     let url: URL
+    /// The custom-script record this URL came from, if any. The
+    /// `id` is `.customScript` for every script, so a load failure
+    /// cannot tell scripts apart without this.
+    let scriptID: String? = nil
 }
 
 protocol AudioSourceProvider {
