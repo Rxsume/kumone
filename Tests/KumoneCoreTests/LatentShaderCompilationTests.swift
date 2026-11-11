@@ -16,7 +16,12 @@ import Testing
 
     @Test func latentShaderCompiles() throws {
         guard let device = MTLCreateSystemDefaultDevice() else {
-            try Test.skip("No Metal device in this environment; nothing to compile against.")
+            // No Metal device in this environment (e.g. a headless CI runner):
+            // nothing to compile against. `Test.skip` is not available in this
+            // toolchain, so return early; the test passes without exercising
+            // the shader.
+            print("LatentShaderCompilationTests: no Metal device, skipping latent shader compilation.")
+            return
         }
         let library = try device.makeLibrary(source: latentShaderSource, options: nil)
         #expect(library.makeFunction(name: "latentVertex") != nil)
@@ -30,7 +35,12 @@ import Testing
 
     @Test func soraShaderCompiles() throws {
         guard let device = MTLCreateSystemDefaultDevice() else {
-            try Test.skip("No Metal device in this environment; nothing to compile against.")
+            // No Metal device in this environment (e.g. a headless CI runner):
+            // nothing to compile against. `Test.skip` is not available in this
+            // toolchain, so return early; the test passes without exercising
+            // the shader.
+            print("LatentShaderCompilationTests: no Metal device, skipping sora shader compilation.")
+            return
         }
         let library = try device.makeLibrary(source: soraShaderSource, options: nil)
         #expect(library.makeFunction(name: "soraVertex") != nil)
