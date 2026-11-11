@@ -165,11 +165,11 @@ struct SettingsView: View {
             // `ThirdPartySourceManagerSheet`），及三项新开关（与其他音
             // 频同时播放、启动续播、第三方会员歌提醒）。未搬：120Hz 高
             // 刷新（Beans 里强制开启、无 Golia 等价物）、触感反馈
-            // （Golia 无触感基建，加开关会是死开关）。被取代的 Golia
-            // 旧行（音质 Picker、灰色歌曲解锁、淡入淡出、加歌默认行
-            // 为、自动跳过、防息屏、ReplayGain、音源开关、AutoMix）随
-            // 旧节删除——key 仍在 SettingsManager 里，引擎继续按已存
-            // 值工作，平台切换器仍自动开对应音源。
+            // （Golia 无触感基建，加开关会是死开关）。Golia 旧行里
+            // 的淡入淡出、加歌默认行为、自动跳过、防息屏、ReplayGain
+            // 与切歌淡入淡出后来按照片恢复在下面（key 与引擎一直都
+            // 在）；过渡模式 AutoMix 未恢复——它要双引擎过渡规划器，
+            // 那套还删着，单加 Picker 会是死开关。
             Section {
                 Button {
                     withAnimation(.easeInOut(duration: 0.22)) {
@@ -239,6 +239,47 @@ struct SettingsView: View {
                     Text("无版权或下架歌曲将从已启用音源中匹配播放")
                         .font(.caption)
                         .foregroundStyle(.secondary)
+                    Group {
+                        // Restored playback rows (the old Section("播放")
+                        // rows deleted by the Beans playback-settings
+                        // port, 10fd00a): the engines and keys survived,
+                        // only the rows were gone. The 切歌淡入淡出 toggle
+                        // below is the restored iosCrossfadeEnabled key,
+                        // now driving a single-engine fade (no overlap).
+                        #if os(iOS)
+                        Toggle("暂停/播放淡入淡出", isOn: $settings.playbackFadeEnabled)
+                        Text("暂停与恢复播放时音量短暂淡入淡出，避免声音突变")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                        Picker("加歌默认行为", selection: $settings.queueAddBehavior) {
+                            ForEach(QueueAddBehavior.allCases) { behavior in
+                                Text(behavior.displayName).tag(behavior)
+                            }
+                        }
+                        Toggle("无法播放自动跳过", isOn: $settings.autoSkipUnplayable)
+                        Text("无法播放的歌曲自动跳到下一首")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                        #endif
+                        #if os(iOS)
+                        Toggle("播放时防息屏", isOn: $settings.preventDisplaySleepDuringPlayback)
+                        Text("播放期间屏幕不自动息屏，暂停或切到后台后恢复")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                        Toggle("切歌淡入淡出", isOn: $settings.iosCrossfadeEnabled)
+                        Text("切歌时先淡出再淡入，两首歌之间有短暂间隙；关闭后恢复原来的直接切歌")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                        #endif
+                        Picker("响度平衡（ReplayGain）", selection: $settings.replayGainMode) {
+                            ForEach(ReplayGainMode.allCases) { mode in
+                                Text(mode.displayName).tag(mode)
+                            }
+                        }
+                        Text("按单曲或专辑统一播放响度；iOS 上只对已缓存分析过的歌曲生效")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }.disabled(!settings.foliaEnabled)
                     Button {
                         showCustomSources = true
                     } label: {

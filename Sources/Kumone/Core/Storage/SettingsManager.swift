@@ -545,6 +545,7 @@ final class SettingsManager: ObservableObject {
         static let transitionAnimationCard = "settings.transitionAnimationCard"
         #if os(iOS)
         static let preventDisplaySleep = "settings.preventDisplaySleepDuringPlayback"
+        static let iosCrossfadeEnabled = "settings.iosCrossfadeEnabled"
         #endif
         static let transitionMode = "settings.transitionMode"
         static let crossfadeMaxSeconds = "settings.crossfadeMaxSeconds"
@@ -1458,6 +1459,20 @@ final class SettingsManager: ObservableObject {
     /// nothing held the idle timer while playing.
     var effectivePreventDisplaySleepDuringPlayback: Bool {
         foliaEnabled ? preventDisplaySleepDuringPlayback : false
+    }
+
+    /// Track-change fade (restored 切歌淡入淡出, single-engine):
+    /// fade the outgoing track out and the incoming one in, with a
+    /// short silence gap in between — no overlap, the dual-deck
+    /// crossfade stays deleted. Default off.
+    @Published var iosCrossfadeEnabled: Bool {
+        didSet { UserDefaults.standard.set(iosCrossfadeEnabled, forKey: Keys.iosCrossfadeEnabled) }
+    }
+
+    /// Track-change fade with the master switch off: pre-folia iOS
+    /// played through a single `AVPlayer` with hard cuts.
+    var effectiveIosCrossfadeEnabled: Bool {
+        foliaEnabled ? iosCrossfadeEnabled : false
     }
     #endif
 
@@ -2673,6 +2688,8 @@ final class SettingsManager: ObservableObject {
         #if os(iOS)
         preventDisplaySleepDuringPlayback =
             defaults.object(forKey: Keys.preventDisplaySleep) as? Bool ?? true
+        iosCrossfadeEnabled =
+            defaults.object(forKey: Keys.iosCrossfadeEnabled) as? Bool ?? false
         #endif
         transitionMode = defaults.string(forKey: Keys.transitionMode)
             .flatMap(TransitionMode.init) ?? .automix
@@ -3211,6 +3228,8 @@ final class SettingsManager: ObservableObject {
         #if os(iOS)
         preventDisplaySleepDuringPlayback =
             defaults.object(forKey: Keys.preventDisplaySleep) as? Bool ?? true
+        iosCrossfadeEnabled =
+            defaults.object(forKey: Keys.iosCrossfadeEnabled) as? Bool ?? false
         #endif
         transitionMode = defaults.string(forKey: Keys.transitionMode)
             .flatMap(TransitionMode.init) ?? .automix
