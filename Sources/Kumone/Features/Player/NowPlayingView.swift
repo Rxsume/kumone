@@ -152,7 +152,7 @@ struct NowPlayingView: View {
                         } label: {
                             Image(systemName: showLyricsOnMobile ? "music.note" : "quote.bubble")
                                 .font(.system(size: 14, weight: .semibold))
-                                .foregroundStyle(showLyricsOnMobile ? Theme.accent : .white.opacity(0.85))
+                                .foregroundStyle(showLyricsOnMobile ? themeAccent : .white.opacity(0.85))
                                 .frame(width: 36, height: 36)
                                 .background(.white.opacity(0.12), in: Circle())
                         }
@@ -169,7 +169,7 @@ struct NowPlayingView: View {
                 // C9: floating song card (tap returns to the main view).
                 if settings.effectiveStageTrackCardEnabled, player.hasCurrentTrack {
                     StageTrackCard(
-                        accent: Theme.accent,
+                        accent: themeAccent,
                         // C11: the card outline while a handover plays.
                         transitionHighlighted: settings.effectiveTransitionAnimationCard && transitionInProgress
                     ) {
@@ -188,7 +188,7 @@ struct NowPlayingView: View {
             .overlay {
                 // C11: the transition ring floats over the page while a
                 // handover plays; inert until a transition signal exists.
-                TransitionAnimationView(isTransitioning: transitionInProgress, accent: Theme.accent)
+                TransitionAnimationView(isTransitioning: transitionInProgress, accent: themeAccent)
             }
             .overlay {
                 // Auto-hide: when the chrome is hidden, any tap on the
@@ -348,16 +348,38 @@ struct NowPlayingView: View {
         #endif
     }
 
-    /// Player-page colours, pre-Folia behaviour: always follow the artwork
-    /// palette (or the neutral fallback with no artwork), scaled by the
-    /// player-page tint intensity.
-    private var colors: ArtworkColors {
+    /// Raw artwork palette for theme resolution, or nil when no artwork is
+    /// loaded — nil (not `.fallback`) is what lets a non-default preset win
+    /// when nothing is playing.
+    private var artworkPalette: ArtworkColors? {
         #if os(macOS)
-        let base = artworkStore.colors
+        artworkStore.artwork == nil ? nil : artworkStore.colors
         #else
-        let base = artworkImage == nil ? .fallback : loadedArtworkColors
+        artworkImage == nil ? nil : loadedArtworkColors
         #endif
-        return tintedColors(base, intensity: settings.effectivePlayerPageTintIntensity)
+    }
+
+    /// C12/C14: the effective theme (custom → song artwork → selected
+    /// preset). The default preset with no saved custom theme resolves to
+    /// the pre-existing colours — `Theme.accent` over the fallback palette,
+    /// or the artwork palette while song-theme auto-switch is on — so the
+    /// default look is unchanged.
+    private var theme: ResolvedTheme {
+        ThemePreset.resolvedTheme(settings: settings, palette: artworkPalette)
+    }
+
+    /// Accent colour for controls and highlights, from the resolved theme.
+    private var themeAccent: Color { theme.accent }
+
+    private var colors: ArtworkColors {
+        let base = ArtworkColors(primary: theme.tint, secondary: theme.secondaryTint)
+        // C10: the player-page tint intensity multiplies the theme's own
+        // intensity — the artwork theme's intensity is 1, so artwork-derived
+        // pages behave exactly as before, while preset/custom themes (whose
+        // intensity used to replace the slider outright) now scale with it
+        // too. Default 1.0 leaves the default appearance unchanged.
+        let intensity = theme.intensity * settings.effectivePlayerPageTintIntensity
+        return tintedColors(base, intensity: intensity)
     }
 
     /// C11: whether a hand-over is currently playing, from the player's
@@ -489,7 +511,7 @@ struct NowPlayingView: View {
                 LatentBackgroundView(
                     primary: colors.primary,
                     secondary: colors.secondary,
-                    accent: Theme.accent,
+                    accent: themeAccent,
                     background: colors.secondary,
                     isPlaying: player.isPlaying,
                     isStatic: backgroundIsStatic,
@@ -505,11 +527,11 @@ struct NowPlayingView: View {
                         radius: settings.effectiveNomandHalftoneRadius,
                         contrast: settings.effectiveNomandHalftoneContrast,
                         originalColors: settings.effectiveNomandOriginalColors,
-                        accent: PlatformColor(Theme.accent),
+                        accent: PlatformColor(themeAccent),
                         background: PlatformColor(colors.secondary),
                         effect: settings.effectiveNomandEffect,
                         highlight: PlatformColor(colors.primary),
-                        secondary: PlatformColor(colors.secondary),
+                        secondary: PlatformColor(theme.secondaryTint),
                         ditheringType: settings.effectiveNomandDitheringType,
                         ditheringSize: settings.effectiveNomandDitheringSize,
                         ditheringColorSteps: settings.effectiveNomandDitheringColorSteps,
@@ -540,7 +562,7 @@ struct NowPlayingView: View {
                         background: colors.secondary,
                         primary: colors.primary,
                         secondary: colors.secondary,
-                        accent: Theme.accent,
+                        accent: themeAccent,
                         songID: player.currentTrack.map { String($0.id) },
                         opacity: settings.effectiveCommonOpacity,
                         useCoverColorBg: settings.effectiveCommonUseCoverColorBg,
@@ -561,7 +583,7 @@ struct NowPlayingView: View {
                     cover: backgroundSourceImage(for: settings.effectiveMonetBackgroundSource),
                     background: colors.secondary,
                     primary: colors.primary,
-                    accent: Theme.accent,
+                    accent: themeAccent,
                     secondary: colors.secondary,
                     tuning: settings.monetTuning,
                     isStatic: backgroundIsStatic
@@ -578,7 +600,7 @@ struct NowPlayingView: View {
             case .sora:
                 SoraBackgroundView(
                     primary: colors.primary,
-                    accent: Theme.accent,
+                    accent: themeAccent,
                     background: colors.secondary,
                     isStatic: backgroundIsStatic,
                     blank: settings.effectiveSoraBlank
@@ -751,7 +773,7 @@ struct NowPlayingView: View {
 
             circleButton(
                 icon: "list.bullet", size: 15,
-                tint: showQueueOnMobile ? Theme.accent : nil
+                tint: showQueueOnMobile ? themeAccent : nil
             ) {
                 withAnimation(AppAnimation.standard) {
                     showQueueOnMobile.toggle()
@@ -826,7 +848,7 @@ struct NowPlayingView: View {
                 } label: {
                     Image(systemName: liked ? "heart.fill" : "heart")
                         .font(.system(size: 20, weight: .medium))
-                        .foregroundStyle(liked ? Theme.accent : .white.opacity(0.85))
+                        .foregroundStyle(liked ? themeAccent : .white.opacity(0.85))
                         .frame(width: 40, height: 40)
                         .contentShape(Rectangle())
                 }
@@ -1031,8 +1053,8 @@ struct NowPlayingView: View {
             LatticeLyricsCard(
                 lyrics: player.lyrics,
                 activeIndex: lyricsCursor.activeIndex,
-                accent: Theme.accent,
-                tint: colors.primary,
+                accent: themeAccent,
+                tint: theme.tint,
                 showTranslation: settings.showLyricsTranslation,
                 showRomaji: settings.lyricsAnnotation == .romaji,
                 animate: player.isPlaying && !settings.effectiveStaticMode,
@@ -1099,7 +1121,7 @@ struct NowPlayingView: View {
                     CompactQueueContent()
                         .transition(.opacity)
                 } else {
-                    LuminousLyricsView(accent: Theme.accent)
+                    LuminousLyricsView(accent: themeAccent)
                 }
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -1123,7 +1145,7 @@ struct NowPlayingView: View {
                     } label: {
                         Image(systemName: "list.bullet")
                             .font(.system(size: 17, weight: .medium))
-                            .foregroundColor(showQueueOnMobile ? Theme.accent : .white.opacity(0.72))
+                            .foregroundColor(showQueueOnMobile ? themeAccent : .white.opacity(0.72))
                             .frame(width: 44, height: 44)
                             .background(.white.opacity(0.08), in: Circle())
                     }
@@ -1180,7 +1202,7 @@ struct NowPlayingView: View {
 
             CompactTrackHeader(
                 showsExpandedArtwork: showsVinyl,
-                accent: Theme.accent,
+                accent: themeAccent,
                 onOpenDestination: onOpenDestination
             )
                 .padding(.bottom, 10)
@@ -1395,7 +1417,7 @@ struct NowPlayingView: View {
 
             CompactTrackHeader(
                 showsExpandedArtwork: showsExpandedArtwork,
-                accent: Theme.accent,
+                accent: themeAccent,
                 onOpenDestination: onOpenDestination,
                 onTapArtwork: collapseImmersiveArtwork
             )
@@ -1461,7 +1483,7 @@ struct NowPlayingView: View {
             }
             CompactTransportControls()
             CompactSecondaryControls(
-                accent: Theme.accent,
+                accent: themeAccent,
                 showsLyrics: showLyricsOnMobile,
                 showsQueue: showQueueOnMobile,
                 onToggleLyrics: toggleImmersiveLyrics,
@@ -1565,7 +1587,7 @@ struct NowPlayingView: View {
             ZStack(alignment: .top) {
                 Color.clear
                 MinimalTrackInfoRow(
-                    accent: Theme.accent,
+                    accent: themeAccent,
                     onOpenDestination: onOpenDestination,
                     onOpenSoundEffects: { showSoundEffects = true },
                     metadataOnly: true
@@ -1616,12 +1638,12 @@ struct NowPlayingView: View {
     private var minimalControls: some View {
         VStack(spacing: 22) {
             ZStack {
-                MinimalTrackInfoRow(accent: Theme.accent, onOpenDestination: onOpenDestination, onOpenSoundEffects: { showSoundEffects = true })
+                MinimalTrackInfoRow(accent: themeAccent, onOpenDestination: onOpenDestination, onOpenSoundEffects: { showSoundEffects = true })
                     .opacity(showLyricsOnMobile ? 0 : 1)
                     .allowsHitTesting(!showLyricsOnMobile)
                     .accessibilityHidden(showLyricsOnMobile)
                 MinimalTrackInfoRow(
-                    accent: Theme.accent,
+                    accent: themeAccent,
                     onOpenDestination: onOpenDestination,
                     onOpenSoundEffects: { showSoundEffects = true },
                     actionsOnly: true
@@ -1638,7 +1660,7 @@ struct NowPlayingView: View {
                     .padding(.top, 16)
             }
             MinimalTransportControls(
-                accent: Theme.accent,
+                accent: themeAccent,
                 backdrop: colors,
                 showQueue: $showQueueOnMobile,
                 onOpenDestination: onOpenDestination
@@ -1846,7 +1868,7 @@ struct NowPlayingView: View {
                     let liked = account.isLiked(track.id)
                     circleButton(
                         icon: liked ? "heart.fill" : "heart",
-                        size: 15, tint: liked ? Theme.accent : nil
+                        size: 15, tint: liked ? themeAccent : nil
                     ) {
                         Task { await account.toggleLike(trackID: track.id) }
                     }
@@ -1924,7 +1946,7 @@ struct NowPlayingView: View {
                 // all. Only the three values below differ per platform.
                 circleButton(
                     icon: queueOrderIcon, size: 14,
-                    tint: queueOrderIsActive ? Theme.accent : nil,
+                    tint: queueOrderIsActive ? themeAccent : nil,
                     action: cycleQueueOrder
                 )
                 #if os(macOS)
@@ -1960,7 +1982,7 @@ struct NowPlayingView: View {
                 circleButton(
                     icon: player.repeatMode == .one ? "repeat.1" : "repeat",
                     size: 14,
-                    tint: player.repeatMode != .off ? Theme.accent : nil
+                    tint: player.repeatMode != .off ? themeAccent : nil
                 ) {
                     player.cycleRepeatMode()
                 }

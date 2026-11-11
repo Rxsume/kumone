@@ -53,13 +53,14 @@ enum SettingsBackup {
     /// Every settings key a backup may carry: the full `Keys` enum
     /// (generated from SettingsManager.swift) plus the updater's
     /// dismissal key and `PlatformPreferenceStore`'s three keys — minus
-    /// the 6 keys the Folia rollback deleted (themePreset, customTheme,
-    /// preferCustomTheme, songThemeAutoSwitch, preferredLyricSource,
-    /// autoHidePlayerChrome) and
+    /// `preferredLyricSource` (deleted by the Folia rollback) and
     /// `neteaseScrobbleEnabled` (deleted by the Beans settings port),
-    /// which must never be re-added here. `iosCrossfadeEnabled` was
-    /// the 7th deleted key, restored as the single-engine
-    /// track-change fade, so it is back in the list. The Beans settings port's
+    /// which must never be re-added here. The four theme keys
+    /// (themePreset, customTheme, preferCustomTheme, songThemeAutoSwitch)
+    /// were deleted by the same rollback and restored with the Folia
+    /// theme system, so they are back in the list, as is
+    /// `iosCrossfadeEnabled` (restored as the single-engine
+    /// track-change fade). The Beans settings port's
     /// own new keys (playback, accent, tab bar, wallpaper, font) are
     /// in the list; `settings.customAudioSources` is NOT — it is not a
     /// `SettingsManager` key and must never be backed up (the user's
@@ -100,6 +101,7 @@ enum SettingsBackup {
         "settings.crossfadeMaxSeconds",
         "settings.customAccentHex",
         "settings.customFontName",
+        "settings.customTheme",
         "settings.desktopLyricsCentered",
         "settings.dismissedUpdateRelease",
         "settings.enableAudioCache",
@@ -189,6 +191,7 @@ enum SettingsBackup {
         "settings.playerControlSlots",
         "settings.playerPageNativeBlur",
         "settings.playerPageTintIntensity",
+        "settings.preferCustomTheme",
         "settings.preventDisplaySleepDuringPlayback",
         "settings.queueAddBehavior",
         "settings.reduceMotionBackground",
@@ -201,6 +204,7 @@ enum SettingsBackup {
         "settings.showMainWindowAmbientBackground",
         "settings.showMenuBarPlayer",
         "settings.showThirdPartySourceNotice",
+        "settings.songThemeAutoSwitch",
         "settings.soraBlank",
         "settings.stageTrackCardEnabled",
         "settings.staticMode",
@@ -216,6 +220,7 @@ enum SettingsBackup {
         "settings.subtitleUpcomingLineCount",
         "settings.subtitleUpcomingLyricsBlur",
         "settings.tabLabelsVisible",
+        "settings.themePreset",
         "settings.transitionAnimationCard",
         "settings.transitionAnimationRing",
         "settings.transitionMode",

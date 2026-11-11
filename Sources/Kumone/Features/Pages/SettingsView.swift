@@ -42,6 +42,8 @@ struct SettingsSheet: View {
                         LyricStyleSettingsView()
                     case .lyricFilter:
                         LyricFilterSettingsView()
+                    case .themePark:
+                        ThemeParkView()
                     }
                 }
         }
@@ -67,6 +69,7 @@ struct SettingsView: View {
 
     fileprivate enum SettingsPage: Hashable {
         case storage
+        case themePark
         #if os(iOS)
         case soundEffects
         #endif
@@ -481,6 +484,29 @@ struct SettingsView: View {
                         NavigationLink(value: SettingsPage.lyricStyle) {
                             Label("歌词样式", systemImage: "textformat")
                         }
+                        Picker("配色主题预设", selection: $settings.themePresetID) {
+                            Text("默认").tag("default")
+                            Text("暮色").tag("dusk")
+                            Text("海洋").tag("ocean")
+                            Text("林深").tag("forest")
+                            Text("玫瑰").tag("rose")
+                            Text("自定义").tag("custom")
+                        }
+                        // The theme actually in effect (see `activeThemeCaption`):
+                        // the preset picker alone cannot show it, because
+                        // song-theme auto-switch short-circuits the preset and
+                        // "custom" with no saved theme falls back to default.
+                        Text(activeThemeCaption)
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                        NavigationLink(value: SettingsPage.themePark) {
+                            Label("主题乐园", systemImage: "paintpalette")
+                        }
+                        Toggle("歌曲主题自动切换", isOn: $settings.songThemeAutoSwitch)
+                        Text("切歌时播放页与主界面跟随当前歌曲封面取色，关闭后使用默认配色")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                        Toggle("优先使用自定义主题", isOn: $settings.preferCustomTheme)
                     // Folia 歌词多源 (restored; re-homed here from
                     // PR #40的 section on the rebase over main
                     // 2ca91b8): auto-best search across NetEase /
@@ -706,6 +732,8 @@ struct SettingsView: View {
                     LyricStyleSettingsView()
                 case .lyricFilter:
                     LyricFilterSettingsView()
+                case .themePark:
+                    ThemeParkView()
                 }
             }
             .navigationBarBackButtonHidden()
@@ -714,6 +742,7 @@ struct SettingsView: View {
                 ToolbarItem(placement: .principal) {
                     switch page {
                     case .storage: Text("存储空间").font(.headline)
+                    case .themePark: Text("主题乐园").font(.headline)
                     case .lyricStyle: Text("歌词样式").font(.headline)
                     case .lyricFilter: Text("歌词过滤").font(.headline)
                     case .shortcuts: Text("快捷键").font(.headline)
@@ -722,6 +751,24 @@ struct SettingsView: View {
             }
         }
         #endif
+    }
+
+    /// The theme actually in effect, by the same priority as
+    /// `ThemePreset.resolvedTheme` (custom > song artwork > preset),
+    /// resolved without an artwork palette — this page has none, so with
+    /// song-theme auto-switch on the caption reads 跟随封面: the palette
+    /// wins whenever a song with artwork is playing, and the preset below
+    /// it is what shows while nothing is. Reads the effective values, so
+    /// the caption stays true with the Folia master switch off too.
+    private var activeThemeCaption: String {
+        if ThemePreset.customTheme(from: settings) != nil,
+           settings.effectivePreferCustomTheme || settings.effectiveThemePresetID == "custom" {
+            return "当前：自定义"
+        }
+        if settings.effectiveSongThemeAutoSwitch {
+            return "当前：跟随封面"
+        }
+        return "当前：\(ThemePreset.preset(id: settings.effectiveThemePresetID).displayName)"
     }
 
     /// Sparkle on macOS; on iOS only sideload builds carry an updater.
