@@ -190,6 +190,12 @@ final class PlayerService: ObservableObject {
     /// never fight each other (C1).
     private var fadeTask: Task<Void, Never>?
 
+    /// Set by `startPlaying` when it fades the outgoing track out for a
+    /// track change; consumed by `installResolvedAsset`, which fades the
+    /// new track in. Single-engine 切歌淡入淡出 (restored): no overlap,
+    /// a short silence gap instead.
+    private var trackChangeFadePending = false
+
     // MARK: - Loudness compensation (Folia P8, iOS)
 
     /// In-session analyses for loudness compensation: track ID →
@@ -1009,6 +1015,18 @@ final class PlayerService: ObservableObject {
 
     private func startPlaying(_ track: Track,
                               localLease: OfflinePlaybackLease? = nil, resumeAt: TimeInterval = 0) {
+        // Restored 切歌淡入淡出 (single-engine): fade the outgoing
+        // track out while the new URL resolves; the incoming track
+        // fades back in when it is installed. No overlap — there is
+        // a short silence gap instead. Only when something is
+        // actually playing; a first play or a restored session
+        // (nothing loaded) starts at full volume as before.
+        trackChangeFadePending = false
+        if SettingsManager.shared.effectiveIosCrossfadeEnabled, isPlaying, engine.currentItem != nil, volume > 0 {
+            trackChangeFadePending = true
+            cancelFade()
+            fadeVolume(to: 0)
+        }
         offlineScan?.cancel()
         offlineScan = nil
         offlineScanID = UUID()
@@ -1457,6 +1475,19 @@ final class PlayerService: ObservableObject {
         if isPlaying {
             engine.play()
             scrobbleStartIfNeeded()
+        }
+
+        // Restored 切歌淡入淡出 (single-engine): the outgoing track
+        // was faded out in `startPlaying`; fade the new one in from
+        // silence. The flag is consumed here so a superseded install
+        // never fades in late.
+        if trackChangeFadePending {
+            trackChangeFadePending = false
+            if isPlaying, SettingsManager.shared.effectiveIosCrossfadeEnabled, volume > 0 {
+                cancelFade()
+                engine.volume = 0
+                fadeVolume(to: effectiveVolume)
+            }
         }
 
         if let durationMS, durationMS > 0 {

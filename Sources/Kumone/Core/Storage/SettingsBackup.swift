@@ -53,11 +53,13 @@ enum SettingsBackup {
     /// Every settings key a backup may carry: the full `Keys` enum
     /// (generated from SettingsManager.swift) plus the updater's
     /// dismissal key and `PlatformPreferenceStore`'s three keys — minus
-    /// the 7 keys the Folia rollback deleted (themePreset, customTheme,
+    /// the 6 keys the Folia rollback deleted (themePreset, customTheme,
     /// preferCustomTheme, songThemeAutoSwitch, preferredLyricSource,
-    /// autoHidePlayerChrome, iosCrossfadeEnabled) and
+    /// autoHidePlayerChrome) and
     /// `neteaseScrobbleEnabled` (deleted by the Beans settings port),
-    /// which must never be re-added here. The Beans settings port's
+    /// which must never be re-added here. `iosCrossfadeEnabled` was
+    /// the 7th deleted key, restored as the single-engine
+    /// track-change fade, so it is back in the list. The Beans settings port's
     /// own new keys (playback, accent, tab bar, wallpaper, font) are
     /// in the list; `settings.customAudioSources` is NOT — it is not a
     /// `SettingsManager` key and must never be backed up (the user's
@@ -114,6 +116,7 @@ enum SettingsBackup {
         "settings.homePlatformOrder.v1",
         "settings.homePlatformsSeen.v1",
         "settings.homeWallpaperBlur",
+        "settings.iosCrossfadeEnabled",
         "settings.landscapeNowPlayingStyle",
         "settings.latentColorSource",
         "settings.latentDisplayMode",
