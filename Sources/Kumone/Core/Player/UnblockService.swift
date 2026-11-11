@@ -47,7 +47,15 @@ enum UnblockService {
         /// the whole step, so a load-failure retry needs these ids
         /// to skip only the script that already failed and still try
         /// the other scripts.
-        let attemptedScriptIDs: Set<String> = []
+        let attemptedScriptIDs: Set<String>
+
+        /// Explicit initializer: the memberwise one is not relied on
+        /// (CI reported `extra argument 'attemptedScriptIDs'` against it).
+        init(source: ResolvedAudioSource?, attemptedSources: Set<AudioSourceID>, attemptedScriptIDs: Set<String> = []) {
+            self.source = source
+            self.attemptedSources = attemptedSources
+            self.attemptedScriptIDs = attemptedScriptIDs
+        }
     }
 
     static func resolve(
