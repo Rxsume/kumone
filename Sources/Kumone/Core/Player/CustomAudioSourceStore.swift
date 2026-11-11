@@ -4,8 +4,8 @@ import Foundation
 /// `UnblockSourceStore`.
 ///
 /// One JSON blob in UserDefaults under `storeKey`. List order is
-/// the resolve order in `UnblockService`. Two bundled scripts are
-/// seeded once (酸甜贤 + Golia贤源, see `BuiltInAudioSources`):
+/// the resolve order in `UnblockService`. Three bundled scripts are
+/// seeded once (酸甜贤 + Golia贤源 + GD音乐台, see `BuiltInAudioSources`):
 /// each seeds only when no copy of the same script is already
 /// stored, and deleting a seeded record marks it dismissed so it
 /// is never re-seeded. A seeded record is otherwise an ordinary
@@ -57,25 +57,35 @@ final class CustomAudioSourceStore: ObservableObject {
 
     /// Seeds the three bundled scripts once: 酸甜贤 first, Golia
     /// second, GD third (list order is resolve order). Each seeds
-    /// only when
-    /// no copy of the same script is already stored (matched by
-    /// backend host, not id, so a user-imported copy suppresses
-    /// the seed) and the user has not deleted the seeded record.
+    /// only when no copy of the same script is already stored and
+    /// the user has not deleted the seeded record. A copy is
+    /// recognised by seed id OR backend host: the id match catches
+    /// a stored obfuscated copy (its host is split into fragments
+    /// and never appears contiguously), the host match catches a
+    /// user-imported plain copy (random id) so it suppresses the
+    /// seed instead of duplicating it.
     private func seedBuiltInSourcesIfNeeded() {
         var list = sources
         if !defaults.bool(forKey: BuiltInAudioSources.ikunDismissedKey),
-           !list.contains(where: { $0.script?.contains(BuiltInAudioSources.ikunBackendHost) == true }) {
+           !alreadyHasBuiltIn(id: BuiltInAudioSources.ikunSourceID, host: BuiltInAudioSources.ikunBackendHost, in: list) {
             list.append(BuiltInAudioSources.seededIkunSource())
         }
         if !defaults.bool(forKey: BuiltInAudioSources.goliaDismissedKey),
-           !list.contains(where: { $0.script?.contains(BuiltInAudioSources.goliaBackendHost) == true }) {
+           !alreadyHasBuiltIn(id: BuiltInAudioSources.goliaSourceID, host: BuiltInAudioSources.goliaBackendHost, in: list) {
             list.append(BuiltInAudioSources.seededGoliaSource())
         }
         if !defaults.bool(forKey: BuiltInAudioSources.gdDismissedKey),
-           !list.contains(where: { $0.script?.contains(BuiltInAudioSources.gdBackendHost) == true }) {
+           !alreadyHasBuiltIn(id: BuiltInAudioSources.gdSourceID, host: BuiltInAudioSources.gdBackendHost, in: list) {
             list.append(BuiltInAudioSources.seededGdSource())
         }
         sources = list
+    }
+
+    /// True when a copy of a bundled script is already stored: the
+    /// seeded record itself (same id) or any copy of the script
+    /// (matched by backend host).
+    private func alreadyHasBuiltIn(id: String, host: String, in list: [CustomAudioSource]) -> Bool {
+        list.contains { $0.id == id || $0.script?.contains(host) == true }
     }
 
     /// One-time migration (built-in removal, 2026-11-10). The removed
