@@ -34,6 +34,7 @@
 
 import Metal
 import MetalKit
+import os
 import SwiftUI
 import UIKit
 
@@ -209,6 +210,8 @@ private struct LatentBackgroundMetalView: UIViewRepresentable {
 
     final class Coordinator: NSObject, MTKViewDelegate {
         weak var view: MTKView?
+
+        private static let log = Logger(subsystem: "sb.moe.kumone", category: "latentBackground")
 
         private var commandQueue: MTLCommandQueue?
         private var pipelineState: MTLRenderPipelineState?
@@ -415,7 +418,10 @@ private struct LatentBackgroundMetalView: UIViewRepresentable {
                 let library = try device.makeLibrary(source: latentShaderSource, options: nil)
                 guard let vertex = library.makeFunction(name: "latentVertex"),
                       let fragment = library.makeFunction(name: "latentFragment")
-                else { return nil }
+                else {
+                    log.error("Latent background shader compiled but latentVertex/latentFragment not found; staying on the clear colour.")
+                    return nil
+                }
                 let descriptor = MTLRenderPipelineDescriptor()
                 descriptor.vertexFunction = vertex
                 descriptor.fragmentFunction = fragment
@@ -423,7 +429,10 @@ private struct LatentBackgroundMetalView: UIViewRepresentable {
                 return try device.makeRenderPipelineState(descriptor: descriptor)
             } catch {
                 // Compilation failure leaves the view on its clear colour;
-                // the caller never shows an error for a background.
+                // the caller never shows an error for a background, but
+                // the failure is logged so a broken shader is visible in
+                // Console instead of silently leaving the page flat.
+                log.error("Latent background shader failed to compile; staying on the clear colour: \(String(describing: error), privacy: .public)")
                 return nil
             }
         }
@@ -457,6 +466,8 @@ private struct LatentUniforms {
     var pad: SIMD2<Float>
 }
 
+#endif
+
 // MARK: - Shader
 
 /// One fragment shader: a domain-warped fbm smoke field in the cover
@@ -469,7 +480,15 @@ private struct LatentUniforms {
 /// field visibly re-forms over ~5s while playing (the video's
 /// low-frequency field decorrelates in ~4s); `distortion` / `swirl`
 /// scale the warp strength the way Folia's mesh tuning does.
-private let latentShaderSource = """
+///
+/// This source deliberately lives outside the `#if os(iOS)` guard
+/// above: it is only a string, so it compiles on macOS too, and the
+/// macOS test target compiles it with a real Metal device to catch
+/// shader breakage in CI (the latent shader once shipped a GLSL
+/// `mod()` call Metal rejects, and the page silently fell back to its
+/// clear colour). It is internal, not private, for the same reason.
+/// Runtime behaviour is unchanged: only the iOS view compiles it.
+let latentShaderSource = """
 #include <metal_stdlib>
 using namespace metal;
 
@@ -550,6 +569,15 @@ float3 softLight(float3 b, float3 s) {
         softLightChannel(b.b, s.b)
     );
 }
+
+// GLSL-style mod: Metal Shading Language has only fmod, whose sign
+// follows the dividend, while the Bayer index below needs the floored,
+// always-non-negative remainder GLSL mod gives. (The shipped shader
+// once called mod() directly; MSL has no such function, so the whole
+// library failed to compile and the page fell back to its clear
+// colour.) Only the float variant is needed: both call sites pass
+// floats.
+float mod(float x, float y) { return x - y * floor(x / y); }
 
 fragment float4 latentFragment(VSOut in [[stage_in]], constant LatentUniforms &u [[buffer(0)]]) {
     float2 uv = in.position.xy / u.resolution;
@@ -632,5 +660,3 @@ fragment float4 latentFragment(VSOut in [[stage_in]], constant LatentUniforms &u
     return float4(col, 1.0);
 }
 """
-
-#endif
