@@ -55,8 +55,9 @@ final class CustomAudioSourceStore: ObservableObject {
         save()
     }
 
-    /// Seeds the two bundled scripts once: 酸甜贤 first, Golia
-    /// second (list order is resolve order). Each seeds only when
+    /// Seeds the three bundled scripts once: 酸甜贤 first, Golia
+    /// second, GD third (list order is resolve order). Each seeds
+    /// only when
     /// no copy of the same script is already stored (matched by
     /// backend host, not id, so a user-imported copy suppresses
     /// the seed) and the user has not deleted the seeded record.
@@ -69,6 +70,10 @@ final class CustomAudioSourceStore: ObservableObject {
         if !defaults.bool(forKey: BuiltInAudioSources.goliaDismissedKey),
            !list.contains(where: { $0.script?.contains(BuiltInAudioSources.goliaBackendHost) == true }) {
             list.append(BuiltInAudioSources.seededGoliaSource())
+        }
+        if !defaults.bool(forKey: BuiltInAudioSources.gdDismissedKey),
+           !list.contains(where: { $0.script?.contains(BuiltInAudioSources.gdBackendHost) == true }) {
+            list.append(BuiltInAudioSources.seededGdSource())
         }
         sources = list
     }
@@ -245,6 +250,8 @@ final class CustomAudioSourceStore: ObservableObject {
             defaults.set(true, forKey: BuiltInAudioSources.ikunDismissedKey)
         } else if id == BuiltInAudioSources.goliaSourceID {
             defaults.set(true, forKey: BuiltInAudioSources.goliaDismissedKey)
+        } else if id == BuiltInAudioSources.gdSourceID {
+            defaults.set(true, forKey: BuiltInAudioSources.gdDismissedKey)
         }
         // Drop the cached platform chips too, so the persisted cache
         // does not grow with entries for sources that no longer exist.
