@@ -57,6 +57,19 @@ struct ResolvedAudioSource {
     let id: AudioSourceID
     let displayName: String
     let url: URL
+    /// The custom-script record this URL came from, if any. The
+    /// `id` is `.customScript` for every script, so a load failure
+    /// cannot tell scripts apart without this.
+    let scriptID: String?
+
+    /// Explicit initializer: the memberwise one is not relied on
+    /// (CI reported `extra argument 'scriptID'` against it).
+    init(id: AudioSourceID, displayName: String, url: URL, scriptID: String? = nil) {
+        self.id = id
+        self.displayName = displayName
+        self.url = url
+        self.scriptID = scriptID
+    }
 }
 
 protocol AudioSourceProvider {

@@ -42,14 +42,30 @@ enum UnblockService {
     struct Resolution {
         let source: ResolvedAudioSource?
         let attemptedSources: Set<AudioSourceID>
+        /// Custom-script records attempted by this call, by store id.
+        /// The `.customScript` marker in `attemptedSources` covers
+        /// the whole step, so a load-failure retry needs these ids
+        /// to skip only the script that already failed and still try
+        /// the other scripts.
+        let attemptedScriptIDs: Set<String>
+
+        /// Explicit initializer: the memberwise one is not relied on
+        /// (CI reported `extra argument 'attemptedScriptIDs'` against it).
+        init(source: ResolvedAudioSource?, attemptedSources: Set<AudioSourceID>, attemptedScriptIDs: Set<String> = []) {
+            self.source = source
+            self.attemptedSources = attemptedSources
+            self.attemptedScriptIDs = attemptedScriptIDs
+        }
     }
 
     static func resolve(
         _ track: Track,
         enabledSources: Set<AudioSourceID>,
-        excluding attemptedSources: Set<AudioSourceID>
+        excluding attemptedSources: Set<AudioSourceID>,
+        excludingScriptIDs: Set<String> = []
     ) async -> Resolution {
         var newlyAttemptedSources = Set<AudioSourceID>()
+        var newlyAttemptedScriptIDs = Set<String>()
         guard !Task.isCancelled else { return Resolution(source: nil, attemptedSources: []) }
         // User-imported LX script sources FIRST, before the platform
         // rule: the user asked for the imported script to replace
@@ -61,14 +77,20 @@ enum UnblockService {
         // step is the user's list order in the store.
         let customSources = await MainActor.run { CustomAudioSourceStore.shared.sources }
             .filter { $0.enabled && $0.script?.isEmpty == false }
-        if !customSources.isEmpty, !attemptedSources.contains(.customScript) {
+        // A load-failure retry re-enters this step with the failed
+        // script excluded: only scripts not yet tried for this track
+        // are attempted, so the other scripts still get their turn
+        // instead of the whole step being skipped.
+        let untriedScripts = customSources.filter { !excludingScriptIDs.contains($0.id) }
+        if !untriedScripts.isEmpty {
             newlyAttemptedSources.insert(.customScript)
-            for source in customSources {
+            for source in untriedScripts {
                 guard !Task.isCancelled else { break }
+                newlyAttemptedScriptIDs.insert(source.id)
                 guard let scriptURL = await customScriptResolve(track, source: source) else { continue }
-                let resolved = ResolvedAudioSource(id: .customScript, displayName: source.name, url: scriptURL)
+                let resolved = ResolvedAudioSource(id: .customScript, displayName: source.name, url: scriptURL, scriptID: source.id)
                 if await isUsable(resolved, track: track) {
-                    return Resolution(source: resolved, attemptedSources: newlyAttemptedSources)
+                    return Resolution(source: resolved, attemptedSources: newlyAttemptedSources, attemptedScriptIDs: newlyAttemptedScriptIDs)
                 }
             }
         }
@@ -89,7 +111,7 @@ enum UnblockService {
         // this is the platform playback rule the user asked for.
         if track.platformSource == .qqmusic || track.platformSource == .kugou,
            let resolved = await platformTrackViaFallbacks(track) {
-            return Resolution(source: resolved, attemptedSources: newlyAttemptedSources)
+            return Resolution(source: resolved, attemptedSources: newlyAttemptedSources, attemptedScriptIDs: newlyAttemptedScriptIDs)
         }
         if enabledSources.contains(.ikun), !attemptedSources.contains(.ikun) {
             newlyAttemptedSources.insert(.ikun)
@@ -98,7 +120,8 @@ enum UnblockService {
                    await isUsable(resolved, track: track) {
                     return Resolution(
                         source: resolved,
-                        attemptedSources: newlyAttemptedSources
+                        attemptedSources: newlyAttemptedSources,
+                        attemptedScriptIDs: newlyAttemptedScriptIDs
                     )
                 }
             } catch {
@@ -113,11 +136,12 @@ enum UnblockService {
                 if await isUsable(resolved, track: track) {
                     return Resolution(
                         source: resolved,
-                        attemptedSources: newlyAttemptedSources
+                        attemptedSources: newlyAttemptedSources,
+                        attemptedScriptIDs: newlyAttemptedScriptIDs
                     )
                 }
             } catch {
-                if Task.isCancelled { return Resolution(source: nil, attemptedSources: newlyAttemptedSources) }
+                if Task.isCancelled { return Resolution(source: nil, attemptedSources: newlyAttemptedSources, attemptedScriptIDs: newlyAttemptedScriptIDs) }
                 logFailure(source: .pyncmd, operation: "resolve", error: error)
             }
         }
@@ -139,14 +163,14 @@ enum UnblockService {
             do {
                 if let resolved = try await provider.resolve(track: track),
                    await isUsable(resolved, track: track) {
-                    return Resolution(source: resolved, attemptedSources: newlyAttemptedSources)
+                    return Resolution(source: resolved, attemptedSources: newlyAttemptedSources, attemptedScriptIDs: newlyAttemptedScriptIDs)
                 }
             } catch {
                 if Task.isCancelled { break }
                 logFailure(source: provider.id, operation: "resolve", error: error)
             }
         }
-        return Resolution(source: nil, attemptedSources: newlyAttemptedSources)
+        return Resolution(source: nil, attemptedSources: newlyAttemptedSources, attemptedScriptIDs: newlyAttemptedScriptIDs)
     }
 
     /// Matches a QQ/Kugou track to the same song on NetEase and resolves

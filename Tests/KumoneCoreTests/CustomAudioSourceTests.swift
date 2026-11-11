@@ -482,7 +482,7 @@ struct CustomAudioSourceTests {
     send(EVENT_NAMES.inited, {status: true, sources: {wy: {name: "wy", type: "music", actions: ["musicUrl"], qualitys: ["320k"]}, kw: {name: "kw", type: "music", actions: ["musicUrl"], qualitys: ["320k"]}}});
     """
 
-    @Test @MainActor func runtimeInitedCachesDeclaredPlatforms() async {
+    @Test(.serialized) @MainActor func runtimeInitedCachesDeclaredPlatforms() async {
         let source = CustomAudioSource(name: "CacheProbe", kind: "script", template: "", script: Self.probeScript)
         let store = CustomAudioSourceStore.shared
         store.addSource(source)
@@ -542,6 +542,96 @@ struct CustomAudioSourceTests {
         let source = CustomAudioSource(name: "WyFirst", kind: "script", template: "", script: Self.stubScript)
         let url = await UnblockService.customScriptResolve(jayChouQingTian(), source: source)
         #expect(url?.absoluteString == "https://example.com/song.mp3")
+    }
+
+    // MARK: - Per-script retry in UnblockService.resolve
+
+    /// Builds a stub script that answers every musicUrl request
+    /// with `url`, regardless of the requested source code.
+    private static func resolvingScript(url: String) -> String {
+        """
+        const {EVENT_NAMES, on, send} = globalThis.lx;
+        on(EVENT_NAMES.request, ({action, source, info}) => {
+            if (action === "musicUrl") {
+                return Promise.resolve("\(url)");
+            }
+            return Promise.reject("unsupported action");
+        });
+        send(EVENT_NAMES.inited, {status: true, sources: {wy: {name: "wy", type: "music", actions: ["musicUrl"], qualitys: ["320k"]}}});
+        """
+    }
+
+    /// Disables the three built-in scripts in the shared store so
+    /// `resolve` only sees the stubs this test adds. Returns the
+    /// saved enabled states for the caller to restore.
+    @MainActor
+    private func disableBuiltInsInSharedStore() -> [(id: String, enabled: Bool)] {
+        let store = CustomAudioSourceStore.shared
+        let builtinIDs = [
+            BuiltInAudioSources.ikunSourceID,
+            BuiltInAudioSources.goliaSourceID,
+            BuiltInAudioSources.gdSourceID,
+        ]
+        let saved = store.sources
+            .filter { builtinIDs.contains($0.id) }
+            .map { (id: $0.id, enabled: $0.enabled) }
+        for index in store.sources.indices where builtinIDs.contains(store.sources[index].id) {
+            store.sources[index].enabled = false
+        }
+        return saved
+    }
+
+    @MainActor
+    private func restoreBuiltInsInSharedStore(_ saved: [(id: String, enabled: Bool)]) {
+        let store = CustomAudioSourceStore.shared
+        for (id, enabled) in saved {
+            if let index = store.sources.firstIndex(where: { $0.id == id }) {
+                store.sources[index].enabled = enabled
+            }
+        }
+    }
+
+    /// One test for both resolve behaviours: `.serialized` did NOT stop
+    /// these two from racing in CI (#169 failed the other half after
+    /// #168 failed this one) — two test functions sharing the singleton
+    /// store can interleave at `await` points, and the other test's
+    /// StubA (same name and URL, different id) wins the resolve. A
+    /// single test body cannot interleave with itself, so both halves
+    /// live here. The CacheProbe test's script rejects every request,
+    /// so it can only add a failed attempt, never win a resolve.
+    @Test(.serialized) @MainActor func resolveReportsAttemptedScriptIDsAndSkipsExcludedScript() async {
+        let store = CustomAudioSourceStore.shared
+        let saved = disableBuiltInsInSharedStore()
+        let stubA = CustomAudioSource(name: "StubA", kind: "script", template: "", script: Self.resolvingScript(url: "https://example.com/a.mp3"))
+        let stubB = CustomAudioSource(name: "StubB", kind: "script", template: "", script: Self.resolvingScript(url: "https://example.com/b.mp3"))
+        store.addSource(stubA)
+        store.addSource(stubB)
+        defer {
+            _ = store.removeSource(id: stubA.id)
+            _ = store.removeSource(id: stubB.id)
+            restoreBuiltInsInSharedStore(saved)
+        }
+
+        // No exclusions: resolves via the first stub, and reports it.
+        let first = await UnblockService.resolve(jayChouQingTian(), enabledSources: [], excluding: [])
+        #expect(first.source?.url.absoluteString == "https://example.com/a.mp3")
+        #expect(first.source?.displayName == "StubA")
+        #expect(first.source?.scriptID == stubA.id)
+        #expect(first.attemptedScriptIDs.contains(stubA.id))
+        #expect(first.attemptedScriptIDs.contains(stubB.id) == false)
+
+        // Exclude StubA: must fall through to StubB.
+        let second = await UnblockService.resolve(
+            jayChouQingTian(),
+            enabledSources: [],
+            excluding: [],
+            excludingScriptIDs: [stubA.id]
+        )
+        #expect(second.source?.url.absoluteString == "https://example.com/b.mp3")
+        #expect(second.source?.displayName == "StubB")
+        #expect(second.source?.scriptID == stubB.id)
+        #expect(second.attemptedScriptIDs.contains(stubA.id) == false)
+        #expect(second.attemptedScriptIDs.contains(stubB.id))
     }
 
     // MARK: - Share import (.js / .txt opened into the app)
