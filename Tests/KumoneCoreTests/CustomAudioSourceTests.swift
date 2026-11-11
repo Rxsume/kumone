@@ -591,11 +591,15 @@ struct CustomAudioSourceTests {
         }
     }
 
-    /// Serialized: these resolve tests share the singleton store, so
-    /// parallel runs would see each other's StubA/StubB (same names,
-    /// different ids) and the exclude test would resolve the other
-    /// test's StubA. The CacheProbe test below mutates the same store.
-    @Test(.serialized) @MainActor func resolveReportsAttemptedScriptIDs() async {
+    /// One test for both resolve behaviours: `.serialized` did NOT stop
+    /// these two from racing in CI (#169 failed the other half after
+    /// #168 failed this one) — two test functions sharing the singleton
+    /// store can interleave at `await` points, and the other test's
+    /// StubA (same name and URL, different id) wins the resolve. A
+    /// single test body cannot interleave with itself, so both halves
+    /// live here. The CacheProbe test's script rejects every request,
+    /// so it can only add a failed attempt, never win a resolve.
+    @Test(.serialized) @MainActor func resolveReportsAttemptedScriptIDsAndSkipsExcludedScript() async {
         let store = CustomAudioSourceStore.shared
         let saved = disableBuiltInsInSharedStore()
         let stubA = CustomAudioSource(name: "StubA", kind: "script", template: "", script: Self.resolvingScript(url: "https://example.com/a.mp3"))
@@ -608,37 +612,26 @@ struct CustomAudioSourceTests {
             restoreBuiltInsInSharedStore(saved)
         }
 
-        let resolution = await UnblockService.resolve(jayChouQingTian(), enabledSources: [], excluding: [])
-        #expect(resolution.source?.url.absoluteString == "https://example.com/a.mp3")
-        #expect(resolution.source?.displayName == "StubA")
-        #expect(resolution.attemptedScriptIDs.contains(stubA.id))
-        #expect(resolution.attemptedScriptIDs.contains(stubB.id) == false)
-    }
+        // No exclusions: resolves via the first stub, and reports it.
+        let first = await UnblockService.resolve(jayChouQingTian(), enabledSources: [], excluding: [])
+        #expect(first.source?.url.absoluteString == "https://example.com/a.mp3")
+        #expect(first.source?.displayName == "StubA")
+        #expect(first.source?.scriptID == stubA.id)
+        #expect(first.attemptedScriptIDs.contains(stubA.id))
+        #expect(first.attemptedScriptIDs.contains(stubB.id) == false)
 
-    @Test(.serialized) @MainActor func resolveSkipsExcludedScriptAndTriesTheNext() async {
-        let store = CustomAudioSourceStore.shared
-        let saved = disableBuiltInsInSharedStore()
-        let stubA = CustomAudioSource(name: "StubA", kind: "script", template: "", script: Self.resolvingScript(url: "https://example.com/a.mp3"))
-        let stubB = CustomAudioSource(name: "StubB", kind: "script", template: "", script: Self.resolvingScript(url: "https://example.com/b.mp3"))
-        store.addSource(stubA)
-        store.addSource(stubB)
-        defer {
-            _ = store.removeSource(id: stubA.id)
-            _ = store.removeSource(id: stubB.id)
-            restoreBuiltInsInSharedStore(saved)
-        }
-
-        let resolution = await UnblockService.resolve(
+        // Exclude StubA: must fall through to StubB.
+        let second = await UnblockService.resolve(
             jayChouQingTian(),
             enabledSources: [],
             excluding: [],
             excludingScriptIDs: [stubA.id]
         )
-        #expect(resolution.source?.url.absoluteString == "https://example.com/b.mp3")
-        #expect(resolution.source?.displayName == "StubB")
-        #expect(resolution.source?.scriptID == stubB.id)
-        #expect(resolution.attemptedScriptIDs.contains(stubA.id) == false)
-        #expect(resolution.attemptedScriptIDs.contains(stubB.id))
+        #expect(second.source?.url.absoluteString == "https://example.com/b.mp3")
+        #expect(second.source?.displayName == "StubB")
+        #expect(second.source?.scriptID == stubB.id)
+        #expect(second.attemptedScriptIDs.contains(stubA.id) == false)
+        #expect(second.attemptedScriptIDs.contains(stubB.id))
     }
 
     // MARK: - Share import (.js / .txt opened into the app)
