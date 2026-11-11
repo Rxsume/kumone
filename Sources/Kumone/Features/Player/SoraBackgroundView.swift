@@ -26,6 +26,7 @@
 
 import Metal
 import MetalKit
+import os
 import SwiftUI
 import UIKit
 
@@ -130,6 +131,8 @@ private struct SoraBackgroundMetalView: UIViewRepresentable {
 
     final class Coordinator: NSObject, MTKViewDelegate {
         weak var view: MTKView?
+
+        private static let log = Logger(subsystem: "sb.moe.kumone", category: "soraBackground")
 
         private var commandQueue: MTLCommandQueue?
         private var pipelineState: MTLRenderPipelineState?
@@ -241,7 +244,10 @@ private struct SoraBackgroundMetalView: UIViewRepresentable {
                 let library = try device.makeLibrary(source: soraShaderSource, options: nil)
                 guard let vertex = library.makeFunction(name: "soraVertex"),
                       let fragment = library.makeFunction(name: "soraFragment")
-                else { return nil }
+                else {
+                    log.error("Sora background shader compiled but soraVertex/soraFragment not found; staying on the clear colour.")
+                    return nil
+                }
                 let descriptor = MTLRenderPipelineDescriptor()
                 descriptor.vertexFunction = vertex
                 descriptor.fragmentFunction = fragment
@@ -258,7 +264,10 @@ private struct SoraBackgroundMetalView: UIViewRepresentable {
                 return try device.makeRenderPipelineState(descriptor: descriptor)
             } catch {
                 // Compilation failure leaves the view on its clear colour;
-                // the caller never shows an error for a background.
+                // the caller never shows an error for a background, but
+                // the failure is logged so a broken shader is visible in
+                // Console instead of silently leaving the page starless.
+                log.error("Sora background shader failed to compile; staying on the clear colour: \(String(describing: error), privacy: .public)")
                 return nil
             }
         }
@@ -278,6 +287,8 @@ private struct SoraUniforms {
     var pad: Float
 }
 
+#endif
+
 // MARK: - Shader
 
 /// 150 stars as Metal points. Each star's speed (0.008–0.032), size,
@@ -287,7 +298,14 @@ private struct SoraUniforms {
 /// with a sine; blink runs 0.3–1.0. Point size is in drawable pixels
 /// (the view renders at half point resolution). ~10% of stars take the
 /// accent colour, the rest the primary colour.
-private let soraShaderSource = """
+///
+/// This source deliberately lives outside the `#if os(iOS)` guard
+/// above, like `latentShaderSource`: it is only a string, so it
+/// compiles on macOS too, and the macOS test target compiles it with
+/// a real Metal device to catch shader breakage in CI. It is
+/// internal, not private, for the same reason. Runtime behaviour is
+/// unchanged: only the iOS view compiles it.
+let soraShaderSource = """
 #include <metal_stdlib>
 using namespace metal;
 
@@ -346,5 +364,3 @@ fragment float4 soraFragment(SoraVSOut in [[stage_in]], float2 pointCoord [[poin
     return float4(in.color.rgb * a, a);
 }
 """
-
-#endif

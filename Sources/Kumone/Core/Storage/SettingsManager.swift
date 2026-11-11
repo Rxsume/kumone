@@ -498,6 +498,10 @@ final class SettingsManager: ObservableObject {
         #endif
         static let lyricAnimationStyle = "settings.lyricAnimationStyle"
         static let homePlatform = "settings.homePlatform"
+        static let themePreset = "settings.themePreset"
+        static let customTheme = "settings.customTheme"
+        static let preferCustomTheme = "settings.preferCustomTheme"
+        static let songThemeAutoSwitch = "settings.songThemeAutoSwitch"
         static let homeDynamicBackground = "settings.homeDynamicBackground"
         static let playerPageNativeBlur = "settings.playerPageNativeBlur"
         static let staticMode = "settings.staticMode"
@@ -1100,6 +1104,54 @@ final class SettingsManager: ObservableObject {
     /// NetEase by default, which preserves today's behaviour.
     @Published var homePlatform: HomePlatform {
         didSet { UserDefaults.standard.set(homePlatform.rawValue, forKey: Keys.homePlatform) }
+    }
+
+    /// Built-in colour theme preset id; "default" follows the system light/dark
+    /// artwork tint, "custom" uses `customThemeJSON`.
+    @Published var themePresetID: String {
+        didSet { UserDefaults.standard.set(themePresetID, forKey: Keys.themePreset) }
+    }
+
+    /// Theme preset with the master switch off: `"default"`, whose
+    /// colours are the pre-folia ones (`Theme.accent` over the
+    /// fallback artwork tint). No custom theme existed before PR #8.
+    var effectiveThemePresetID: String {
+        foliaEnabled ? themePresetID : "default"
+    }
+
+    /// JSON-encoded custom theme (see `ThemePreset`), empty when none is saved.
+    @Published var customThemeJSON: String {
+        didSet { UserDefaults.standard.set(customThemeJSON, forKey: Keys.customTheme) }
+    }
+
+    /// Custom theme JSON with the master switch off: none was saved
+    /// before PR #8, so there is no custom theme.
+    var effectiveCustomThemeJSON: String {
+        foliaEnabled ? customThemeJSON : ""
+    }
+
+    /// Prefer the custom theme over the current song's artwork theme.
+    @Published var preferCustomTheme: Bool {
+        didSet { UserDefaults.standard.set(preferCustomTheme, forKey: Keys.preferCustomTheme) }
+    }
+
+    /// Prefer-custom-theme with the master switch off: no custom
+    /// theme existed before PR #8, so there is nothing to prefer.
+    var effectivePreferCustomTheme: Bool {
+        foliaEnabled ? preferCustomTheme : false
+    }
+
+    /// Let the now-playing page and main interface follow the current song's
+    /// artwork palette. Off keeps the default theme colours.
+    @Published var songThemeAutoSwitch: Bool {
+        didSet { UserDefaults.standard.set(songThemeAutoSwitch, forKey: Keys.songThemeAutoSwitch) }
+    }
+
+    /// Song-theme auto-switch with the master switch off: pre-folia
+    /// the now-playing page always followed the artwork palette, so
+    /// it stays on.
+    var effectiveSongThemeAutoSwitch: Bool {
+        foliaEnabled ? songThemeAutoSwitch : true
     }
 
     /// Home page artwork-tinted dynamic background, separate from the main
@@ -2658,6 +2710,10 @@ final class SettingsManager: ObservableObject {
             .flatMap(LyricAnimationStyle.init) ?? .fade
         homePlatform = defaults.string(forKey: Keys.homePlatform)
             .flatMap(HomePlatform.init) ?? .netease
+        themePresetID = defaults.string(forKey: Keys.themePreset) ?? "default"
+        customThemeJSON = defaults.string(forKey: Keys.customTheme) ?? ""
+        preferCustomTheme = defaults.object(forKey: Keys.preferCustomTheme) as? Bool ?? false
+        songThemeAutoSwitch = defaults.object(forKey: Keys.songThemeAutoSwitch) as? Bool ?? true
         homeDynamicBackground = defaults.object(forKey: Keys.homeDynamicBackground) as? Bool ?? true
         playerPageNativeBlur = defaults.object(forKey: Keys.playerPageNativeBlur) as? Bool ?? true
         staticMode = defaults.object(forKey: Keys.staticMode) as? Bool ?? false
@@ -3171,6 +3227,10 @@ final class SettingsManager: ObservableObject {
             .flatMap(LyricAnimationStyle.init) ?? .fade
         homePlatform = defaults.string(forKey: Keys.homePlatform)
             .flatMap(HomePlatform.init) ?? .netease
+        themePresetID = defaults.string(forKey: Keys.themePreset) ?? "default"
+        customThemeJSON = defaults.string(forKey: Keys.customTheme) ?? ""
+        preferCustomTheme = defaults.object(forKey: Keys.preferCustomTheme) as? Bool ?? false
+        songThemeAutoSwitch = defaults.object(forKey: Keys.songThemeAutoSwitch) as? Bool ?? true
         homeDynamicBackground = defaults.object(forKey: Keys.homeDynamicBackground) as? Bool ?? true
         playerPageNativeBlur = defaults.object(forKey: Keys.playerPageNativeBlur) as? Bool ?? true
         staticMode = defaults.object(forKey: Keys.staticMode) as? Bool ?? false
