@@ -264,13 +264,29 @@ enum UnblockService {
     /// (`kw`) with the same NetEase id, last. The backend
     /// cross-matches a NetEase id to a Kuwo CDN link (live-probed
     /// 2026-11-10: wy/186016 → code 200, 261.3s full track). First
-    /// non-nil URL wins; the `isUsable` clip check is applied by the
-    /// caller. Quality is the source's own quality (default `320k`).
+    /// usable URL wins: each attempt's URL is checked with
+    /// `isUsable` before it is returned, so a short clip (the ikun
+    /// backend's tx leg currently answers QQ tracks with a 7.1 s
+    /// generic clip) falls through to the next attempt instead of
+    /// discarding the whole script — the caller used to reject the
+    /// script on its first URL and never try its wy/kw legs. The
+    /// `validate` closure exists for tests: production passes nil
+    /// and the real `isUsable` probe runs.
     /// Internal (not private) so tests can cover the fallback order.
-    static func customScriptResolve(_ track: Track, source: CustomAudioSource) async -> URL? {
+    static func customScriptResolve(
+        _ track: Track,
+        source: CustomAudioSource,
+        validate: ((ResolvedAudioSource, Track) async -> Bool)? = nil
+    ) async -> URL? {
         let quality = source.quality
         let albumName = track.album.name
         let albumID = String(track.album.id)
+        let isUsableURL: (URL) async -> Bool = { url in
+            let resolved = ResolvedAudioSource(
+                id: .customScript, displayName: source.name, url: url, scriptID: source.id)
+            if let validate { return await validate(resolved, track) }
+            return await isUsable(resolved, track: track)
+        }
         if track.platformSource == .qqmusic, let key = track.platformSongKey, !key.isEmpty {
             // `songmid[|mediaMid]`
             let parts = key.split(separator: "|", omittingEmptySubsequences: false).map(String.init)
@@ -281,7 +297,9 @@ enum UnblockService {
                 qqMid: qqMid, qqMediaMid: qqMediaMid,
                 name: track.name, artists: track.artistNames,
                 albumName: albumName, albumID: albumID, quality: quality
-            ) { return url }
+            ) {
+                if await isUsableURL(url) { return url }
+            }
         }
         if track.platformSource == .kugou, let key = track.platformSongKey, !key.isEmpty {
             // `hash[|albumAudioId|albumId]`
@@ -291,7 +309,9 @@ enum UnblockService {
                 kugouID: hash,
                 name: track.name, artists: track.artistNames,
                 albumName: albumName, albumID: albumID, quality: quality
-            ) { return url }
+            ) {
+                if await isUsableURL(url) { return url }
+            }
         }
         // The NetEase id to try: the track's own id when positive,
         // otherwise the matched NetEase track's id.
@@ -306,7 +326,9 @@ enum UnblockService {
             source: source, songSource: .netease, songID: neteaseID,
             name: track.name, artists: track.artistNames,
             albumName: albumName, albumID: albumID, quality: quality
-        ) { return url }
+        ) {
+            if await isUsableURL(url) { return url }
+        }
         // Kuwo fallback, last: same NetEase id, same fields. NOT
         // added: mg/git/qs/bi/qishui/bilibili — the backend rejects
         // all of them (code 500 "unsupported source").
@@ -314,7 +336,9 @@ enum UnblockService {
             source: source, songSource: .kuwo, songID: neteaseID,
             name: track.name, artists: track.artistNames,
             albumName: albumName, albumID: albumID, quality: quality
-        ) { return url }
+        ) {
+            if await isUsableURL(url) { return url }
+        }
         return nil
     }
 

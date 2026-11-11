@@ -418,7 +418,15 @@ final class LXScriptRuntime: @unchecked Sendable {
             context.evaluateScript("if (typeof global === 'undefined') { globalThis.global = globalThis; }")
             context.evaluateScript("if (typeof self === 'undefined') { globalThis.self = globalThis; }")
             context.evaluateScript("if (typeof globalThis.lx === 'undefined') { globalThis.lx = lx; }")
-            context.evaluateScript("if (typeof console === 'undefined') { globalThis.console = { log: function() {}, info: function() {}, debug: function() {}, warn: function() {}, error: function() {} }; }")
+            // Full no-op console: LX scripts call group/groupEnd
+            // (ikun calls console.groupEnd() on every musicUrl, Golia
+            // calls console.group() when env !== 'mobile') and a
+            // missing method throws, rejecting the whole invocation —
+            // every built-in script failed to resolve any track until
+            // these were added. The list covers the methods scripts
+            // in the wild use; anything else stays undefined, as in
+            // a bare JSContext.
+            context.evaluateScript("if (typeof console === 'undefined') { globalThis.console = { log: function() {}, info: function() {}, debug: function() {}, warn: function() {}, error: function() {}, group: function() {}, groupEnd: function() {}, groupCollapsed: function() {}, table: function() {}, trace: function() {}, time: function() {}, timeEnd: function() {}, timeLog: function() {}, count: function() {}, countReset: function() {}, assert: function() {}, clear: function() {}, dir: function() {}, dirxml: function() {} }; }")
             context.evaluateScript("if (typeof module === 'undefined') { var module = { exports: {} }; var exports = module.exports; }")
             context.evaluateScript("""
             (function() {

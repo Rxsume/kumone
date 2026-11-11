@@ -424,6 +424,38 @@ struct CustomAudioSourceTests {
         #expect(url == nil)
     }
 
+    /// The runtime's console stub must cover group/groupEnd: the
+    /// ikun script calls console.groupEnd() on every musicUrl and
+    /// the Golia script calls console.group() — a missing method
+    /// throws, the invocation rejects, and no built-in script could
+    /// resolve any track. No network: the stub answers from the
+    /// source code.
+    private static let consoleGroupScript = """
+    const {EVENT_NAMES, on, send} = globalThis.lx;
+    console.group("probe");
+    console.groupEnd();
+    on(EVENT_NAMES.request, ({action, source, info}) => {
+        if (action !== "musicUrl") return Promise.reject("unsupported action");
+        console.group("musicUrl");
+        console.groupEnd();
+        return Promise.resolve("https://example.com/group-song.mp3");
+    });
+    send(EVENT_NAMES.inited, {status: true, sources: {wy: {name: "wy", type: "music", actions: ["musicUrl"], qualitys: ["320k"]}}});
+    """
+
+    @Test func runnerToleratesConsoleGroupCalls() async {
+        let source = CustomAudioSource(name: "ConsoleGroup", kind: "script", template: "", script: Self.consoleGroupScript)
+        let url = await LXScriptRunner.shared.resolve(
+            source: source,
+            songSource: .netease,
+            songID: "123",
+            name: "Test Song",
+            artists: "Test Artist",
+            quality: "320k"
+        )
+        #expect(url?.absoluteString == "https://example.com/group-song.mp3")
+    }
+
     // MARK: - Declared platform chips (display-only)
 
     @Test func platformMappingCoversKnownIds() {
@@ -542,6 +574,34 @@ struct CustomAudioSourceTests {
         let source = CustomAudioSource(name: "WyFirst", kind: "script", template: "", script: Self.stubScript)
         let url = await UnblockService.customScriptResolve(jayChouQingTian(), source: source)
         #expect(url?.absoluteString == "https://example.com/song.mp3")
+    }
+
+    /// A rejected first attempt must fall through to the next attempt
+    /// in the same script, not discard the script: the ikun tx leg
+    /// answers QQ tracks with a 7.1 s generic clip, and the caller
+    /// used to reject the script on that URL before its kw leg was
+    /// ever tried. The validator stands in for the real duration
+    /// probe (no network in tests): it rejects the clip URL and
+    /// accepts the full-track URL. The NetEase track exercises the
+    /// same wiring as the QQ tx → wy → kw chain (same loop, same
+    /// per-attempt check) without a live cross-platform search.
+    private static let wyClipKwResolvesScript = """
+    const {EVENT_NAMES, on, send} = globalThis.lx;
+    on(EVENT_NAMES.request, ({action, source, info}) => {
+        if (action !== "musicUrl") return Promise.reject("unsupported action");
+        if (source === "wy") return Promise.resolve("https://example.com/clip.mp3");
+        if (source === "kw") return Promise.resolve("https://example.com/kw-song.mp3");
+        return Promise.reject("unsupported source");
+    });
+    send(EVENT_NAMES.inited, {status: true, sources: {wy: {name: "wy", type: "music", actions: ["musicUrl"], qualitys: ["320k"]}, kw: {name: "kw", type: "music", actions: ["musicUrl"], qualitys: ["320k"]}}});
+    """
+
+    @Test func customScriptResolveSkipsRejectedClipAndTriesNextAttempt() async {
+        let source = CustomAudioSource(name: "ClipSkip", kind: "script", template: "", script: Self.wyClipKwResolvesScript)
+        let url = await UnblockService.customScriptResolve(jayChouQingTian(), source: source) { resolved, _ in
+            !resolved.url.absoluteString.contains("clip.mp3")
+        }
+        #expect(url?.absoluteString == "https://example.com/kw-song.mp3")
     }
 
     // MARK: - Per-script retry in UnblockService.resolve
