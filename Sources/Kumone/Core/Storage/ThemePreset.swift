@@ -133,9 +133,13 @@ struct ThemePreset: Codable, Equatable, Hashable, Identifiable {
     /// id is always normalised to `"custom"`.
     static func decodeCustomTheme(from json: String) -> ThemePreset? {
         guard !json.isEmpty, let data = json.data(using: .utf8) else { return nil }
-        guard var theme = try? JSONDecoder().decode(ThemePreset.self, from: data) else { return nil }
-        theme.id = "custom"
-        return theme
+        guard let theme = try? JSONDecoder().decode(ThemePreset.self, from: data) else { return nil }
+        // Rebuild through the clamping initializer: Codable synthesis decodes
+        // via the memberwise init and bypasses the intensity clamp in
+        // init(id:accent:tint:intensity:), so an out-of-range stored value
+        // would otherwise survive decoding and flow into ResolvedTheme.
+        // The decoded theme's id is always normalised to "custom".
+        return ThemePreset(id: "custom", accent: theme.accent, tint: theme.tint, intensity: theme.intensity)
     }
 
     /// The custom theme currently saved in settings, if any. Reads the
