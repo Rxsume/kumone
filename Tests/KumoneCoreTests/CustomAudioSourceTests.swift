@@ -482,7 +482,7 @@ struct CustomAudioSourceTests {
     send(EVENT_NAMES.inited, {status: true, sources: {wy: {name: "wy", type: "music", actions: ["musicUrl"], qualitys: ["320k"]}, kw: {name: "kw", type: "music", actions: ["musicUrl"], qualitys: ["320k"]}}});
     """
 
-    @Test @MainActor func runtimeInitedCachesDeclaredPlatforms() async {
+    @Test(.serialized) @MainActor func runtimeInitedCachesDeclaredPlatforms() async {
         let source = CustomAudioSource(name: "CacheProbe", kind: "script", template: "", script: Self.probeScript)
         let store = CustomAudioSourceStore.shared
         store.addSource(source)
@@ -591,7 +591,11 @@ struct CustomAudioSourceTests {
         }
     }
 
-    @Test @MainActor func resolveReportsAttemptedScriptIDs() async {
+    /// Serialized: these resolve tests share the singleton store, so
+    /// parallel runs would see each other's StubA/StubB (same names,
+    /// different ids) and the exclude test would resolve the other
+    /// test's StubA. The CacheProbe test below mutates the same store.
+    @Test(.serialized) @MainActor func resolveReportsAttemptedScriptIDs() async {
         let store = CustomAudioSourceStore.shared
         let saved = disableBuiltInsInSharedStore()
         let stubA = CustomAudioSource(name: "StubA", kind: "script", template: "", script: Self.resolvingScript(url: "https://example.com/a.mp3"))
@@ -611,7 +615,7 @@ struct CustomAudioSourceTests {
         #expect(resolution.attemptedScriptIDs.contains(stubB.id) == false)
     }
 
-    @Test @MainActor func resolveSkipsExcludedScriptAndTriesTheNext() async {
+    @Test(.serialized) @MainActor func resolveSkipsExcludedScriptAndTriesTheNext() async {
         let store = CustomAudioSourceStore.shared
         let saved = disableBuiltInsInSharedStore()
         let stubA = CustomAudioSource(name: "StubA", kind: "script", template: "", script: Self.resolvingScript(url: "https://example.com/a.mp3"))
