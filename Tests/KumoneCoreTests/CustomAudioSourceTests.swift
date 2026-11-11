@@ -97,8 +97,10 @@ struct CustomAudioSourceTests {
     // MARK: - Store
 
     /// A fresh store seeds the three bundled scripts (酸甜贤 first,
-    /// Golia second, GD third). The ikun script ships with its
-    /// private key blanked; the Golia and GD scripts ship verbatim.
+    /// Golia second, GD third). The scripts ship obfuscated: the
+    /// ikun key is assembled inside its file, so the seed is
+    /// recognised by backend fragments (the full host is split
+    /// across the obfuscated text), not the contiguous host.
     @Test @MainActor func freshStoreSeedsThreeBuiltInSources() {
         let suite = "com.test.FreshStoreTests"
         guard let defaults = UserDefaults(suiteName: suite) else {
@@ -117,19 +119,19 @@ struct CustomAudioSourceTests {
         #expect(ikun.template == "")
         #expect(ikun.quality == "320k")
         #expect(ikun.enabled == true)
-        #expect(ikun.script?.contains(BuiltInAudioSources.ikunBackendHost) == true)
-        #expect(ikun.script?.contains("const API_KEY = \"\"") == true)
+        #expect(ikun.script?.contains("wwwweb.top") == true)
+        #expect(ikun.script?.contains("API_KEY=") == true)
         let golia = store.sources[1]
         #expect(golia.id == BuiltInAudioSources.goliaSourceID)
         #expect(golia.name == "Golia贤源")
         #expect(golia.kind == "script")
-        #expect(golia.script?.contains(BuiltInAudioSources.goliaBackendHost) == true)
+        #expect(golia.script?.contains("nrender.co") == true)
         let gd = store.sources[2]
         #expect(gd.id == BuiltInAudioSources.gdSourceID)
         #expect(gd.name == "GD音乐台聚合音源")
         #expect(gd.kind == "script")
-        #expect(gd.script?.contains(BuiltInAudioSources.gdBackendHost) == true)
-        #expect(gd.script?.contains("music-api.gdstudio.xyz") == true)
+        #expect(gd.script?.contains("sic-api.gd") == true)
+        #expect(gd.script?.contains("sic.gdstud") == true)
         #expect(store.hasEnabledScriptSources == true)
 
         // Reloading does not seed a second copy.
@@ -193,15 +195,31 @@ struct CustomAudioSourceTests {
 
     // MARK: - Built-in API_KEY helpers
 
-    /// Fake placeholder keys only, never a real key.
+    /// The bundled scripts ship obfuscated, so they carry no plain
+    /// `const API_KEY = "..."` assignment: the key helpers return
+    /// nil for them and the editor's "赞助密钥" field stays hidden.
+    /// (The ikun key is assembled inside the obfuscated text.)
+    @Test func builtInApiKeyIsNilForObfuscatedScripts() {
+        #expect(BuiltInAudioSources.apiKey(in: BuiltInAudioSources.ikunScript) == nil)
+        #expect(BuiltInAudioSources.apiKey(in: BuiltInAudioSources.goliaScript) == nil)
+        #expect(BuiltInAudioSources.apiKey(in: BuiltInAudioSources.gdScript) == nil)
+        #expect(BuiltInAudioSources.settingApiKey("TEST-KEY-123", in: BuiltInAudioSources.ikunScript) == nil)
+        #expect(BuiltInAudioSources.settingApiKey("TEST-KEY-123", in: BuiltInAudioSources.goliaScript) == nil)
+        #expect(BuiltInAudioSources.settingApiKey("TEST-KEY-123", in: BuiltInAudioSources.gdScript) == nil)
+    }
+
+    /// Fake placeholder keys only, never a real key. Helper behaviour
+    /// is covered against synthetic plain scripts: the bundled
+    /// scripts are obfuscated (see above) and have no plain
+    /// assignment for the helpers to read or write.
     @Test func builtInApiKeyReadsAndWritesBothQuoteStyles() {
-        let ikun = BuiltInAudioSources.ikunScript
+        let ikun = "const API_KEY = \"\";\nconst API_URL = \"https://c.wwwweb.top\";"
         #expect(BuiltInAudioSources.apiKey(in: ikun) == "")
         let keyed = BuiltInAudioSources.settingApiKey("TEST-KEY-123", in: ikun)
         #expect(keyed?.contains("const API_KEY = \"TEST-KEY-123\"") == true)
         #expect(BuiltInAudioSources.apiKey(in: keyed ?? "") == "TEST-KEY-123")
 
-        let golia = BuiltInAudioSources.goliaScript
+        let golia = "const API_KEY = \"share-v3\";"
         #expect(BuiltInAudioSources.apiKey(in: golia) == "share-v3")
         let goliaKeyed = BuiltInAudioSources.settingApiKey("TEST-KEY-456", in: golia)
         #expect(BuiltInAudioSources.apiKey(in: goliaKeyed ?? "") == "TEST-KEY-456")
